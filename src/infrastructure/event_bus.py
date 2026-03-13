@@ -9,7 +9,8 @@ from __future__ import annotations
 import asyncio
 import fnmatch
 from collections import defaultdict
-from typing import Any, Callable, Coroutine
+from collections.abc import Callable, Coroutine
+from typing import Any
 
 from src.platform.logging import get_logger
 
@@ -65,7 +66,7 @@ class EventBus:
         if not matched_handlers:
             return
 
-        logger.debug("event_bus.publish", event=event, handler_count=len(matched_handlers))
+        logger.debug("event_bus.publish", event_name=event, handler_count=len(matched_handlers))
 
         # Fire all handlers concurrently, isolate failures
         results = await asyncio.gather(
@@ -74,7 +75,7 @@ class EventBus:
         )
         for result in results:
             if isinstance(result, Exception):
-                logger.error("event_bus.handler_error", event=event, error=str(result))
+                logger.error("event_bus.handler_error", event_name=event, error=str(result))
 
     async def _safe_call(
         self, handler: EventHandler, event: str, data: dict[str, Any]
@@ -83,5 +84,9 @@ class EventBus:
         try:
             await handler(data)
         except Exception:
-            logger.exception("event_bus.handler_exception", event=event, handler=handler.__qualname__)
+            logger.exception(
+                "event_bus.handler_exception",
+                event_name=event,
+                handler=handler.__qualname__,
+            )
             raise
