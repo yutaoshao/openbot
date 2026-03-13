@@ -1,0 +1,30 @@
+# OpenBot Configuration
+# Environment variables override these values.
+# API keys should be set via .env or environment variables, NOT here.
+
+model:
+  primary:
+    provider: anthropic
+    model: doubao-seed-2.0-pro
+    max_tokens: 4096
+    temperature: 0.7
+  # fallback:
+  #   provider: openai
+  #   model: gpt-4o-mini
+  #   max_tokens: 4096
+  max_retries: 3
+
+telegram:
+  mode: polling
+  # allowed_user_ids: []  # Empty = allow all, set IDs to restrict access
+
+storage:
+  db_path: data/openbot.db
+
+log:
+  level: INFO
+  format: console  # console | json
+
+agent:
+  max_iterations: 10
+  token_budget: 8000
