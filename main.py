@@ -19,6 +19,8 @@ from src.infrastructure.event_bus import EventBus
 from src.infrastructure.model_gateway import ModelGateway
 from src.platform.config import load_config
 from src.platform.logging import get_logger, setup_logging
+from src.tools.builtin import CodeExecutorTool, FileManagerTool, WebFetchTool, WebSearchTool
+from src.tools.registry import ToolRegistry
 
 logger = get_logger(__name__)
 
@@ -34,8 +36,14 @@ class Application:
         self.event_bus = EventBus()
         self.model_gateway = ModelGateway(self.config.model, self.event_bus)
 
+        # Tool layer
+        self.tool_registry = ToolRegistry()
+        self._register_builtin_tools()
+
         # Core layer
-        self.agent = Agent(self.model_gateway, self.event_bus, self.config.agent)
+        self.agent = Agent(
+            self.model_gateway, self.event_bus, self.config.agent, self.tool_registry
+        )
 
         # Application layer
         self.msg_hub = MsgHub(self.event_bus)
@@ -43,6 +51,13 @@ class Application:
 
         # Wire up events
         self.event_bus.subscribe("msg.receive", self._on_message_receive)
+
+    def _register_builtin_tools(self) -> None:
+        """Register all built-in tools."""
+        self.tool_registry.register(WebSearchTool())
+        self.tool_registry.register(WebFetchTool())
+        self.tool_registry.register(CodeExecutorTool())
+        self.tool_registry.register(FileManagerTool())
 
     async def _on_message_receive(self, data: dict[str, Any]) -> None:
         """Handle incoming message: run agent and publish response."""

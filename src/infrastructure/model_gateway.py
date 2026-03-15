@@ -7,6 +7,7 @@ Provider implementations live in src/infrastructure/providers/.
 from __future__ import annotations
 
 import asyncio
+import json
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
@@ -52,13 +53,20 @@ class ModelResponse:
         return len(self.tool_calls) > 0
 
     def to_assistant_message(self) -> dict[str, Any]:
-        """Convert to message dict for conversation context."""
+        """Convert to message dict for conversation context (OpenAI format)."""
         msg: dict[str, Any] = {"role": "assistant"}
         if self.text:
             msg["content"] = self.text
         if self.tool_calls:
             msg["tool_calls"] = [
-                {"id": tc.id, "name": tc.name, "arguments": tc.arguments}
+                {
+                    "id": tc.id,
+                    "type": "function",
+                    "function": {
+                        "name": tc.name,
+                        "arguments": json.dumps(tc.arguments, ensure_ascii=False),
+                    },
+                }
                 for tc in self.tool_calls
             ]
         return msg
