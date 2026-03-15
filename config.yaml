@@ -1,25 +1,27 @@
 # OpenBot Configuration
-# Environment variables override these values.
-# API keys should be set via .env or environment variables, NOT here.
+# Secrets (API keys, tokens) go in .env, referenced here by env var name.
+# All other settings go directly in this file.
 
 model:
   primary:
     provider: openai_compatible
     model: kimi-k2.5
     base_url: https://ark.cn-beijing.volces.com/api/coding/v3
+    api_key_env: ARK_API_KEY          # reads from .env: ARK_API_KEY=xxx
     max_tokens: 4096
     temperature: 0.7
-    # Pricing per 1M tokens (for cost tracking, set 0 if unknown)
-    pricing_input: 0.6
+    pricing_input: 0.6                # per 1M tokens
     pricing_output: 3
-  # fallback:
-  #   provider: anthropic
-  #   model: claude-sonnet-4-20250514
-  #   max_tokens: 4096
+    fallback:
+      provider: dashscope
+      model: glm-4.7
+      api_key_env: DASHSCOPE_API_KEY
+      max_tokens: 4096
   max_retries: 3
 
 telegram:
   mode: polling
+  bot_token_env: TELEGRAM_BOT_TOKEN   # reads from .env: TELEGRAM_BOT_TOKEN=xxx
   # allowed_user_ids: []  # Empty = allow all, set IDs to restrict access
 
 storage:
