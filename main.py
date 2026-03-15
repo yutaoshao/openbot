@@ -14,7 +14,7 @@ from typing import Any
 from src.agent.agent import Agent
 from src.channels.adapters.telegram import TelegramAdapter
 from src.channels.hub import MsgHub
-from src.channels.models import MessageContent
+from src.channels.types import MessageContent
 from src.infrastructure.event_bus import EventBus
 from src.infrastructure.model_gateway import ModelGateway
 from src.platform.config import load_config

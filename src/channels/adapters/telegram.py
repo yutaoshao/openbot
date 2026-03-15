@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING
 
 from telegram.ext import ApplicationBuilder, ContextTypes, MessageHandler, filters
 
-from src.channels.models import MessageContent, UnifiedMessage
+from src.channels.types import MessageContent, UnifiedMessage
 from src.platform.logging import get_logger
 
 if TYPE_CHECKING:

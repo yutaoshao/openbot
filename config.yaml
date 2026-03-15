@@ -4,13 +4,17 @@
 
 model:
   primary:
-    provider: anthropic
-    model: doubao-seed-2.0-pro
+    provider: openai_compatible
+    model: kimi-k2.5
+    base_url: https://ark.cn-beijing.volces.com/api/coding/v3
     max_tokens: 4096
     temperature: 0.7
+    # Pricing per 1M tokens (for cost tracking, set 0 if unknown)
+    pricing_input: 0.6
+    pricing_output: 3
   # fallback:
-  #   provider: openai
-  #   model: gpt-4o-mini
+  #   provider: anthropic
+  #   model: claude-sonnet-4-20250514
   #   max_tokens: 4096
   max_retries: 3
 

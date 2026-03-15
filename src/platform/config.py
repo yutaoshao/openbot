@@ -16,11 +16,15 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class ModelProviderConfig(BaseModel):
     """Single model provider configuration."""
 
-    provider: Literal["anthropic", "openai"] = "anthropic"
+    provider: Literal["anthropic", "openai_compatible"] = "anthropic"
     model: str = "claude-sonnet-4-20250514"
     api_key: str = ""
+    base_url: str | None = None  # Required for openai_compatible providers
     max_tokens: int = 4096
     temperature: float = 0.7
+    # Pricing per 1M tokens (for cost tracking)
+    pricing_input: float = 0.0
+    pricing_output: float = 0.0
 
 
 class ModelConfig(BaseModel):
@@ -82,6 +86,7 @@ class AppConfig(BaseSettings):
     # Direct env var mappings for convenience
     anthropic_api_key: str = ""
     openai_api_key: str = ""
+    ark_api_key: str = ""  # Volcengine (doubao)
     telegram_bot_token: str = ""
     tavily_api_key: str = ""
 
@@ -96,9 +101,19 @@ def load_config(config_path: str = "config.yaml") -> AppConfig:
 
     config = AppConfig(**yaml_data)
 
-    # Map convenience env vars to nested config
-    if config.anthropic_api_key and not config.model.primary.api_key:
-        config.model.primary.api_key = config.anthropic_api_key
+    # Map convenience env vars to nested config based on provider type
+    if not config.model.primary.api_key:
+        provider = config.model.primary.provider
+        if provider == "anthropic" and config.anthropic_api_key:
+            config.model.primary.api_key = config.anthropic_api_key
+        elif provider == "openai_compatible":
+            # Try provider-specific keys, then generic openai key
+            config.model.primary.api_key = (
+                config.ark_api_key
+                or config.openai_api_key
+                or ""
+            )
+
     if config.telegram_bot_token and not config.telegram.bot_token:
         config.telegram.bot_token = config.telegram_bot_token
 

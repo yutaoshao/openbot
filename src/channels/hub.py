@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from src.channels.models import MessageContent, UnifiedMessage
+from src.channels.types import MessageContent, UnifiedMessage
 from src.platform.logging import get_logger
 
 if TYPE_CHECKING:
