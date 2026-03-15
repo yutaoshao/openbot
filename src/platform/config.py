@@ -83,6 +83,22 @@ class AgentConfig(BaseModel):
     token_budget: int = 8000
 
 
+class EmbeddingConfig(BaseModel):
+    """Embedding service configuration."""
+
+    enabled: bool = False
+    provider: Literal["openai_compatible"] = "openai_compatible"
+    model: str = "text-embedding-v3"
+    base_url: str | None = None
+    api_key_env: str = "DASHSCOPE_API_KEY"
+    dimensions: int = 1024
+
+    @property
+    def api_key(self) -> str:
+        """Resolve API key from environment variable."""
+        return os.environ.get(self.api_key_env, "")
+
+
 class AppConfig(BaseModel):
     """Root application configuration."""
 
@@ -91,6 +107,7 @@ class AppConfig(BaseModel):
     storage: StorageConfig = Field(default_factory=StorageConfig)
     log: LogConfig = Field(default_factory=LogConfig)
     agent: AgentConfig = Field(default_factory=AgentConfig)
+    embedding: EmbeddingConfig = Field(default_factory=EmbeddingConfig)
 
 
 def load_config(config_path: str = "config.yaml") -> AppConfig:

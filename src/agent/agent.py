@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Any
 from src.platform.logging import get_logger
 
 if TYPE_CHECKING:
+    from src.agent.conversation import ConversationManager
     from src.infrastructure.event_bus import EventBus
     from src.infrastructure.model_gateway import ModelGateway
     from src.platform.config import AgentConfig
@@ -56,12 +57,14 @@ class Agent:
         event_bus: EventBus,
         config: AgentConfig,
         tool_registry: ToolRegistry | None = None,
+        conversation_manager: ConversationManager | None = None,
     ) -> None:
         self.model_gateway = model_gateway
         self.event_bus = event_bus
         self.config = config
         self.max_iterations = config.max_iterations
         self.tool_registry = tool_registry
+        self.conversation_manager = conversation_manager
 
     def _build_system_prompt(self) -> str:
         """Build system prompt with current context."""
@@ -70,18 +73,38 @@ class Agent:
             date=datetime.now(UTC).strftime("%Y-%m-%d"),
         )
 
-    async def run(self, input_text: str, conversation_id: str = "") -> AgentResponse:
+    async def run(
+        self,
+        input_text: str,
+        conversation_id: str = "",
+        platform: str = "unknown",
+    ) -> AgentResponse:
         """Execute the agent ReAct loop.
 
-        Loop: model response -> check tool calls -> execute tools -> feed results back -> repeat.
-        Terminates when model returns text without tool calls, or max iterations reached.
+        When a ConversationManager is available, messages are built with
+        memory context (preferences, knowledge, past conversations).
+        Otherwise, falls back to a simple system + user message pair.
         """
         start = time.monotonic()
 
-        messages: list[dict[str, Any]] = [
-            {"role": "system", "content": self._build_system_prompt()},
-            {"role": "user", "content": input_text},
-        ]
+        # Build messages with memory context if available
+        if self.conversation_manager and conversation_id:
+            await self.conversation_manager.get_or_create_conversation(
+                conversation_id, platform, self.config.token_budget,
+            )
+            await self.conversation_manager.add_user_message(
+                conversation_id, input_text,
+            )
+            messages = await self.conversation_manager.build_messages(
+                conversation_id,
+                self._build_system_prompt(),
+                input_text,
+            )
+        else:
+            messages = [
+                {"role": "system", "content": self._build_system_prompt()},
+                {"role": "user", "content": input_text},
+            ]
 
         # Prepare tool schemas if registry is available
         tools = self.tool_registry.get_schemas() if self.tool_registry else None
@@ -130,6 +153,22 @@ class Agent:
                     "cost": total_cost,
                     "tool_calls": len(all_tool_calls),
                 })
+
+                # Persist assistant message and check compression
+                if self.conversation_manager and conversation_id:
+                    await self.conversation_manager.add_assistant_message(
+                        conversation_id,
+                        content=response.text,
+                        model=response.model,
+                        tokens_in=total_tokens_in,
+                        tokens_out=total_tokens_out,
+                        cost=total_cost,
+                        latency_ms=total_latency,
+                        tool_calls=all_tool_calls or None,
+                    )
+                    await self.conversation_manager.maybe_compress(
+                        conversation_id,
+                    )
 
                 return result
 

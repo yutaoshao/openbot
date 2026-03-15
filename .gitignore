@@ -12,6 +12,8 @@ build/
 # Database
 *.db
 *.db-journal
+*.db-wal
+data/
 
 # IDE
 .idea/

@@ -8,15 +8,21 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import signal
-from pathlib import Path
 from typing import Any
 
 from src.agent.agent import Agent
+from src.agent.conversation import ConversationManager
 from src.channels.adapters.telegram import TelegramAdapter
 from src.channels.hub import MsgHub
 from src.channels.types import MessageContent
+from src.infrastructure.database import Database
+from src.infrastructure.embedding import EmbeddingService, NullEmbeddingService
 from src.infrastructure.event_bus import EventBus
 from src.infrastructure.model_gateway import ModelGateway
+from src.infrastructure.storage import Storage
+from src.memory.episodic import EpisodicMemory
+from src.memory.procedural import ProceduralMemory
+from src.memory.semantic import SemanticMemory
 from src.platform.config import load_config
 from src.platform.logging import get_logger, setup_logging
 from src.tools.builtin import CodeExecutorTool, FileManagerTool, WebFetchTool, WebSearchTool
@@ -35,14 +41,44 @@ class Application:
         # Infrastructure layer
         self.event_bus = EventBus()
         self.model_gateway = ModelGateway(self.config.model, self.event_bus)
+        self.database = Database(self.config.storage)
+        self.storage = Storage(self.database)
+
+        # Embedding service
+        if self.config.embedding.enabled:
+            self.embedding_service = EmbeddingService(self.config.embedding)
+        else:
+            self.embedding_service = NullEmbeddingService()
 
         # Tool layer
         self.tool_registry = ToolRegistry()
         self._register_builtin_tools()
 
+        # Memory layer
+        self.semantic_memory = SemanticMemory(
+            self.storage, self.model_gateway,
+            self.embedding_service, self.database,
+        )
+        self.episodic_memory = EpisodicMemory(
+            self.storage, self.model_gateway,
+            self.embedding_service, self.database,
+        )
+        self.procedural_memory = ProceduralMemory(
+            self.storage, self.model_gateway,
+        )
+        self.conversation_manager = ConversationManager(
+            self.storage, self.model_gateway,
+            self.semantic_memory, self.episodic_memory,
+            self.procedural_memory,
+        )
+
         # Core layer
         self.agent = Agent(
-            self.model_gateway, self.event_bus, self.config.agent, self.tool_registry
+            model_gateway=self.model_gateway,
+            event_bus=self.event_bus,
+            config=self.config.agent,
+            tool_registry=self.tool_registry,
+            conversation_manager=self.conversation_manager,
         )
 
         # Application layer
@@ -78,6 +114,7 @@ class Application:
             result = await self.agent.run(
                 input_text=input_text,
                 conversation_id=message.conversation_id,
+                platform=message.platform,
             )
 
             await self.event_bus.publish("agent.response", {
@@ -110,9 +147,8 @@ class Application:
         """Start all services."""
         logger.info("app.starting")
 
-        # Ensure data directory exists
-        db_dir = Path(self.config.storage.db_path).parent
-        db_dir.mkdir(parents=True, exist_ok=True)
+        # Initialize database (creates dir, schema, vec extension)
+        await self.database.initialize()
 
         # Start Telegram adapter
         if self.config.telegram.bot_token:
@@ -131,6 +167,8 @@ class Application:
 
         if self.telegram:
             await self.telegram.stop()
+
+        await self.database.close()
 
         logger.info("app.stopped")
 
