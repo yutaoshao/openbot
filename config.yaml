@@ -37,11 +37,12 @@ agent:
   token_budget: 8000
 
 embedding:
-  enabled: false                        # set to true to enable vector search
-  model: text-embedding-v3
+  enabled: true                        # set to true to enable vector search
+  provider: dashscope                  # dashscope native SDK (required for VL models)
+  model: qwen3-vl-embedding
   base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
   api_key_env: DASHSCOPE_API_KEY
-  dimensions: 1024
+  dimensions: 1536
 
 reranker:
   enabled: true                        # set to true to enable reranking

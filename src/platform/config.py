@@ -84,11 +84,16 @@ class AgentConfig(BaseModel):
 
 
 class EmbeddingConfig(BaseModel):
-    """Embedding service configuration."""
+    """Embedding service configuration.
+
+    Providers:
+    - openai_compatible: DashScope text-embedding-v4, SiliconFlow, etc.
+    - dashscope: DashScope native SDK (required for qwen3-vl-embedding)
+    """
 
     enabled: bool = False
-    provider: Literal["openai_compatible"] = "openai_compatible"
-    model: str = "text-embedding-v3"
+    provider: Literal["openai_compatible", "dashscope"] = "openai_compatible"
+    model: str = "text-embedding-v4"
     base_url: str | None = None
     api_key_env: str = "DASHSCOPE_API_KEY"
     dimensions: int = 1024

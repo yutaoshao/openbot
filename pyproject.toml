@@ -11,6 +11,7 @@ dependencies = [
     # LLM providers
     "anthropic>=0.52.0",
     "openai>=1.82.0",
+    "dashscope>=1.22.0",
     # Data & config
     "pydantic>=2.11.0",
     "pydantic-settings>=2.9.0",
