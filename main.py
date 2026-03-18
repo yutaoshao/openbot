@@ -19,6 +19,7 @@ from src.infrastructure.database import Database
 from src.infrastructure.embedding import EmbeddingService, NullEmbeddingService
 from src.infrastructure.event_bus import EventBus
 from src.infrastructure.model_gateway import ModelGateway
+from src.infrastructure.reranker import NullRerankerService, RerankerService
 from src.infrastructure.storage import Storage
 from src.memory.episodic import EpisodicMemory
 from src.memory.procedural import ProceduralMemory
@@ -50,6 +51,12 @@ class Application:
         else:
             self.embedding_service = NullEmbeddingService()
 
+        # Reranker service
+        if self.config.reranker.enabled:
+            self.reranker_service = RerankerService(self.config.reranker)
+        else:
+            self.reranker_service = NullRerankerService()
+
         # Tool layer
         self.tool_registry = ToolRegistry()
         self._register_builtin_tools()
@@ -58,10 +65,12 @@ class Application:
         self.semantic_memory = SemanticMemory(
             self.storage, self.model_gateway,
             self.embedding_service, self.database,
+            self.reranker_service,
         )
         self.episodic_memory = EpisodicMemory(
             self.storage, self.model_gateway,
             self.embedding_service, self.database,
+            self.reranker_service,
         )
         self.procedural_memory = ProceduralMemory(
             self.storage, self.model_gateway,

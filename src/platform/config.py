@@ -99,6 +99,25 @@ class EmbeddingConfig(BaseModel):
         return os.environ.get(self.api_key_env, "")
 
 
+class RerankerConfig(BaseModel):
+    """Reranker service configuration.
+
+    Uses SiliconFlow-style /v1/rerank endpoint (also compatible with
+    Jina, Cohere, and other providers that implement the same API).
+    """
+
+    enabled: bool = False
+    model: str = "Qwen/Qwen3-Reranker-8B"
+    base_url: str = "https://api.siliconflow.cn/v1"
+    api_key_env: str = "SILICONFLOW_API_KEY"
+    top_n: int = 5
+
+    @property
+    def api_key(self) -> str:
+        """Resolve API key from environment variable."""
+        return os.environ.get(self.api_key_env, "")
+
+
 class AppConfig(BaseModel):
     """Root application configuration."""
 
@@ -108,6 +127,7 @@ class AppConfig(BaseModel):
     log: LogConfig = Field(default_factory=LogConfig)
     agent: AgentConfig = Field(default_factory=AgentConfig)
     embedding: EmbeddingConfig = Field(default_factory=EmbeddingConfig)
+    reranker: RerankerConfig = Field(default_factory=RerankerConfig)
 
 
 def load_config(config_path: str = "config.yaml") -> AppConfig:

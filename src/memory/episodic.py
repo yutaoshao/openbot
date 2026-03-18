@@ -16,6 +16,7 @@ if TYPE_CHECKING:
     from src.infrastructure.database import Database
     from src.infrastructure.embedding import EmbeddingService
     from src.infrastructure.model_gateway import ModelGateway
+    from src.infrastructure.reranker import NullRerankerService, RerankerService
     from src.infrastructure.storage import Storage
 
 logger = get_logger(__name__)
@@ -87,11 +88,13 @@ class EpisodicMemory:
         model_gateway: ModelGateway,
         embedding_service: EmbeddingService,
         db: Database,
+        reranker: RerankerService | NullRerankerService | None = None,
     ) -> None:
         self._storage = storage
         self._gateway = model_gateway
         self._embedding = embedding_service
         self._db = db
+        self._reranker = reranker
 
     # ------------------------------------------------------------------
     # Public API
@@ -152,20 +155,33 @@ class EpisodicMemory:
     ) -> list[dict[str, Any]]:
         """Recall past conversations relevant to *query*.
 
-        Uses vector similarity search when the embedding service is
-        available, otherwise falls back to text LIKE search on the
-        conversations table.
+        Pipeline: embed → vector search (over-fetch) → rerank (top limit).
+        Falls back to text LIKE search when embeddings are unavailable.
         """
         embedding = await self._embedding.embed(query)
 
         if embedding:
-            return await self._recall_by_vector(embedding, limit)
+            fetch_n = limit * 3 if self._reranker else limit
+            items = await self._recall_by_vector(embedding, fetch_n)
+        else:
+            logger.debug(
+                "episodic.recall_fallback_text",
+                reason="embedding_unavailable",
+            )
+            fetch_n = limit * 3 if self._reranker else limit
+            items = await self._storage.conversations.search(
+                query, fetch_n,
+            )
 
-        logger.debug(
-            "episodic.recall_fallback_text",
-            reason="embedding_unavailable",
-        )
-        return await self._storage.conversations.search(query, limit)
+        # Rerank if available
+        if self._reranker and items:
+            items = await self._reranker.rerank_dicts(
+                query, items, content_key="summary", top_n=limit,
+            )
+        else:
+            items = items[:limit]
+
+        return items
 
     async def generate_title(
         self, messages: list[dict[str, Any]],

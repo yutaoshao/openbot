@@ -18,6 +18,7 @@ if TYPE_CHECKING:
     from src.infrastructure.database import Database
     from src.infrastructure.embedding import EmbeddingService
     from src.infrastructure.model_gateway import ModelGateway
+    from src.infrastructure.reranker import NullRerankerService, RerankerService
     from src.infrastructure.storage import Storage
 
 logger = get_logger(__name__)
@@ -69,11 +70,13 @@ class SemanticMemory:
         model_gateway: ModelGateway,
         embedding_service: EmbeddingService,
         db: Database,
+        reranker: RerankerService | NullRerankerService | None = None,
     ) -> None:
         self._storage = storage
         self._gateway = model_gateway
         self._embedding = embedding_service
         self._db = db
+        self._reranker = reranker
 
     # ------------------------------------------------------------------
     # Public API
@@ -149,20 +152,33 @@ class SemanticMemory:
         query: str,
         limit: int = 5,
     ) -> list[dict]:
-        """Retrieve knowledge relevant to *query* via vector similarity.
+        """Retrieve knowledge relevant to *query*.
 
+        Pipeline: embed → vector search (top limit*3) → rerank (top limit).
         Falls back to text LIKE search when embeddings are disabled.
         Increments ``access_count`` for each returned item.
         """
         embedding = await self._embedding.embed(query)
 
         if embedding:
-            items = await self._vector_search(embedding, limit)
+            # Over-fetch for reranking, then narrow down
+            fetch_n = limit * 3 if self._reranker else limit
+            items = await self._vector_search(embedding, fetch_n)
         else:
             # Fallback: text search
-            items = await self._storage.knowledge.search(query, limit=limit)
+            items = await self._storage.knowledge.search(
+                query, limit=limit * 3 if self._reranker else limit,
+            )
 
-        # Bump access counts (fire-and-forget style, errors logged)
+        # Rerank if available
+        if self._reranker and items:
+            items = await self._reranker.rerank_dicts(
+                query, items, content_key="content", top_n=limit,
+            )
+        else:
+            items = items[:limit]
+
+        # Bump access counts
         for item in items:
             try:
                 await self._storage.knowledge.increment_access(item["id"])
@@ -178,6 +194,7 @@ class SemanticMemory:
             query_len=len(query),
             results=len(items),
             used_vectors=bool(embedding),
+            used_reranker=bool(self._reranker and items),
         )
         return items
 
