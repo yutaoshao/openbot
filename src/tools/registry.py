@@ -9,7 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Protocol, runtime_checkable
 
-from src.platform.logging import get_logger
+from src.core.logging import get_logger
 
 logger = get_logger(__name__)
 

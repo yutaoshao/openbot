@@ -15,10 +15,12 @@ import time
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from src.platform.config import ModelProviderConfig
+    from collections.abc import AsyncIterator
 
-from src.infrastructure.model_gateway import ModelResponse, ToolCall, Usage
-from src.platform.logging import get_logger
+    from src.core.config import ModelProviderConfig
+
+from src.core.logging import get_logger
+from src.infrastructure.model_gateway import ModelResponse, StreamChunk, ToolCall, Usage
 
 logger = get_logger(__name__)
 
@@ -105,5 +107,114 @@ class OpenAICompatibleProvider:
             tool_calls=tool_calls,
             usage=Usage(tokens_in=tokens_in, tokens_out=tokens_out, cost=cost),
             model=self.model,
+            latency_ms=latency_ms,
+        )
+
+    async def chat_stream(
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None = None,
+        **kwargs: Any,
+    ) -> AsyncIterator[StreamChunk]:
+        """Stream chat completions and yield StreamChunk objects."""
+        import json
+
+        call_kwargs: dict[str, Any] = {
+            "model": self.model,
+            "max_tokens": kwargs.get("max_tokens", self.config.max_tokens),
+            "messages": messages,
+            "stream": True,
+            "stream_options": {"include_usage": True},
+        }
+        if self.config.temperature is not None:
+            call_kwargs["temperature"] = self.config.temperature
+
+        if tools:
+            call_kwargs["tools"] = [
+                {
+                    "type": "function",
+                    "function": {
+                        "name": t["name"],
+                        "description": t["description"],
+                        "parameters": t["parameters"],
+                    },
+                }
+                for t in tools
+            ]
+
+        start = time.monotonic()
+
+        stream = await self.client.chat.completions.create(**call_kwargs)
+
+        # Accumulate tool call deltas (index -> {id, name, arguments_str})
+        tc_accum: dict[int, dict[str, str]] = {}
+        tokens_in = 0
+        tokens_out = 0
+
+        async for event in stream:
+            # Usage chunk (sent at stream end when include_usage=True)
+            if event.usage:
+                tokens_in = event.usage.prompt_tokens
+                tokens_out = event.usage.completion_tokens
+
+            if not event.choices:
+                continue
+
+            delta = event.choices[0].delta
+
+            # Text delta
+            if delta.content:
+                yield StreamChunk(type="text", text=delta.content)
+
+            # Tool call delta
+            if delta.tool_calls:
+                for tc_delta in delta.tool_calls:
+                    idx = tc_delta.index
+                    if idx not in tc_accum:
+                        tc_accum[idx] = {
+                            "id": tc_delta.id or "",
+                            "name": "",
+                            "arguments": "",
+                        }
+                    acc = tc_accum[idx]
+                    if tc_delta.id:
+                        acc["id"] = tc_delta.id
+                    if tc_delta.function:
+                        if tc_delta.function.name:
+                            acc["name"] += tc_delta.function.name
+                        if tc_delta.function.arguments:
+                            acc["arguments"] += tc_delta.function.arguments
+
+        # Yield accumulated tool calls
+        for _idx in sorted(tc_accum):
+            acc = tc_accum[_idx]
+            args_str = acc["arguments"]
+            try:
+                args = json.loads(args_str) if args_str else {}
+            except json.JSONDecodeError:
+                args = {"_raw": args_str}
+            yield StreamChunk(
+                type="tool_call",
+                tool_call=ToolCall(id=acc["id"], name=acc["name"], arguments=args),
+            )
+
+        # Cost
+        latency_ms = int((time.monotonic() - start) * 1000)
+        cost = (
+            tokens_in * self.config.pricing_input
+            + tokens_out * self.config.pricing_output
+        ) / 1_000_000
+
+        yield StreamChunk(
+            type="done",
+            usage=Usage(tokens_in=tokens_in, tokens_out=tokens_out, cost=cost),
+            model=self.model,
+        )
+
+        logger.debug(
+            "openai_compat.stream_done",
+            model=self.model,
+            tokens_in=tokens_in,
+            tokens_out=tokens_out,
             latency_ms=latency_ms,
         )

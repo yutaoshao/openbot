@@ -6,9 +6,11 @@ import time
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from src.platform.config import ModelProviderConfig
+    from collections.abc import AsyncIterator
 
-from src.infrastructure.model_gateway import ModelResponse, ToolCall, Usage
+    from src.core.config import ModelProviderConfig
+
+from src.infrastructure.model_gateway import ModelResponse, StreamChunk, ToolCall, Usage
 
 
 class ClaudeProvider:
@@ -92,4 +94,105 @@ class ClaudeProvider:
             ),
             model=self.model,
             latency_ms=latency_ms,
+        )
+
+    async def chat_stream(
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None = None,
+        **kwargs: Any,
+    ) -> AsyncIterator[StreamChunk]:
+        """Stream Claude messages and yield StreamChunk objects."""
+        system_text = ""
+        conversation = []
+        for msg in messages:
+            if msg["role"] == "system":
+                system_text += msg["content"] + "\n"
+            else:
+                conversation.append(msg)
+
+        call_kwargs: dict[str, Any] = {
+            "model": self.model,
+            "max_tokens": kwargs.get("max_tokens", self.config.max_tokens),
+            "messages": conversation,
+        }
+        if system_text.strip():
+            call_kwargs["system"] = system_text.strip()
+        if self.config.temperature is not None:
+            call_kwargs["temperature"] = self.config.temperature
+
+        if tools:
+            call_kwargs["tools"] = [
+                {
+                    "name": t["name"],
+                    "description": t["description"],
+                    "input_schema": t["parameters"],
+                }
+                for t in tools
+            ]
+
+        # Accumulate tool use blocks: block_index -> {id, name, input_json_str}
+        tc_accum: dict[int, dict[str, str]] = {}
+        current_block_idx = -1
+        tokens_in = 0
+        tokens_out = 0
+
+        async with self.client.messages.stream(**call_kwargs) as stream:
+            async for event in stream:
+                event_type = event.type
+
+                if event_type == "content_block_start":
+                    current_block_idx += 1
+                    block = event.content_block
+                    if block.type == "tool_use":
+                        tc_accum[current_block_idx] = {
+                            "id": block.id,
+                            "name": block.name,
+                            "input_json": "",
+                        }
+
+                elif event_type == "content_block_delta":
+                    delta = event.delta
+                    if delta.type == "text_delta":
+                        yield StreamChunk(type="text", text=delta.text)
+                    elif (
+                        delta.type == "input_json_delta"
+                        and current_block_idx in tc_accum
+                    ):
+                        tc_accum[current_block_idx]["input_json"] += (
+                            delta.partial_json
+                        )
+
+                elif event_type == "message_delta":
+                    if hasattr(event, "usage") and event.usage:
+                        tokens_out = event.usage.output_tokens
+
+                elif event_type == "message_start":
+                    if hasattr(event, "message") and event.message.usage:
+                        tokens_in = event.message.usage.input_tokens
+
+        # Yield accumulated tool calls
+        import json
+
+        for _idx in sorted(tc_accum):
+            acc = tc_accum[_idx]
+            try:
+                args = json.loads(acc["input_json"]) if acc["input_json"] else {}
+            except json.JSONDecodeError:
+                args = {"_raw": acc["input_json"]}
+            yield StreamChunk(
+                type="tool_call",
+                tool_call=ToolCall(id=acc["id"], name=acc["name"], arguments=args),
+            )
+
+        # Cost
+        pricing = self.PRICING.get(self.model, {"input": 3.0, "output": 15.0})
+        cost = (
+            tokens_in * pricing["input"] + tokens_out * pricing["output"]
+        ) / 1_000_000
+
+        yield StreamChunk(
+            type="done",
+            usage=Usage(tokens_in=tokens_in, tokens_out=tokens_out, cost=cost),
+            model=self.model,
         )

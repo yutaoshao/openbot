@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING, Any
 
-from src.platform.logging import get_logger
+from src.core.logging import get_logger
 
 if TYPE_CHECKING:
     from src.infrastructure.database import Database

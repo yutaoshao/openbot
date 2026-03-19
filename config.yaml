@@ -23,6 +23,7 @@ model:
 telegram:
   mode: polling
   bot_token_env: TELEGRAM_BOT_TOKEN   # reads from .env: TELEGRAM_BOT_TOKEN=xxx
+  enable_streaming: false
   # allowed_user_ids: []  # Empty = allow all, set IDs to restrict access
 
 storage:

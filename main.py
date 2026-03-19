@@ -9,12 +9,15 @@ import asyncio
 import contextlib
 import signal
 from typing import Any
+from pathlib import Path
 
 from src.agent.agent import Agent
 from src.agent.conversation import ConversationManager
 from src.channels.adapters.telegram import TelegramAdapter
 from src.channels.hub import MsgHub
-from src.channels.types import MessageContent
+from src.channels.types import MessageContent, StreamingAdapter
+from src.core.config import load_config
+from src.core.logging import get_logger, setup_logging
 from src.infrastructure.database import Database
 from src.infrastructure.embedding import EmbeddingService, NullEmbeddingService
 from src.infrastructure.event_bus import EventBus
@@ -24,8 +27,6 @@ from src.infrastructure.storage import Storage
 from src.memory.episodic import EpisodicMemory
 from src.memory.procedural import ProceduralMemory
 from src.memory.semantic import SemanticMemory
-from src.platform.config import load_config
-from src.platform.logging import get_logger, setup_logging
 from src.tools.builtin import CodeExecutorTool, FileManagerTool, WebFetchTool, WebSearchTool
 from src.tools.registry import ToolRegistry
 
@@ -102,10 +103,14 @@ class Application:
         self.tool_registry.register(WebSearchTool())
         self.tool_registry.register(WebFetchTool())
         self.tool_registry.register(CodeExecutorTool())
-        self.tool_registry.register(FileManagerTool())
+        self.tool_registry.register(FileManagerTool(workspace=Path("/Users/yutaoshao/Project/openbot")))
 
     async def _on_message_receive(self, data: dict[str, Any]) -> None:
-        """Handle incoming message: run agent and publish response."""
+        """Handle incoming message: run agent and publish response.
+
+        Uses streaming path when the adapter supports it, otherwise
+        falls back to the non-streaming ``Agent.run()`` path.
+        """
         message = data["message"]
         input_text = message.content.text
 
@@ -119,38 +124,84 @@ class Application:
             text_preview=input_text[:50],
         )
 
+        adapter = self.msg_hub.get_adapter(message.platform)
+
         try:
-            result = await self.agent.run(
-                input_text=input_text,
-                conversation_id=message.conversation_id,
-                platform=message.platform,
-            )
-
-            await self.event_bus.publish("agent.response", {
-                "platform": message.platform,
-                "target_id": message.conversation_id,
-                "content": MessageContent(text=result.content),
-                "latency_ms": result.latency_ms,
-                "tokens_in": result.tokens_in,
-                "tokens_out": result.tokens_out,
-                "cost": result.cost,
-            })
-
-            logger.info(
-                "app.response_sent",
-                platform=message.platform,
-                latency_ms=result.latency_ms,
-                tokens=f"{result.tokens_in}/{result.tokens_out}",
-                cost=f"${result.cost:.4f}",
-            )
+            if self.config.telegram.enable_streaming and isinstance(adapter, StreamingAdapter):
+                await self._handle_streaming(message, adapter)
+            else:
+                await self._handle_non_streaming(message)
 
         except Exception:
-            logger.exception("app.agent_error", conversation_id=message.conversation_id)
+            logger.exception(
+                "app.agent_error",
+                conversation_id=message.conversation_id,
+            )
             await self.event_bus.publish("agent.response", {
                 "platform": message.platform,
                 "target_id": message.conversation_id,
-                "content": MessageContent(text="Sorry, an error occurred. Please try again."),
+                "content": MessageContent(
+                    text="Sorry, an error occurred. Please try again.",
+                ),
             })
+
+    async def _handle_streaming(
+        self, message: Any, adapter: StreamingAdapter,
+    ) -> None:
+        """Streaming path: Agent.run_stream() -> adapter.send_streaming()."""
+        import time
+
+        start = time.monotonic()
+
+        stream = self.agent.run_stream(
+            input_text=message.content.text,
+            conversation_id=message.conversation_id,
+            platform=message.platform,
+        )
+
+        await adapter.send_streaming(message.conversation_id, stream)
+
+        latency_ms = int((time.monotonic() - start) * 1000)
+
+        # Publish metrics-only event (NOT "agent.response"
+        # to avoid MsgHub double-delivery).
+        await self.event_bus.publish("agent.metrics", {
+            "platform": message.platform,
+            "conversation_id": message.conversation_id,
+            "latency_ms": latency_ms,
+        })
+
+        logger.info(
+            "app.streaming_complete",
+            platform=message.platform,
+            latency_ms=latency_ms,
+        )
+
+    async def _handle_non_streaming(self, message: Any) -> None:
+        """Non-streaming path: Agent.run() -> event bus -> MsgHub."""
+        result = await self.agent.run(
+            input_text=message.content.text,
+            conversation_id=message.conversation_id,
+            platform=message.platform,
+        )
+
+        await self.event_bus.publish("agent.response", {
+            "platform": message.platform,
+            "target_id": message.conversation_id,
+            "content": MessageContent(text=result.content),
+            "latency_ms": result.latency_ms,
+            "tokens_in": result.tokens_in,
+            "tokens_out": result.tokens_out,
+            "cost": result.cost,
+        })
+
+        logger.info(
+            "app.response_sent",
+            platform=message.platform,
+            latency_ms=result.latency_ms,
+            tokens=f"{result.tokens_in}/{result.tokens_out}",
+            cost=f"${result.cost:.4f}",
+        )
 
     async def start(self) -> None:
         """Start all services."""

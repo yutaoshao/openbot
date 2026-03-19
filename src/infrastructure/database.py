@@ -13,12 +13,12 @@ from typing import TYPE_CHECKING
 import aiosqlite
 import sqlite_vec
 
-from src.platform.logging import get_logger
+from src.core.logging import get_logger
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
-    from src.platform.config import StorageConfig
+    from src.core.config import StorageConfig
 
 logger = get_logger(__name__)
 
@@ -37,7 +37,7 @@ CREATE TABLE IF NOT EXISTS conversations (
     id TEXT PRIMARY KEY,
     title TEXT,
     summary TEXT,
-    platform TEXT NOT NULL,
+    core TEXT NOT NULL,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );

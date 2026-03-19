@@ -55,6 +55,8 @@ class TelegramConfig(BaseModel):
     bot_token_env: str = "TELEGRAM_BOT_TOKEN"
     webhook_url: str | None = None
     allowed_user_ids: list[int] = Field(default_factory=list)
+    stream_throttle: float = 0.5  # seconds between draft updates
+    enable_streaming: bool = False
 
     @property
     def bot_token(self) -> str:

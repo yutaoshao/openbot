@@ -9,13 +9,15 @@ from __future__ import annotations
 import asyncio
 import json
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, Literal, Protocol, runtime_checkable
 
-from src.platform.logging import get_logger
+from src.core.logging import get_logger
 
 if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
+
+    from src.core.config import ModelConfig, ModelProviderConfig
     from src.infrastructure.event_bus import EventBus
-    from src.platform.config import ModelConfig, ModelProviderConfig
 
 logger = get_logger(__name__)
 
@@ -72,6 +74,18 @@ class ModelResponse:
         return msg
 
 
+@dataclass
+class StreamChunk:
+    """A single chunk from a streaming model response."""
+
+    type: Literal["text", "tool_call", "tool_status", "done"]
+    text: str = ""
+    tool_call: ToolCall | None = None
+    tool_name: str = ""           # type="tool_status"
+    usage: Usage | None = None    # type="done"
+    model: str = ""               # type="done"
+
+
 @runtime_checkable
 class ModelProvider(Protocol):
     """Protocol for LLM provider implementations."""
@@ -82,6 +96,13 @@ class ModelProvider(Protocol):
         tools: list[dict[str, Any]] | None = None,
         **kwargs: Any,
     ) -> ModelResponse: ...
+
+    async def chat_stream(
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None = None,
+        **kwargs: Any,
+    ) -> AsyncIterator[StreamChunk]: ...
 
 
 class ModelGateway:
@@ -164,3 +185,61 @@ class ModelGateway:
             logger.error("model_gateway.provider_exhausted", provider=provider_key)
 
         raise RuntimeError(f"All model providers failed: {last_error}") from last_error
+
+    async def chat_stream(
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None = None,
+        **kwargs: Any,
+    ) -> AsyncIterator[StreamChunk]:
+        """Send streaming chat request with retry and fallback.
+
+        Retry/fallback applies only at connection phase.  Once streaming
+        begins, errors propagate to the caller (no mid-stream retry).
+        """
+        providers_to_try = ["primary"]
+        if "fallback" in self._providers:
+            providers_to_try.append("fallback")
+
+        last_error: Exception | None = None
+
+        for provider_key in providers_to_try:
+            provider = self._providers[provider_key]
+            for attempt in range(self.config.max_retries):
+                try:
+                    stream = provider.chat_stream(messages, tools, **kwargs)
+                    # Yield first chunk to verify the connection is live,
+                    # then forward remaining chunks to the caller.
+                    first = True
+                    async for chunk in stream:
+                        if first:
+                            first = False
+                            logger.info(
+                                "model_gateway.stream_started",
+                                provider=provider_key,
+                            )
+                        yield chunk
+                    return  # noqa: B012 — stream consumed, done
+
+                except Exception as e:
+                    last_error = e
+                    delay = self.config.retry_base_delay * (2 ** attempt)
+                    logger.warning(
+                        "model_gateway.stream_retry",
+                        provider=provider_key,
+                        attempt=attempt + 1,
+                        max_retries=self.config.max_retries,
+                        delay=delay,
+                        error=str(e),
+                    )
+                    if attempt < self.config.max_retries - 1:
+                        await asyncio.sleep(delay)
+
+            logger.error(
+                "model_gateway.stream_provider_exhausted",
+                provider=provider_key,
+            )
+
+        raise RuntimeError(
+            f"All model providers failed (stream): {last_error}",
+        ) from last_error

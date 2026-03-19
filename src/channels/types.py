@@ -1,12 +1,18 @@
-"""Unified message models for cross-platform communication.
+"""Unified message models for cross-core communication.
 
-All platform adapters convert their native message format to/from these models.
+All core adapters convert their native message format to/from these models.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
+
+    from src.infrastructure.model_gateway import StreamChunk
 
 
 @dataclass
@@ -38,3 +44,14 @@ class UnifiedMessage:
     content: MessageContent
     reply_to: str | None = None
     timestamp: datetime = field(default_factory=lambda: datetime.now(UTC))
+
+
+@runtime_checkable
+class StreamingAdapter(Protocol):
+    """Protocol for adapters that support streaming output."""
+
+    async def send_streaming(
+        self,
+        chat_id: str,
+        stream: AsyncIterator[StreamChunk],
+    ) -> None: ...

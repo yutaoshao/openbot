@@ -12,7 +12,7 @@ from collections import defaultdict
 from collections.abc import Callable, Coroutine
 from typing import Any
 
-from src.platform.logging import get_logger
+from src.core.logging import get_logger
 
 logger = get_logger(__name__)
 

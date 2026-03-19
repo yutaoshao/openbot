@@ -15,10 +15,10 @@ from typing import TYPE_CHECKING, Any
 
 import httpx
 
-from src.platform.logging import get_logger
+from src.core.logging import get_logger
 
 if TYPE_CHECKING:
-    from src.platform.config import RerankerConfig
+    from src.core.config import RerankerConfig
 
 logger = get_logger(__name__)
 

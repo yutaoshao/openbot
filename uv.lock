@@ -1004,7 +1004,7 @@ requires-dist = [
     { name = "pydantic", specifier = ">=2.11.0" },
     { name = "pydantic-settings", specifier = ">=2.9.0" },
     { name = "python-dotenv", specifier = ">=1.0.0" },
-    { name = "python-telegram-bot", specifier = ">=21.11" },
+    { name = "python-telegram-bot", specifier = ">=22.6" },
     { name = "pyyaml", specifier = ">=6.0" },
     { name = "sqlite-vec", specifier = ">=0.1.6" },
     { name = "structlog", specifier = ">=25.1.0" },

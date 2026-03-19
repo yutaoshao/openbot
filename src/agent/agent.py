@@ -1,6 +1,7 @@
 """Agent core - ReAct reasoning loop.
 
 Implements the Think -> Decide -> Act -> Observe cycle.
+Supports both non-streaming (run) and streaming (run_stream) execution.
 """
 
 from __future__ import annotations
@@ -10,13 +11,16 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
-from src.platform.logging import get_logger
+from src.core.logging import get_logger
+from src.infrastructure.model_gateway import StreamChunk
 
 if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
+
     from src.agent.conversation import ConversationManager
+    from src.core.config import AgentConfig
     from src.infrastructure.event_bus import EventBus
-    from src.infrastructure.model_gateway import ModelGateway
-    from src.platform.config import AgentConfig
+    from src.infrastructure.model_gateway import ModelGateway, Usage
     from src.tools.registry import ToolRegistry, ToolResult
 
 logger = get_logger(__name__)
@@ -66,12 +70,6 @@ class Agent:
         self.tool_registry = tool_registry
         self.conversation_manager = conversation_manager
 
-    def _build_system_prompt(self) -> str:
-        """Build system prompt with current context."""
-        template = self.config.system_prompt or DEFAULT_SYSTEM_PROMPT
-        return template.format(
-            date=datetime.now(UTC).strftime("%Y-%m-%d"),
-        )
 
     async def run(
         self,
@@ -79,15 +77,202 @@ class Agent:
         conversation_id: str = "",
         platform: str = "unknown",
     ) -> AgentResponse:
-        """Execute the agent ReAct loop.
+        """Execute the agent ReAct loop (non-streaming).
 
-        When a ConversationManager is available, messages are built with
-        memory context (preferences, knowledge, past conversations).
-        Otherwise, falls back to a simple system + user message pair.
+        Internally consumes ``run_stream()`` and assembles the final
+        ``AgentResponse``.  Behaviour and return type are unchanged.
         """
         start = time.monotonic()
+        content = ""
+        model = ""
+        total_tokens_in = 0
+        total_tokens_out = 0
+        total_cost = 0.0
+        tool_calls_made: list[dict[str, Any]] = []
+        iterations = 0
 
-        # Build messages with memory context if available
+        async for chunk in self.run_stream(input_text, conversation_id, platform):
+            if chunk.type == "text":
+                content += chunk.text
+            elif chunk.type == "tool_status":
+                # tool_status carries tool_name + optional detail in text
+                tool_calls_made.append({"name": chunk.tool_name})
+            elif chunk.type == "done":
+                model = chunk.model
+                if chunk.usage:
+                    total_tokens_in = chunk.usage.tokens_in
+                    total_tokens_out = chunk.usage.tokens_out
+                    total_cost = chunk.usage.cost
+
+        total_latency = int((time.monotonic() - start) * 1000)
+
+        return AgentResponse(
+            content=content,
+            model=model,
+            tokens_in=total_tokens_in,
+            tokens_out=total_tokens_out,
+            cost=total_cost,
+            latency_ms=total_latency,
+            iterations=iterations,
+            tool_calls_made=tool_calls_made,
+        )
+
+    async def run_stream(
+        self,
+        input_text: str,
+        conversation_id: str = "",
+        platform: str = "unknown",
+    ) -> AsyncIterator[StreamChunk]:
+        """Execute the agent ReAct loop, yielding StreamChunks.
+
+        Yields:
+            StreamChunk(type="text")        — text token from the model
+            StreamChunk(type="tool_status") — tool about to execute
+            StreamChunk(type="done")        — final metadata (usage, model)
+        """
+        messages, tools = await self._prepare(
+            input_text, conversation_id, platform,
+        )
+
+        await self.event_bus.publish("agent.think.start", {
+            "conversation_id": conversation_id,
+            "input_length": len(input_text),
+        })
+
+        iterations = 0
+        total_tokens_in = 0
+        total_tokens_out = 0
+        total_cost = 0.0
+        all_tool_calls: list[dict[str, Any]] = []
+        final_text = ""
+        final_model = ""
+
+        while iterations < self.max_iterations:
+            iterations += 1
+            accumulated_text = ""
+            collected_tool_calls: list[Any] = []  # ToolCall objects
+            iter_usage: Usage | None = None
+
+            async for chunk in self.model_gateway.chat_stream(
+                messages=messages, tools=tools,
+            ):
+                if chunk.type == "text":
+                    accumulated_text += chunk.text
+                    yield chunk  # pass through to caller
+                elif chunk.type == "tool_call":
+                    collected_tool_calls.append(chunk.tool_call)
+                elif chunk.type == "done":
+                    iter_usage = chunk.usage
+                    final_model = chunk.model
+
+            # Accumulate usage
+            if iter_usage:
+                total_tokens_in += iter_usage.tokens_in
+                total_tokens_out += iter_usage.tokens_out
+                total_cost += iter_usage.cost
+
+            # No tool calls: final text response
+            if not collected_tool_calls:
+                final_text = accumulated_text
+                break
+
+            # Has tool calls: execute and continue loop
+            # Build assistant message for context
+            import json
+            assistant_msg: dict[str, Any] = {"role": "assistant"}
+            if accumulated_text:
+                assistant_msg["content"] = accumulated_text
+            assistant_msg["tool_calls"] = [
+                {
+                    "id": tc.id,
+                    "type": "function",
+                    "function": {
+                        "name": tc.name,
+                        "arguments": json.dumps(
+                            tc.arguments, ensure_ascii=False,
+                        ),
+                    },
+                }
+                for tc in collected_tool_calls
+            ]
+            messages.append(assistant_msg)
+
+            for tc in collected_tool_calls:
+                yield StreamChunk(type="tool_status", tool_name=tc.name)
+
+                tool_result = await self._execute_tool(tc.name, tc.arguments)
+
+                all_tool_calls.append({
+                    "name": tc.name,
+                    "arguments": tc.arguments,
+                    "result_preview": tool_result.content[:200],
+                    "is_error": tool_result.is_error,
+                })
+
+                messages.append(tool_result.to_message(tc.id))
+
+                await self.event_bus.publish("agent.tool.executed", {
+                    "conversation_id": conversation_id,
+                    "tool": tc.name,
+                    "is_error": tool_result.is_error,
+                    "iteration": iterations,
+                })
+
+                logger.info(
+                    "agent.tool_executed",
+                    tool=tc.name,
+                    is_error=tool_result.is_error,
+                    result_length=len(tool_result.content),
+                )
+
+        else:
+            # Max iterations reached
+            final_text = "Task exceeded maximum iterations."
+
+        # Post-loop: persist and compress
+        await self._finalize(
+            conversation_id=conversation_id,
+            content=final_text,
+            model=final_model,
+            tokens_in=total_tokens_in,
+            tokens_out=total_tokens_out,
+            cost=total_cost,
+            latency_ms=0,  # caller computes actual latency
+            iterations=iterations,
+            all_tool_calls=all_tool_calls,
+        )
+
+        from src.infrastructure.model_gateway import Usage
+
+        yield StreamChunk(
+            type="done",
+            usage=Usage(
+                tokens_in=total_tokens_in,
+                tokens_out=total_tokens_out,
+                cost=total_cost,
+            ),
+            model=final_model,
+        )
+
+
+    def _build_system_prompt(self) -> str:
+        """Build system prompt with current context."""
+        template = self.config.system_prompt or DEFAULT_SYSTEM_PROMPT
+        return template.format(
+            date=datetime.now(UTC).strftime("%Y-%m-%d"),
+        )
+
+    async def _prepare(
+        self,
+        input_text: str,
+        conversation_id: str,
+        platform: str,
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]] | None]:
+        """Build messages and tools for the ReAct loop.
+
+        Returns:
+            (messages, tools) tuple.
+        """
         if self.conversation_manager and conversation_id:
             await self.conversation_manager.get_or_create_conversation(
                 conversation_id, platform, self.config.token_budget,
@@ -106,113 +291,49 @@ class Agent:
                 {"role": "user", "content": input_text},
             ]
 
-        # Prepare tool schemas if registry is available
         tools = self.tool_registry.get_schemas() if self.tool_registry else None
+        return messages, tools
 
-        await self.event_bus.publish("agent.think.start", {
+    async def _finalize(
+        self,
+        *,
+        conversation_id: str,
+        content: str,
+        model: str,
+        tokens_in: int,
+        tokens_out: int,
+        cost: float,
+        latency_ms: int,
+        iterations: int,
+        all_tool_calls: list[dict[str, Any]],
+    ) -> None:
+        """Post-loop: publish events, persist messages, check compression."""
+        await self.event_bus.publish("agent.think.complete", {
             "conversation_id": conversation_id,
-            "input_length": len(input_text),
+            "iterations": iterations,
+            "latency_ms": latency_ms,
+            "tokens_in": tokens_in,
+            "tokens_out": tokens_out,
+            "cost": cost,
+            "tool_calls": len(all_tool_calls),
         })
 
-        iterations = 0
-        total_tokens_in = 0
-        total_tokens_out = 0
-        total_cost = 0.0
-        all_tool_calls: list[dict[str, Any]] = []
+        if self.conversation_manager and conversation_id:
+            await self.conversation_manager.add_assistant_message(
+                conversation_id,
+                content=content,
+                model=model,
+                tokens_in=tokens_in,
+                tokens_out=tokens_out,
+                cost=cost,
+                latency_ms=latency_ms,
+                tool_calls=all_tool_calls or None,
+            )
+            await self.conversation_manager.maybe_compress(conversation_id)
 
-        while iterations < self.max_iterations:
-            iterations += 1
-
-            response = await self.model_gateway.chat(messages=messages, tools=tools)
-
-            total_tokens_in += response.usage.tokens_in
-            total_tokens_out += response.usage.tokens_out
-            total_cost += response.usage.cost
-
-            # No tool calls: final response
-            if not response.has_tool_calls:
-                total_latency = int((time.monotonic() - start) * 1000)
-
-                result = AgentResponse(
-                    content=response.text,
-                    model=response.model,
-                    tokens_in=total_tokens_in,
-                    tokens_out=total_tokens_out,
-                    cost=total_cost,
-                    latency_ms=total_latency,
-                    iterations=iterations,
-                    tool_calls_made=all_tool_calls,
-                )
-
-                await self.event_bus.publish("agent.think.complete", {
-                    "conversation_id": conversation_id,
-                    "iterations": iterations,
-                    "latency_ms": total_latency,
-                    "tokens_in": total_tokens_in,
-                    "tokens_out": total_tokens_out,
-                    "cost": total_cost,
-                    "tool_calls": len(all_tool_calls),
-                })
-
-                # Persist assistant message and check compression
-                if self.conversation_manager and conversation_id:
-                    await self.conversation_manager.add_assistant_message(
-                        conversation_id,
-                        content=response.text,
-                        model=response.model,
-                        tokens_in=total_tokens_in,
-                        tokens_out=total_tokens_out,
-                        cost=total_cost,
-                        latency_ms=total_latency,
-                        tool_calls=all_tool_calls or None,
-                    )
-                    await self.conversation_manager.maybe_compress(
-                        conversation_id,
-                    )
-
-                return result
-
-            # Has tool calls: execute and continue loop
-            # Append assistant message with tool calls to context
-            messages.append(response.to_assistant_message())
-
-            for tc in response.tool_calls:
-                tool_result = await self._execute_tool(tc.name, tc.arguments)
-
-                all_tool_calls.append({
-                    "name": tc.name,
-                    "arguments": tc.arguments,
-                    "result_preview": tool_result.content[:200],
-                    "is_error": tool_result.is_error,
-                })
-
-                # Append tool result to messages for model context
-                messages.append(tool_result.to_message(tc.id))
-
-                await self.event_bus.publish("agent.tool.executed", {
-                    "conversation_id": conversation_id,
-                    "tool": tc.name,
-                    "is_error": tool_result.is_error,
-                    "iteration": iterations,
-                })
-
-                logger.info(
-                    "agent.tool_executed",
-                    tool=tc.name,
-                    is_error=tool_result.is_error,
-                    result_length=len(tool_result.content),
-                )
-
-        # Max iterations reached
-        total_latency = int((time.monotonic() - start) * 1000)
-        return AgentResponse(
-            content="Task exceeded maximum iterations.",
-            latency_ms=total_latency,
-            iterations=iterations,
-            tool_calls_made=all_tool_calls,
-        )
-
-    async def _execute_tool(self, name: str, arguments: dict[str, Any]) -> ToolResult:
+    async def _execute_tool(
+        self, name: str, arguments: dict[str, Any],
+    ) -> ToolResult:
         """Execute a single tool call by name."""
         from src.tools.registry import ToolResult
 

@@ -9,7 +9,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from src.channels.types import MessageContent, UnifiedMessage
-from src.platform.logging import get_logger
+from src.core.logging import get_logger
 
 if TYPE_CHECKING:
     from src.infrastructure.event_bus import EventBus
@@ -31,6 +31,10 @@ class MsgHub:
         """Register a platform adapter."""
         self._adapters[platform] = adapter
         logger.info("msg_hub.adapter_registered", platform=platform)
+
+    def get_adapter(self, platform: str) -> Any | None:
+        """Get a registered adapter by core name."""
+        return self._adapters.get(platform)
 
     async def handle_incoming(self, message: UnifiedMessage) -> None:
         """Handle an incoming message from any platform.

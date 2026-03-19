@@ -108,11 +108,21 @@ Configure primary and fallback models in `config.yaml`. The gateway handles auto
 
 - [x] Phase 1: Config, Logging, Event Bus, Model Gateway, Agent (single-turn), Telegram
 - [x] Phase 2: Tool Protocol, 4 Built-in Tools, Multi-turn Agent Loop
-- [ ] Phase 3: Database, Storage, 4-tier Memory, Conversation Manager
+- [x] Phase 3: Database, Storage, 4-tier Memory, Conversation Manager
+- [~] In Progress: Telegram native streaming (`sendMessageDraft`) + Markdown to Telegram HTML
 - [ ] Phase 4: REST API, Monitor, Frontend Dashboard
 - [ ] Phase 5: Sub-Agent, Scheduler, DeepResearch, Feishu
 
 See [docs/todo.md](docs/todo.md) for the full implementation plan.
+
+## Testing
+
+- `uv run ruff check .`
+- `uv run pytest -q`
+- Current baseline includes smoke tests for:
+  - WorkingMemory compression/extraction
+  - Agent streaming path (`run_stream`/`run`)
+  - Markdown -> Telegram HTML conversion
 
 ## License
 

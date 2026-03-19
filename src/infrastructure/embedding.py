@@ -10,10 +10,10 @@ from __future__ import annotations
 import asyncio
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
-from src.platform.logging import get_logger
+from src.core.logging import get_logger
 
 if TYPE_CHECKING:
-    from src.platform.config import EmbeddingConfig
+    from src.core.config import EmbeddingConfig
 
 logger = get_logger(__name__)
 
