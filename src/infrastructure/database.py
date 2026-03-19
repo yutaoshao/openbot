@@ -23,7 +23,7 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 # Bump this when schema changes require migration
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 _SCHEMA_SQL = """\
 -- Schema version tracking
@@ -113,6 +113,26 @@ CREATE INDEX IF NOT EXISTS idx_metrics_event_name
     ON metrics(event_name);
 CREATE INDEX IF NOT EXISTS idx_metrics_timestamp
     ON metrics(timestamp);
+
+-- Schedules
+CREATE TABLE IF NOT EXISTS schedules (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    prompt TEXT NOT NULL,
+    cron TEXT NOT NULL,
+    target_platform TEXT,
+    target_id TEXT,
+    status TEXT NOT NULL DEFAULT 'active',
+    last_run_at TEXT,
+    next_run_at TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_schedules_status
+    ON schedules(status);
+CREATE INDEX IF NOT EXISTS idx_schedules_next_run_at
+    ON schedules(next_run_at);
 """
 
 _VEC_TABLES_SQL = """\

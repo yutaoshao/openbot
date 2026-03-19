@@ -8,8 +8,8 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import signal
-from typing import Any
 from pathlib import Path
+from typing import Any
 
 from src.agent.agent import Agent
 from src.agent.conversation import ConversationManager

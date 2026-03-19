@@ -185,6 +185,10 @@ class OpenAICompatibleProvider:
                         if tc_delta.function.arguments:
                             acc["arguments"] += tc_delta.function.arguments
 
+            # Finish reason
+            if event.choices[0].finish_reason:
+                break
+
         # Yield accumulated tool calls
         for _idx in sorted(tc_accum):
             acc = tc_accum[_idx]

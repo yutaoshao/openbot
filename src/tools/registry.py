@@ -7,6 +7,7 @@ that manages tool discovery and schema generation.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from typing import Any, Protocol, runtime_checkable
 
 from src.core.logging import get_logger
@@ -57,12 +58,18 @@ class ToolRegistry:
 
     def __init__(self) -> None:
         self._tools: dict[str, Tool] = {}
+        self._enabled: dict[str, bool] = {}       # tool_name -> enabled flag
+        self._config: dict[str, dict] = {}         # tool_name -> extra config
+        self._last_used: dict[str, str | None] = {}  # tool_name -> ISO timestamp
 
-    def register(self, tool: Tool) -> None:
+    def register(self, tool: Tool, *, enabled: bool = True) -> None:
         """Register a tool."""
         if tool.name in self._tools:
             logger.warning("tool_registry.duplicate", name=tool.name)
         self._tools[tool.name] = tool
+        self._enabled.setdefault(tool.name, enabled)
+        self._config.setdefault(tool.name, {})
+        self._last_used.setdefault(tool.name, None)
         logger.info("tool_registry.registered", name=tool.name, category=tool.category)
 
     def get(self, name: str) -> Tool | None:
@@ -82,6 +89,7 @@ class ToolRegistry:
 
         Returns a list of dicts with name, description, parameters.
         Provider adapters convert this to their specific format.
+        Only includes enabled tools.
         """
         return [
             {
@@ -90,4 +98,51 @@ class ToolRegistry:
                 "parameters": tool.parameters,
             }
             for tool in self._tools.values()
+            if self._enabled.get(tool.name, True)
         ]
+
+    # ------------------------------------------------------------------
+    # Management API (used by REST routes)
+    # ------------------------------------------------------------------
+
+    def list_status(self) -> list[dict[str, Any]]:
+        """Return status info for all registered tools."""
+        return [
+            {
+                "name": tool.name,
+                "description": tool.description,
+                "category": tool.category,
+                "enabled": self._enabled.get(tool.name, True),
+                "config": self._config.get(tool.name, {}),
+                "last_used": self._last_used.get(tool.name),
+            }
+            for tool in self._tools.values()
+        ]
+
+    def update_config(
+        self, name: str, updates: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Update a tool's configuration. Raises KeyError if not found."""
+        tool = self._tools.get(name)
+        if not tool:
+            raise KeyError(name)
+
+        if "enabled" in updates:
+            self._enabled[name] = bool(updates.pop("enabled"))
+        if updates:
+            self._config.setdefault(name, {}).update(updates)
+
+        logger.info("tool_registry.config_updated", name=name)
+        return {
+            "name": tool.name,
+            "description": tool.description,
+            "category": tool.category,
+            "enabled": self._enabled.get(name, True),
+            "config": self._config.get(name, {}),
+            "last_used": self._last_used.get(name),
+        }
+
+    def record_usage(self, name: str) -> None:
+        """Record that a tool was used (updates last_used timestamp)."""
+        if name in self._tools:
+            self._last_used[name] = datetime.now(UTC).isoformat()

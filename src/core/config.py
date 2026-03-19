@@ -68,6 +68,18 @@ class StorageConfig(BaseModel):
     """Database storage configuration."""
 
     db_path: str = "data/openbot.db"
+    workspace_path: str = "data/workspace"
+
+
+class ApiConfig(BaseModel):
+    """REST/WebSocket API server configuration."""
+
+    enabled: bool = True
+    host: str = "127.0.0.1"
+    port: int = 8000
+    cors_origins: list[str] = Field(default_factory=lambda: ["*"])
+    serve_frontend: bool = True
+    frontend_dist: str = "frontend/dist"
 
 
 class LogConfig(BaseModel):
@@ -131,6 +143,7 @@ class AppConfig(BaseModel):
     model: ModelConfig = Field(default_factory=ModelConfig)
     telegram: TelegramConfig = Field(default_factory=TelegramConfig)
     storage: StorageConfig = Field(default_factory=StorageConfig)
+    api: ApiConfig = Field(default_factory=ApiConfig)
     log: LogConfig = Field(default_factory=LogConfig)
     agent: AgentConfig = Field(default_factory=AgentConfig)
     embedding: EmbeddingConfig = Field(default_factory=EmbeddingConfig)

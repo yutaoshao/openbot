@@ -116,10 +116,7 @@ class TelegramAdapter:
     async def send_message(self, chat_id: str, content: MessageContent) -> None:
         """Send a message back to Telegram (non-streaming)."""
         if content.text:
-            final_html = md_to_telegram_html(content.text, partial=False)
-            await self._send_final_message(
-                chat_id, final_html, parse_mode="HTML",
-            )
+            await self._send_final_message(chat_id, content.text)
 
         for attachment in content.attachments:
             if attachment.type == "image" and isinstance(attachment.data, bytes):

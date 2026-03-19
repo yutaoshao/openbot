@@ -1,0 +1,1 @@
+{"root":["./src/app.tsx","./src/main.tsx","./src/components/layout.tsx","./src/components/chat-bar.tsx","./src/lib/api.ts","./src/pages/conversations.tsx","./src/pages/dashboard.tsx","./src/pages/memory.tsx","./src/pages/monitoring.tsx","./src/pages/scheduler.tsx","./src/pages/settings.tsx","./src/pages/tools.tsx"],"version":"5.9.3"}

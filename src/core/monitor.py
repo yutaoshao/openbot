@@ -1,0 +1,258 @@
+"""Metrics collection and aggregation for management dashboard."""
+
+from __future__ import annotations
+
+from collections import defaultdict
+from datetime import UTC, datetime, timedelta
+from statistics import mean
+from typing import TYPE_CHECKING, Any
+
+from src.core.logging import get_logger
+
+if TYPE_CHECKING:
+    from src.infrastructure.event_bus import EventBus
+    from src.infrastructure.storage import Storage
+
+logger = get_logger(__name__)
+
+
+def _parse_iso(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    raw = value.replace("Z", "+00:00")
+    try:
+        return datetime.fromisoformat(raw)
+    except ValueError:
+        return None
+
+
+def _percentile(values: list[int], p: float) -> int:
+    if not values:
+        return 0
+    ordered = sorted(values)
+    idx = max(0, min(len(ordered) - 1, int((len(ordered) - 1) * p)))
+    return ordered[idx]
+
+
+class MetricsCollector:
+    """Collects runtime events and provides aggregate metric views."""
+
+    def __init__(
+        self,
+        storage: Storage,
+        event_bus: EventBus,
+        *,
+        monthly_budget: float | None = None,
+    ) -> None:
+        self.storage = storage
+        self.event_bus = event_bus
+        self.monthly_budget = monthly_budget
+        self._subscribe()
+
+    def _subscribe(self) -> None:
+        self.event_bus.subscribe("agent.response", self._record_agent_response)
+        self.event_bus.subscribe("agent.metrics", self._record_agent_metrics)
+        self.event_bus.subscribe("agent.think.complete", self._record_think_complete)
+        self.event_bus.subscribe("agent.tool.executed", self._record_tool_event)
+        self.event_bus.subscribe("model.request", self._record_model_request)
+        self.event_bus.subscribe("app.agent_error", self._record_error_event)
+
+    async def _record(self, event_name: str, data: dict[str, Any]) -> None:
+        await self.storage.metrics.record(event_name, data)
+
+    async def _record_agent_response(self, data: dict[str, Any]) -> None:
+        await self._record("agent.response", data)
+
+    async def _record_agent_metrics(self, data: dict[str, Any]) -> None:
+        await self._record("agent.metrics", data)
+
+    async def _record_think_complete(self, data: dict[str, Any]) -> None:
+        await self._record("agent.think.complete", data)
+
+    async def _record_tool_event(self, data: dict[str, Any]) -> None:
+        await self._record("agent.tool.executed", data)
+
+    async def _record_model_request(self, data: dict[str, Any]) -> None:
+        await self._record("model.request", data)
+
+    async def _record_error_event(self, data: dict[str, Any]) -> None:
+        await self._record("app.agent_error", data)
+
+    def _period_start(self, period: str) -> datetime:
+        now = datetime.now(UTC)
+        if period == "today":
+            return datetime(now.year, now.month, now.day, tzinfo=UTC)
+        if period == "7d":
+            return now - timedelta(days=7)
+        if period == "30d":
+            return now - timedelta(days=30)
+        return now - timedelta(days=7)
+
+    async def _query_period(
+        self,
+        *,
+        period: str,
+        event_name: str | None = None,
+        limit: int = 5000,
+    ) -> list[dict[str, Any]]:
+        start = self._period_start(period).isoformat()
+        return await self.storage.metrics.query(
+            event_name=event_name,
+            start=start,
+            limit=limit,
+        )
+
+    async def get_overview(self, period: str = "today") -> dict[str, Any]:
+        response_events = await self._query_period(period=period, event_name="agent.response")
+        stream_events = await self._query_period(period=period, event_name="agent.metrics")
+        think_events = await self._query_period(period=period, event_name="agent.think.complete")
+        model_events = await self._query_period(period=period, event_name="model.request")
+        error_events = await self._query_period(period=period, event_name="app.agent_error")
+
+        total_requests = len(response_events) + len(stream_events)
+        if think_events:
+            total_requests = max(total_requests, len(think_events))
+        success_count = max(0, total_requests - len(error_events))
+        error_count = len(error_events)
+        error_rate = (error_count / total_requests) if total_requests else 0.0
+        success_rate = 1.0 - error_rate if total_requests else 0.0
+
+        iterations = [
+            int((item.get("data") or {}).get("iterations") or 0)
+            for item in think_events
+            if isinstance((item.get("data") or {}).get("iterations"), int)
+        ]
+        avg_steps = float(mean(iterations)) if iterations else 0.0
+
+        return {
+            "period": period,
+            "total_requests": total_requests,
+            "success_count": success_count,
+            "error_count": error_count,
+            "error_rate": error_rate,
+            "success_rate": success_rate,
+            "avg_steps": avg_steps,
+            "avg_turns": avg_steps,
+            "llm_api_calls": len(model_events),
+            "avg_llm_api_calls": (len(model_events) / total_requests) if total_requests else 0.0,
+        }
+
+    async def get_latency(self, period: str = "7d") -> dict[str, Any]:
+        response_events = await self._query_period(period=period, event_name="agent.response")
+        stream_events = await self._query_period(period=period, event_name="agent.metrics")
+
+        latencies: list[int] = []
+        by_day: dict[str, list[int]] = defaultdict(list)
+        for item in response_events + stream_events:
+            data = item.get("data") or {}
+            value = data.get("latency_ms")
+            if isinstance(value, int):
+                latencies.append(value)
+                ts = _parse_iso(item.get("timestamp"))
+                day = (ts.date().isoformat() if ts else "unknown")
+                by_day[day].append(value)
+
+        daily = [
+            {
+                "date": day,
+                "count": len(values),
+                "avg": int(mean(values)) if values else 0,
+                "p50": _percentile(values, 0.50),
+                "p95": _percentile(values, 0.95),
+            }
+            for day, values in sorted(by_day.items(), key=lambda x: x[0])
+        ]
+
+        return {
+            "period": period,
+            "count": len(latencies),
+            "avg_response_time": int(mean(latencies)) if latencies else 0,
+            "ttft": _percentile(latencies, 0.50),
+            "p50": _percentile(latencies, 0.50),
+            "p95": _percentile(latencies, 0.95),
+            "p99": _percentile(latencies, 0.99),
+            "daily": daily,
+        }
+
+    async def get_tokens(self, period: str = "7d") -> dict[str, Any]:
+        events = await self._query_period(period=period, event_name="model.request")
+        total_in = 0
+        total_out = 0
+        daily: dict[str, dict[str, int]] = defaultdict(lambda: {"tokens_in": 0, "tokens_out": 0})
+
+        for item in events:
+            data = item.get("data") or {}
+            tokens_in = int(data.get("tokens_in") or 0)
+            tokens_out = int(data.get("tokens_out") or 0)
+            total_in += tokens_in
+            total_out += tokens_out
+
+            ts = _parse_iso(item.get("timestamp"))
+            day = (ts.date().isoformat() if ts else "unknown")
+            daily[day]["tokens_in"] += tokens_in
+            daily[day]["tokens_out"] += tokens_out
+
+        return {
+            "period": period,
+            "tokens_in": total_in,
+            "tokens_out": total_out,
+            "avg_tokens_in_per_request": (total_in / len(events)) if events else 0.0,
+            "avg_tokens_out_per_request": (total_out / len(events)) if events else 0.0,
+            "daily": [
+                {"date": date, **value}
+                for date, value in sorted(daily.items(), key=lambda x: x[0])
+            ],
+        }
+
+    async def get_tools(self, period: str = "7d") -> dict[str, Any]:
+        events = await self._query_period(period=period, event_name="agent.tool.executed")
+        grouped: dict[str, dict[str, Any]] = defaultdict(
+            lambda: {"tool": "", "count": 0, "error_count": 0}
+        )
+
+        for item in events:
+            data = item.get("data") or {}
+            tool = str(data.get("tool") or "unknown")
+            grouped[tool]["tool"] = tool
+            grouped[tool]["count"] += 1
+            if bool(data.get("is_error")):
+                grouped[tool]["error_count"] += 1
+
+        rows = []
+        for row in grouped.values():
+            count = row["count"]
+            error_count = row["error_count"]
+            row["error_rate"] = (error_count / count) if count else 0.0
+            rows.append(row)
+
+        rows.sort(key=lambda item: item["count"], reverse=True)
+        return {"period": period, "tools": rows}
+
+    async def get_cost(self, period: str = "30d") -> dict[str, Any]:
+        events = await self._query_period(period=period, event_name="model.request")
+        total = 0.0
+        daily: dict[str, float] = defaultdict(float)
+
+        for item in events:
+            data = item.get("data") or {}
+            cost = float(data.get("cost") or 0.0)
+            total += cost
+            ts = _parse_iso(item.get("timestamp"))
+            day = (ts.date().isoformat() if ts else "unknown")
+            daily[day] += cost
+
+        budget_progress = None
+        if self.monthly_budget and self.monthly_budget > 0:
+            budget_progress = total / self.monthly_budget
+
+        return {
+            "period": period,
+            "total_cost": total,
+            "per_request_cost": (total / len(events)) if events else 0.0,
+            "monthly_budget": self.monthly_budget,
+            "budget_progress": budget_progress,
+            "daily": [
+                {"date": date, "cost": value}
+                for date, value in sorted(daily.items(), key=lambda x: x[0])
+            ],
+        }
