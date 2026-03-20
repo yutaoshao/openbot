@@ -11,13 +11,20 @@ import signal
 from pathlib import Path
 from typing import Any
 
+import uvicorn
+
 from src.agent.agent import Agent
 from src.agent.conversation import ConversationManager
+from src.agent.scheduler import AgentScheduler
+from src.agent.sub_agent import SubAgent
+from src.api import create_api_app
 from src.channels.adapters.telegram import TelegramAdapter
+from src.channels.adapters.web import WebAdapter
 from src.channels.hub import MsgHub
 from src.channels.types import MessageContent, StreamingAdapter
 from src.core.config import load_config
 from src.core.logging import get_logger, setup_logging
+from src.core.monitor import MetricsCollector
 from src.infrastructure.database import Database
 from src.infrastructure.embedding import EmbeddingService, NullEmbeddingService
 from src.infrastructure.event_bus import EventBus
@@ -31,6 +38,13 @@ from src.tools.builtin import CodeExecutorTool, FileManagerTool, WebFetchTool, W
 from src.tools.registry import ToolRegistry
 
 logger = get_logger(__name__)
+
+
+class _UvicornServerNoSignals(uvicorn.Server):
+    """Uvicorn server variant that lets the app own signal handling."""
+
+    def install_signal_handlers(self) -> None:  # noqa: D401
+        return None
 
 
 class Application:
@@ -91,9 +105,24 @@ class Application:
             conversation_manager=self.conversation_manager,
         )
 
+        # Sub-agent delegator (shared gateway, scoped tools)
+        self.sub_agent = SubAgent(
+            model_gateway=self.model_gateway,
+            event_bus=self.event_bus,
+            config=self.config.agent,
+            tool_registry=self.tool_registry,
+        )
+
         # Application layer
         self.msg_hub = MsgHub(self.event_bus)
         self.telegram: TelegramAdapter | None = None
+        self.web_adapter = WebAdapter()
+        self.scheduler: AgentScheduler | None = None
+        self.monitor = MetricsCollector(self.storage, self.event_bus)
+        self.api_server: _UvicornServerNoSignals | None = None
+        self.api_task: asyncio.Task[None] | None = None
+
+        self.msg_hub.register_adapter("web", self.web_adapter)
 
         # Wire up events
         self.event_bus.subscribe("msg.receive", self._on_message_receive)
@@ -210,14 +239,45 @@ class Application:
         # Initialize database (creates dir, schema, vec extension)
         await self.database.initialize()
 
+        if self.config.api.enabled:
+            api_app = create_api_app(
+                agent=self.agent,
+                storage=self.storage,
+                config=self.config,
+                msg_hub=self.msg_hub,
+                web_adapter=self.web_adapter,
+                tool_registry=self.tool_registry,
+                monitor=self.monitor,
+            )
+            uvicorn_config = uvicorn.Config(
+                app=api_app,
+                host=self.config.api.host,
+                port=self.config.api.port,
+                log_level=self.config.log.level.lower(),
+                access_log=False,
+            )
+            self.api_server = _UvicornServerNoSignals(uvicorn_config)
+            self.api_task = asyncio.create_task(self.api_server.serve())
+            await self._wait_for_api_ready()
+
         # Start Telegram adapter
         if self.config.telegram.bot_token:
-            self.telegram = TelegramAdapter(self.config.telegram, self.msg_hub)
-            self.msg_hub.register_adapter("telegram", self.telegram)
-            await self.telegram.start()
-            logger.info("app.telegram_ready")
+            try:
+                self.telegram = TelegramAdapter(self.config.telegram, self.msg_hub)
+                self.msg_hub.register_adapter("telegram", self.telegram)
+                await self.telegram.start()
+                logger.info("app.telegram_ready")
+            except Exception:
+                self.telegram = None
+                logger.exception("app.telegram_failed")
         else:
             logger.warning("app.telegram_skipped", reason="no bot token configured")
+
+        # Start scheduler
+        self.scheduler = AgentScheduler(
+            self.storage, self.agent, self.event_bus, self.msg_hub,
+        )
+        await self.scheduler.start()
 
         logger.info("app.started")
 
@@ -225,12 +285,53 @@ class Application:
         """Gracefully stop all services."""
         logger.info("app.stopping")
 
+        if self.api_server:
+            self.api_server.should_exit = True
+
+        if self.api_task:
+            with contextlib.suppress(asyncio.CancelledError):
+                await self.api_task
+            self.api_task = None
+            self.api_server = None
+
+        if self.scheduler:
+            await self.scheduler.stop()
+
         if self.telegram:
             await self.telegram.stop()
 
         await self.database.close()
 
         logger.info("app.stopped")
+
+    async def _wait_for_api_ready(self, timeout: float = 5.0) -> None:
+        """Wait for Uvicorn startup and fail fast on startup errors."""
+        if not self.api_server:
+            return
+
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + timeout
+
+        while not self.api_server.started:
+            if self.api_task and self.api_task.done():
+                exc = self.api_task.exception()
+                if exc is not None:
+                    raise RuntimeError("API server failed to start") from exc
+                break
+            if loop.time() >= deadline:
+                logger.warning(
+                    "app.api_start_timeout",
+                    host=self.config.api.host,
+                    port=self.config.api.port,
+                )
+                return
+            await asyncio.sleep(0.05)
+
+        logger.info(
+            "app.api_ready",
+            host=self.config.api.host,
+            port=self.config.api.port,
+        )
 
     async def run_forever(self) -> None:
         """Run until shutdown signal."""

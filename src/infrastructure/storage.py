@@ -10,8 +10,10 @@ tags, evidence) are serialised on write and deserialised on read.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import uuid
+from dataclasses import asdict, is_dataclass
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
@@ -40,7 +42,24 @@ def _new_id() -> str:
 def _json_dumps(value: Any) -> str | None:
     if value is None:
         return None
-    return json.dumps(value, ensure_ascii=False)
+    return json.dumps(value, ensure_ascii=False, default=_json_default)
+
+
+def _json_default(value: Any) -> Any:
+    """Best-effort conversion for non-JSON-native runtime objects."""
+    if is_dataclass(value):
+        return asdict(value)
+    if isinstance(value, datetime):
+        return value.isoformat()
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace")
+
+    model_dump = getattr(value, "model_dump", None)
+    if callable(model_dump):
+        with contextlib.suppress(Exception):
+            return model_dump()
+
+    return str(value)
 
 
 def _json_loads(raw: str | None) -> Any:
@@ -629,6 +648,123 @@ class MetricsRepo:
 
 
 # ---------------------------------------------------------------------------
+# ScheduleRepo
+# ---------------------------------------------------------------------------
+
+_SCHED_COLS = [
+    "id", "name", "prompt", "cron", "target_platform", "target_id",
+    "status", "last_run_at", "next_run_at", "created_at", "updated_at",
+]
+
+
+class ScheduleRepo:
+    """CRUD for the ``schedules`` table."""
+
+    def __init__(self, db: Database) -> None:
+        self._db = db
+
+    async def create(
+        self,
+        name: str,
+        prompt: str,
+        cron: str,
+        target_platform: str | None = None,
+        target_id: str | None = None,
+        status: str = "active",
+        next_run_at: str | None = None,
+    ) -> dict[str, Any]:
+        sched_id = _new_id()
+        now = _now()
+        async with self._db.get_connection() as conn:
+            await conn.execute(
+                """
+                INSERT INTO schedules
+                    (id, name, prompt, cron, target_platform, target_id,
+                     status, next_run_at, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    sched_id, name, prompt, cron, target_platform, target_id,
+                    status, next_run_at, now, now,
+                ),
+            )
+            await conn.commit()
+        return {
+            "id": sched_id, "name": name, "prompt": prompt, "cron": cron,
+            "target_platform": target_platform, "target_id": target_id,
+            "status": status, "last_run_at": None,
+            "next_run_at": next_run_at, "created_at": now, "updated_at": now,
+        }
+
+    async def get(self, id: str) -> dict[str, Any] | None:
+        async with self._db.get_connection() as conn:
+            cursor = await conn.execute(
+                f"SELECT {', '.join(_SCHED_COLS)} FROM schedules WHERE id = ?",
+                (id,),
+            )
+            row = await cursor.fetchone()
+        if row is None:
+            return None
+        return _row_to_dict(row, _SCHED_COLS)
+
+    async def update(self, id: str, **fields: Any) -> dict[str, Any] | None:
+        allowed = {
+            "name", "prompt", "cron", "target_platform", "target_id",
+            "status", "last_run_at", "next_run_at",
+        }
+        to_set = {k: v for k, v in fields.items() if k in allowed}
+        if not to_set:
+            return await self.get(id)
+        to_set["updated_at"] = _now()
+        set_clause = ", ".join(f"{k} = ?" for k in to_set)
+        params = [*to_set.values(), id]
+        async with self._db.get_connection() as conn:
+            await conn.execute(
+                f"UPDATE schedules SET {set_clause} WHERE id = ?",
+                params,
+            )
+            await conn.commit()
+        return await self.get(id)
+
+    async def list_all(
+        self,
+        status: str | None = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[dict[str, Any]]:
+        clauses: list[str] = []
+        params: list[Any] = []
+        if status is not None:
+            clauses.append("status = ?")
+            params.append(status)
+        where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
+        params.extend([limit, offset])
+        async with self._db.get_connection() as conn:
+            cursor = await conn.execute(
+                f"""
+                SELECT {', '.join(_SCHED_COLS)} FROM schedules
+                {where}
+                ORDER BY created_at DESC
+                LIMIT ? OFFSET ?
+                """,
+                params,
+            )
+            rows = await cursor.fetchall()
+        return [_row_to_dict(r, _SCHED_COLS) for r in rows]
+
+    async def list_active(self) -> list[dict[str, Any]]:
+        """Return all schedules with status='active'."""
+        return await self.list_all(status="active")
+
+    async def delete(self, id: str) -> None:
+        async with self._db.get_connection() as conn:
+            await conn.execute(
+                "DELETE FROM schedules WHERE id = ?", (id,),
+            )
+            await conn.commit()
+
+
+# ---------------------------------------------------------------------------
 # Storage facade
 # ---------------------------------------------------------------------------
 
@@ -642,3 +778,4 @@ class Storage:
         self.knowledge = KnowledgeRepo(db)
         self.preferences = PreferenceRepo(db)
         self.metrics = MetricsRepo(db)
+        self.schedules = ScheduleRepo(db)
