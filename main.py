@@ -15,6 +15,7 @@ import uvicorn
 
 from src.agent.agent import Agent
 from src.agent.conversation import ConversationManager
+from src.agent.deep_research import DeepResearch
 from src.agent.scheduler import AgentScheduler
 from src.agent.sub_agent import SubAgent
 from src.api import create_api_app
@@ -111,6 +112,12 @@ class Application:
             event_bus=self.event_bus,
             config=self.config.agent,
             tool_registry=self.tool_registry,
+        )
+
+        # Deep research engine
+        self.deep_research = DeepResearch(
+            model_gateway=self.model_gateway,
+            event_bus=self.event_bus,
         )
 
         # Application layer
