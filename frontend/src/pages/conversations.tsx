@@ -71,7 +71,7 @@ export function ConversationsPage(): JSX.Element {
           className="select"
           value={platformFilter}
           onChange={(e) => setPlatformFilter(e.target.value)}
-          style={{ marginTop: 8 }}
+          style={{ marginTop: "var(--space-2)" }}
         >
           {platforms.map((item) => (
             <option key={item} value={item}>
@@ -79,47 +79,59 @@ export function ConversationsPage(): JSX.Element {
             </option>
           ))}
         </select>
-        <div style={{ marginTop: 10 }}>
+        <div style={{ marginTop: "var(--space-3)" }}>
           {conversations.map((item) => (
-            <button
+            <div
               key={item.id}
-              className="btn secondary"
-              style={{ width: "100%", marginBottom: 6, textAlign: "left" }}
               onClick={() => setSelectedId(item.id)}
-              type="button"
+              role="button"
+              tabIndex={0}
+              onKeyDown={(e) => { if (e.key === "Enter") setSelectedId(item.id); }}
+              style={{
+                padding: "var(--space-2) var(--space-3)",
+                marginBottom: 2,
+                borderRadius: "var(--radius-sm)",
+                cursor: "pointer",
+                background: selectedId === item.id ? "var(--hover)" : "transparent",
+                transition: "background-color 150ms ease",
+              }}
             >
-              <strong style={{ fontSize: 14 }}>{item.title || item.id.slice(0, 10)}</strong>
-              <div style={{ fontSize: 12, color: "var(--muted)" }}>
-                {item.platform} · {item.message_count} msgs
+              <div style={{ fontSize: 14, color: "var(--text)" }}>
+                {item.title || item.id.slice(0, 10)}
               </div>
-            </button>
+              <div className="mono" style={{ color: "var(--text-dim)", marginTop: 2 }}>
+                {item.platform} / {item.message_count} msgs
+              </div>
+            </div>
           ))}
         </div>
       </section>
       <section className="card">
-        <h3>Conversation Detail</h3>
-        {!selectedId ? <p>Select a conversation.</p> : null}
+        <h3>Detail</h3>
+        {!selectedId ? <p style={{ color: "var(--text-muted)" }}>Select a conversation.</p> : null}
         {detail.data ? (
           <>
-            <p className="mono">id: {detail.data.conversation.id}</p>
-            <p className="mono">
-              {detail.data.conversation.platform} · {new Date(detail.data.conversation.updated_at).toLocaleString()}
+            <p className="mono" style={{ margin: "0 0 var(--space-1)", color: "var(--text-dim)" }}>
+              {detail.data.conversation.id}
             </p>
-            <button className="btn secondary" onClick={() => remove.mutate(selectedId)} type="button">
-              Delete Conversation
+            <p className="mono" style={{ margin: "0 0 var(--space-3)", color: "var(--text-muted)" }}>
+              {detail.data.conversation.platform} / {new Date(detail.data.conversation.updated_at).toLocaleString()}
+            </p>
+            <button className="btn danger" onClick={() => remove.mutate(selectedId)} type="button">
+              Delete
             </button>
-            <table className="table" style={{ marginTop: 10 }}>
+            <table className="table" style={{ marginTop: "var(--space-3)" }}>
               <thead>
                 <tr>
-                  <th>Role</th>
+                  <th style={{ width: 80 }}>Role</th>
                   <th>Message</th>
                 </tr>
               </thead>
               <tbody>
                 {detail.data.messages.map((msg) => (
                   <tr key={msg.id}>
-                    <td>{msg.role}</td>
-                    <td>{msg.content}</td>
+                    <td className="mono" style={{ color: msg.role === "user" ? "var(--text)" : "var(--text-muted)" }}>{msg.role}</td>
+                    <td style={{ whiteSpace: "pre-wrap" }}>{msg.content}</td>
                   </tr>
                 ))}
               </tbody>

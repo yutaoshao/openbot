@@ -33,14 +33,28 @@ export function ToolsPage(): JSX.Element {
       {(list.data ?? []).map((tool) => (
         <section className="card" key={tool.name}>
           <h3>{tool.name}</h3>
-          <p style={{ margin: "6px 0", color: "var(--muted)" }}>{tool.description}</p>
-          <p className="mono">category: {tool.category}</p>
-          <p className="mono">last_used: {tool.last_used || "-"}</p>
-          <p className="mono">status: {tool.enabled ? "enabled" : "disabled"}</p>
-          <pre className="mono" style={{ whiteSpace: "pre-wrap", background: "var(--panel-soft)", padding: 8, borderRadius: 8 }}>
+          <p style={{ margin: "var(--space-1) 0 var(--space-3)", color: "var(--text-muted)", fontSize: 13 }}>
+            {tool.description}
+          </p>
+          <div className="mono" style={{ color: "var(--text-dim)", display: "flex", flexDirection: "column", gap: 2, marginBottom: "var(--space-3)" }}>
+            <span>category: {tool.category}</span>
+            <span>last used: {tool.last_used || "never"}</span>
+            <span>
+              status:{" "}
+              <span style={{ color: tool.enabled ? "var(--success)" : "var(--text-dim)" }}>
+                {tool.enabled ? "enabled" : "disabled"}
+              </span>
+            </span>
+          </div>
+          <pre className="code-block">
             {JSON.stringify(tool.config ?? {}, null, 2)}
           </pre>
-          <button className="btn secondary" onClick={() => toggle.mutate(tool)} type="button">
+          <button
+            className="btn secondary"
+            onClick={() => toggle.mutate(tool)}
+            type="button"
+            style={{ marginTop: "var(--space-3)" }}
+          >
             {tool.enabled ? "Disable" : "Enable"}
           </button>
         </section>

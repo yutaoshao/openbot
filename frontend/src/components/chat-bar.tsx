@@ -142,11 +142,11 @@ export function ChatBar(): JSX.Element {
           Send
         </button>
       </form>
-      <div style={{ maxWidth: 1100, margin: "6px auto 0", fontSize: 13, color: "var(--muted)" }}>
+      <div className="chatbar-meta">
         <span className="mono">{status}</span>
-        {preview ? <> · {preview.slice(0, 220)}</> : null}
+        {preview ? <span style={{ marginLeft: 4 }}>{preview.slice(0, 220)}</span> : null}
       </div>
-      <div style={{ maxWidth: 1100, margin: "8px auto 0", display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+      <div className="chatbar-actions">
         <input
           type="file"
           multiple
@@ -155,28 +155,26 @@ export function ChatBar(): JSX.Element {
             setAttachments(files.map((file) => file.name));
           }}
         />
-        {attachments.length ? <span className="mono">{attachments.join(", ")}</span> : null}
+        {attachments.length ? <span className="mono" style={{ color: "var(--text-muted)" }}>{attachments.join(", ")}</span> : null}
         <button className="btn secondary" type="button" onClick={() => setExpanded((prev) => !prev)}>
-          {expanded ? "Collapse Chat" : "Expand Chat"}
+          {expanded ? "Collapse" : "Expand"}
         </button>
       </div>
       {expanded ? (
-        <section className="card" style={{ maxWidth: 1100, margin: "10px auto 0" }}>
-          <h3>Full Chat View</h3>
-          <p className="mono" style={{ whiteSpace: "pre-wrap" }}>
-            Current response:
-            {"\n"}
+        <section className="card" style={{ maxWidth: 1100, margin: "var(--space-3) auto 0" }}>
+          <h3>Chat History</h3>
+          <div style={{ whiteSpace: "pre-wrap" }} className="mono">
             {preview || "(empty)"}
-          </p>
-          <div style={{ maxHeight: 260, overflow: "auto", marginTop: 8 }}>
+          </div>
+          <div style={{ maxHeight: 260, overflow: "auto", marginTop: "var(--space-2)" }}>
             {history.map((item) => (
-              <div key={item.id} style={{ borderTop: "1px solid var(--line)", paddingTop: 8, marginTop: 8 }}>
-                <p>
-                  <strong>Q:</strong> {item.prompt}
+              <div key={item.id} style={{ borderTop: "1px solid var(--border-soft)", paddingTop: "var(--space-2)", marginTop: "var(--space-2)" }}>
+                <p style={{ color: "var(--text-muted)", margin: "0 0 4px" }}>
+                  <strong style={{ color: "var(--text)", fontSize: 14 }}>Q:</strong> {item.prompt}
                 </p>
-                {item.attachments.length ? <p className="mono">Attachments: {item.attachments.join(", ")}</p> : null}
-                <p>
-                  <strong>A:</strong> {item.reply || "(streaming...)"}
+                {item.attachments.length ? <p className="mono" style={{ color: "var(--text-dim)", margin: "0 0 4px" }}>{item.attachments.join(", ")}</p> : null}
+                <p style={{ margin: 0 }}>
+                  <strong style={{ color: "var(--text)", fontSize: 14 }}>A:</strong> {item.reply || "(streaming...)"}
                 </p>
               </div>
             ))}

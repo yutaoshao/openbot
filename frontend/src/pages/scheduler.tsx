@@ -59,15 +59,26 @@ export function SchedulerPage(): JSX.Element {
   });
 
   return (
-    <div className="grid" style={{ gridTemplateColumns: "1fr 1fr" }}>
+    <div className="grid" style={{ gridTemplateColumns: "1fr 2fr" }}>
       <section className="card">
         <h3>Create Task</h3>
-        <input className="input" value={name} onChange={(e) => setName(e.target.value)} />
-        <textarea className="textarea" value={prompt} onChange={(e) => setPrompt(e.target.value)} style={{ marginTop: 8 }} />
-        <input className="input mono" value={cron} onChange={(e) => setCron(e.target.value)} style={{ marginTop: 8 }} />
-        <button className="btn" type="button" onClick={() => create.mutate()}>
-          Create Schedule
-        </button>
+        <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-3)" }}>
+          <div>
+            <label style={{ display: "block", marginBottom: "var(--space-1)", fontSize: 13, color: "var(--text-muted)" }}>Name</label>
+            <input className="input" value={name} onChange={(e) => setName(e.target.value)} />
+          </div>
+          <div>
+            <label style={{ display: "block", marginBottom: "var(--space-1)", fontSize: 13, color: "var(--text-muted)" }}>Prompt</label>
+            <textarea className="textarea" value={prompt} onChange={(e) => setPrompt(e.target.value)} />
+          </div>
+          <div>
+            <label style={{ display: "block", marginBottom: "var(--space-1)", fontSize: 13, color: "var(--text-muted)" }}>Cron</label>
+            <input className="input mono" value={cron} onChange={(e) => setCron(e.target.value)} />
+          </div>
+          <button className="btn" type="button" onClick={() => create.mutate()}>
+            Create
+          </button>
+        </div>
       </section>
       <section className="card">
         <h3>Scheduled Tasks</h3>
@@ -78,7 +89,7 @@ export function SchedulerPage(): JSX.Element {
               <th>Cron</th>
               <th>Status</th>
               <th>Next Run</th>
-              <th />
+              <th style={{ width: 120 }} />
             </tr>
           </thead>
           <tbody>
@@ -100,59 +111,65 @@ export function SchedulerPage(): JSX.Element {
                       item.cron
                     )}
                   </td>
-                  <td>{item.status}</td>
-                  <td className="mono">{item.next_run_at || "-"}</td>
                   <td>
-                    {editing ? (
-                      <>
-                        <textarea
-                          className="textarea"
-                          value={editPrompt}
-                          onChange={(e) => setEditPrompt(e.target.value)}
-                        />
-                        <button
-                          className="btn secondary"
-                          onClick={() => update.mutate({ id: item.id, body: { name: editName, prompt: editPrompt, cron: editCron } })}
-                          type="button"
-                        >
-                          Save
-                        </button>
-                        <button className="btn secondary" onClick={() => setEditingId("")} type="button" style={{ marginTop: 6 }}>
-                          Cancel
-                        </button>
-                      </>
-                    ) : (
-                      <>
-                        <button
-                          className="btn secondary"
-                          onClick={() =>
-                            update.mutate({
-                              id: item.id,
-                              body: { status: item.status === "active" ? "paused" : "active" },
-                            })
-                          }
-                          type="button"
-                        >
-                          {item.status === "active" ? "Pause" : "Activate"}
-                        </button>
-                        <button
-                          className="btn secondary"
-                          onClick={() => {
-                            setEditingId(item.id);
-                            setEditName(item.name);
-                            setEditPrompt(item.prompt);
-                            setEditCron(item.cron);
-                          }}
-                          type="button"
-                          style={{ marginTop: 6 }}
-                        >
-                          Edit
-                        </button>
-                        <button className="btn secondary" onClick={() => remove.mutate(item.id)} type="button" style={{ marginTop: 6 }}>
-                          Delete
-                        </button>
-                      </>
-                    )}
+                    <span style={{ color: item.status === "active" ? "var(--success)" : "var(--text-dim)" }}>
+                      {item.status}
+                    </span>
+                  </td>
+                  <td className="mono" style={{ color: "var(--text-muted)" }}>{item.next_run_at || "-"}</td>
+                  <td>
+                    <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-1)" }}>
+                      {editing ? (
+                        <>
+                          <textarea
+                            className="textarea"
+                            value={editPrompt}
+                            onChange={(e) => setEditPrompt(e.target.value)}
+                            style={{ minHeight: 60 }}
+                          />
+                          <button
+                            className="btn secondary"
+                            onClick={() => update.mutate({ id: item.id, body: { name: editName, prompt: editPrompt, cron: editCron } })}
+                            type="button"
+                          >
+                            Save
+                          </button>
+                          <button className="btn secondary" onClick={() => setEditingId("")} type="button">
+                            Cancel
+                          </button>
+                        </>
+                      ) : (
+                        <>
+                          <button
+                            className="btn secondary"
+                            onClick={() =>
+                              update.mutate({
+                                id: item.id,
+                                body: { status: item.status === "active" ? "paused" : "active" },
+                              })
+                            }
+                            type="button"
+                          >
+                            {item.status === "active" ? "Pause" : "Activate"}
+                          </button>
+                          <button
+                            className="btn secondary"
+                            onClick={() => {
+                              setEditingId(item.id);
+                              setEditName(item.name);
+                              setEditPrompt(item.prompt);
+                              setEditCron(item.cron);
+                            }}
+                            type="button"
+                          >
+                            Edit
+                          </button>
+                          <button className="btn danger" onClick={() => remove.mutate(item.id)} type="button">
+                            Delete
+                          </button>
+                        </>
+                      )}
+                    </div>
                   </td>
                 </tr>
               );

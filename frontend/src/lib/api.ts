@@ -30,3 +30,8 @@ export function wsBaseUrl(): string {
   const protocol = window.location.protocol === "https:" ? "wss" : "ws";
   return `${protocol}://${window.location.host}`;
 }
+
+/** Read a CSS custom property from :root (for Recharts which can't use var()). */
+export function cssVar(name: string): string {
+  return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+}

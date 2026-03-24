@@ -1,6 +1,7 @@
 import { Route, Routes } from "react-router-dom";
 
 import { Layout } from "./components/Layout";
+import { ChatPage } from "./pages/chat";
 import { ConversationsPage } from "./pages/conversations";
 import { DashboardPage } from "./pages/dashboard";
 import { MemoryPage } from "./pages/memory";
@@ -14,6 +15,7 @@ export default function App(): JSX.Element {
     <Routes>
       <Route path="/" element={<Layout />}>
         <Route index element={<DashboardPage />} />
+        <Route path="chat" element={<ChatPage />} />
         <Route path="conversations" element={<ConversationsPage />} />
         <Route path="memory" element={<MemoryPage />} />
         <Route path="tools" element={<ToolsPage />} />

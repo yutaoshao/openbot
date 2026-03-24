@@ -75,39 +75,40 @@ export function MemoryPage(): JSX.Element {
   const items = useMemo(() => list.data ?? [], [list.data]);
 
   return (
-    <div className="grid" style={{ gridTemplateColumns: "1fr 1fr" }}>
+    <div className="grid" style={{ gridTemplateColumns: "1fr 2fr" }}>
       <section className="card">
         <h3>Add Knowledge</h3>
-        <select className="select" value={category} onChange={(e) => setCategory(e.target.value)}>
-          <option value="fact">fact</option>
-          <option value="concept">concept</option>
-          <option value="procedure">procedure</option>
-        </select>
-        <select className="select" value={priority} onChange={(e) => setPriority(e.target.value)} style={{ marginTop: 8 }}>
-          <option value="P1">P1</option>
-          <option value="P2">P2</option>
-          <option value="P3">P3</option>
-        </select>
-        <textarea
-          className="textarea"
-          value={content}
-          onChange={(e) => setContent(e.target.value)}
-          placeholder="Knowledge content"
-          style={{ marginTop: 8 }}
-        />
-        <button className="btn" onClick={() => create.mutate()} type="button" disabled={!content.trim()}>
-          Save
-        </button>
+        <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-3)" }}>
+          <select className="select" value={category} onChange={(e) => setCategory(e.target.value)}>
+            <option value="fact">fact</option>
+            <option value="concept">concept</option>
+            <option value="procedure">procedure</option>
+          </select>
+          <select className="select" value={priority} onChange={(e) => setPriority(e.target.value)}>
+            <option value="P1">P1</option>
+            <option value="P2">P2</option>
+            <option value="P3">P3</option>
+          </select>
+          <textarea
+            className="textarea"
+            value={content}
+            onChange={(e) => setContent(e.target.value)}
+            placeholder="Knowledge content..."
+          />
+          <button className="btn" onClick={() => create.mutate()} type="button" disabled={!content.trim()}>
+            Save
+          </button>
+        </div>
       </section>
       <section className="card">
         <h3>Knowledge Base</h3>
         <input
           className="input"
-          placeholder="Search content..."
+          placeholder="Search..."
           value={search}
           onChange={(e) => setSearch(e.target.value)}
         />
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginTop: 8 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "var(--space-2)", marginTop: "var(--space-2)" }}>
           <select className="select" value={filterCategory} onChange={(e) => setFilterCategory(e.target.value)}>
             <option value="all">all categories</option>
             <option value="fact">fact</option>
@@ -121,13 +122,13 @@ export function MemoryPage(): JSX.Element {
             <option value="P3">P3</option>
           </select>
         </div>
-        <table className="table" style={{ marginTop: 8 }}>
+        <table className="table" style={{ marginTop: "var(--space-3)" }}>
           <thead>
             <tr>
               <th>Category</th>
               <th>Priority</th>
               <th>Content</th>
-              <th />
+              <th style={{ width: 100 }} />
             </tr>
           </thead>
           <tbody>
@@ -135,7 +136,7 @@ export function MemoryPage(): JSX.Element {
               const editing = editingId === item.id;
               return (
                 <tr key={item.id}>
-                  <td>{item.category}</td>
+                  <td className="mono">{item.category}</td>
                   <td>
                     {editing ? (
                       <select
@@ -148,7 +149,7 @@ export function MemoryPage(): JSX.Element {
                         <option value="P3">P3</option>
                       </select>
                     ) : (
-                      item.priority
+                      <span className="mono">{item.priority}</span>
                     )}
                   </td>
                   <td>
@@ -163,52 +164,52 @@ export function MemoryPage(): JSX.Element {
                     )}
                   </td>
                   <td>
-                    {editing ? (
-                      <>
-                        <button className="btn secondary" type="button" onClick={() => update.mutate(item.id)}>
-                          Save
-                        </button>
-                        <button
-                          className="btn secondary"
-                          type="button"
-                          style={{ marginTop: 6 }}
-                          onClick={() => {
-                            setEditingId("");
-                            setEditingContent("");
-                            setEditingPriority("P1");
-                          }}
-                        >
-                          Cancel
-                        </button>
-                      </>
-                    ) : (
-                      <>
-                        <button
-                          className="btn secondary"
-                          type="button"
-                          onClick={() => {
-                            setEditingId(item.id);
-                            setEditingContent(item.content);
-                            setEditingPriority(item.priority);
-                          }}
-                        >
-                          Edit
-                        </button>
-                        <button
-                          className="btn secondary"
-                          onClick={() => {
-                            const ok = window.confirm("Delete this knowledge item?");
-                            if (ok) {
-                              remove.mutate(item.id);
-                            }
-                          }}
-                          type="button"
-                          style={{ marginTop: 6 }}
-                        >
-                          Delete
-                        </button>
-                      </>
-                    )}
+                    <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-1)" }}>
+                      {editing ? (
+                        <>
+                          <button className="btn secondary" type="button" onClick={() => update.mutate(item.id)}>
+                            Save
+                          </button>
+                          <button
+                            className="btn secondary"
+                            type="button"
+                            onClick={() => {
+                              setEditingId("");
+                              setEditingContent("");
+                              setEditingPriority("P1");
+                            }}
+                          >
+                            Cancel
+                          </button>
+                        </>
+                      ) : (
+                        <>
+                          <button
+                            className="btn secondary"
+                            type="button"
+                            onClick={() => {
+                              setEditingId(item.id);
+                              setEditingContent(item.content);
+                              setEditingPriority(item.priority);
+                            }}
+                          >
+                            Edit
+                          </button>
+                          <button
+                            className="btn danger"
+                            onClick={() => {
+                              const ok = window.confirm("Delete this knowledge item?");
+                              if (ok) {
+                                remove.mutate(item.id);
+                              }
+                            }}
+                            type="button"
+                          >
+                            Delete
+                          </button>
+                        </>
+                      )}
+                    </div>
                   </td>
                 </tr>
               );

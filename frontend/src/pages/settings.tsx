@@ -28,7 +28,6 @@ export function SettingsPage(): JSX.Element {
   const [streaming, setStreaming] = useState(false);
   const [mode, setMode] = useState("polling");
   const [maxRetries, setMaxRetries] = useState(3);
-  const [theme, setTheme] = useState(localStorage.getItem("openbot_theme") || "light");
 
   const settings = useQuery({
     queryKey: ["settings"],
@@ -42,11 +41,6 @@ export function SettingsPage(): JSX.Element {
       setMaxRetries(settings.data.model.max_retries);
     }
   }, [settings.data]);
-
-  useEffect(() => {
-    localStorage.setItem("openbot_theme", theme);
-    document.body.dataset.theme = theme;
-  }, [theme]);
 
   const update = useMutation({
     mutationFn: () =>
@@ -67,18 +61,22 @@ export function SettingsPage(): JSX.Element {
   const mask = "********";
 
   return (
-    <section className="card">
-      <h3>Runtime Settings</h3>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+    <section className="card" style={{ maxWidth: 800 }}>
+      <h3>Settings</h3>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "var(--space-4)" }}>
         <div>
-          <label style={{ display: "block", marginBottom: 6 }}>Telegram mode</label>
+          <label style={{ display: "block", marginBottom: "var(--space-1)", fontSize: 13, color: "var(--text-muted)" }}>
+            Telegram mode
+          </label>
           <select className="select" value={mode} onChange={(e) => setMode(e.target.value)}>
             <option value="polling">polling</option>
             <option value="webhook">webhook</option>
           </select>
         </div>
         <div>
-          <label style={{ display: "block", marginBottom: 6 }}>Model max retries</label>
+          <label style={{ display: "block", marginBottom: "var(--space-1)", fontSize: 13, color: "var(--text-muted)" }}>
+            Model max retries
+          </label>
           <input
             className="input"
             type="number"
@@ -89,36 +87,32 @@ export function SettingsPage(): JSX.Element {
           />
         </div>
       </div>
-      <label style={{ display: "block", marginTop: 10 }}>
+
+      <label style={{ display: "flex", alignItems: "center", gap: "var(--space-2)", marginTop: "var(--space-4)", cursor: "pointer", color: "var(--text-muted)" }}>
         <input
           type="checkbox"
           checked={streaming}
           onChange={(e) => setStreaming(e.target.checked)}
-          style={{ marginRight: 8 }}
         />
         Enable Telegram streaming drafts
       </label>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginTop: 12 }}>
-        <div>
-          <h3 style={{ marginBottom: 6 }}>API Keys (masked)</h3>
-          <p className="mono">primary ({settings.data?.model.primary.api_key_env}): {mask}</p>
+
+      <div style={{ marginTop: "var(--space-6)", borderTop: "1px solid var(--border)", paddingTop: "var(--space-4)" }}>
+        <h3>API Keys</h3>
+        <div className="mono" style={{ color: "var(--text-dim)", display: "flex", flexDirection: "column", gap: "var(--space-1)" }}>
+          <span>primary ({settings.data?.model.primary.api_key_env}): {mask}</span>
           {settings.data?.model.fallback ? (
-            <p className="mono">fallback ({settings.data.model.fallback.api_key_env}): {mask}</p>
+            <span>fallback ({settings.data.model.fallback.api_key_env}): {mask}</span>
           ) : null}
-          <p className="mono">telegram ({settings.data?.telegram.bot_token_env}): {mask}</p>
-        </div>
-        <div>
-          <h3 style={{ marginBottom: 6 }}>Theme Preference</h3>
-          <select className="select" value={theme} onChange={(e) => setTheme(e.target.value)}>
-            <option value="light">Light</option>
-            <option value="paper">Paper</option>
-          </select>
+          <span>telegram ({settings.data?.telegram.bot_token_env}): {mask}</span>
         </div>
       </div>
-      <button className="btn" type="button" onClick={() => update.mutate()} style={{ marginTop: 12 }}>
+
+      <button className="btn" type="button" onClick={() => update.mutate()} style={{ marginTop: "var(--space-4)" }}>
         Save
       </button>
-      <pre className="mono" style={{ marginTop: 12, whiteSpace: "pre-wrap" }}>
+
+      <pre className="code-block" style={{ marginTop: "var(--space-4)" }}>
         {JSON.stringify(settings.data ?? {}, null, 2)}
       </pre>
     </section>

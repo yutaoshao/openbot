@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from "recharts";
 
-import { api } from "../lib/api";
+import { api, cssVar } from "../lib/api";
 
 type Overview = {
   total_requests: number;
@@ -36,6 +36,17 @@ type Tokens = {
   daily: Array<{ date: string; tokens_in: number; tokens_out: number }>;
 };
 
+const tooltipStyle = {
+  contentStyle: {
+    background: "var(--surface)",
+    border: "1px solid var(--border)",
+    borderRadius: 6,
+    color: "var(--text)",
+  },
+  labelStyle: { color: "var(--text-muted)" },
+  itemStyle: { color: "var(--text)" },
+};
+
 export function DashboardPage(): JSX.Element {
   const overview = useQuery({
     queryKey: ["metrics", "overview"],
@@ -66,10 +77,13 @@ export function DashboardPage(): JSX.Element {
     { name: "remaining", value: +Math.max(0, budget - (cost.data?.total_cost ?? 0)).toFixed(4) },
   ];
 
+  const isLoading = overview.isLoading || latency.isLoading || cost.isLoading;
+
   return (
     <div className="grid">
+      {/* Top stat cards */}
       <section className="card">
-        <h3>Total Requests (Today)</h3>
+        <h3>Requests (Today)</h3>
         <strong>{overview.data?.total_requests ?? 0}</strong>
       </section>
       <section className="card">
@@ -78,61 +92,74 @@ export function DashboardPage(): JSX.Element {
       </section>
       <section className="card">
         <h3>Avg Response</h3>
-        <strong>{latency.data?.avg_response_time ?? 0} ms</strong>
+        <strong>{latency.data?.avg_response_time ?? 0}ms</strong>
       </section>
       <section className="card">
         <h3>30d Cost</h3>
         <strong>${(cost.data?.total_cost ?? 0).toFixed(4)}</strong>
       </section>
+
+      {/* Latency snapshot */}
       <section className="card" style={{ gridColumn: "1 / -1" }}>
         <h3>Latency Snapshot</h3>
-        <p className="mono">
-          avg: {latency.data?.avg_response_time ?? 0}ms · p50: {latency.data?.p50 ?? 0}ms · p95: {latency.data?.p95 ?? 0}ms · p99: {latency.data?.p99 ?? 0}ms
+        <p className="mono" style={{ margin: 0, color: "var(--text-muted)" }}>
+          avg {latency.data?.avg_response_time ?? 0}ms
+          {" / "}p50 {latency.data?.p50 ?? 0}ms
+          {" / "}p95 {latency.data?.p95 ?? 0}ms
+          {" / "}p99 {latency.data?.p99 ?? 0}ms
         </p>
-        <p className="mono">
-          avg steps: {(overview.data?.avg_steps ?? 0).toFixed(2)} · avg turns: {(overview.data?.avg_turns ?? 0).toFixed(2)} · llm calls: {overview.data?.llm_api_calls ?? 0}
+        <p className="mono" style={{ margin: "var(--space-1) 0 0", color: "var(--text-dim)" }}>
+          steps {(overview.data?.avg_steps ?? 0).toFixed(1)}
+          {" / "}turns {(overview.data?.avg_turns ?? 0).toFixed(1)}
+          {" / "}llm calls {overview.data?.llm_api_calls ?? 0}
         </p>
       </section>
-      <section className="card" style={{ height: 260 }}>
-        <h3>Budget Progress</h3>
+
+      {/* Budget */}
+      <section className="card" style={{ minHeight: 240 }}>
+        <h3>Budget</h3>
         <div style={{ height: 140 }}>
           <ResponsiveContainer width="100%" height="100%">
             <PieChart>
-              <Pie data={pieData} dataKey="value" innerRadius={40} outerRadius={60}>
-                <Cell fill="#0f5be0" />
-                <Cell fill="#d7dfec" />
+              <Pie data={pieData} dataKey="value" innerRadius={40} outerRadius={56} strokeWidth={0}>
+                <Cell fill={cssVar("--chart-1")} />
+                <Cell fill={cssVar("--chart-3")} />
               </Pie>
-              <Tooltip />
+              <Tooltip {...tooltipStyle} />
             </PieChart>
           </ResponsiveContainer>
         </div>
         <div
           style={{
-            height: 10,
-            borderRadius: 999,
-            background: "var(--line)",
+            height: 4,
+            borderRadius: "var(--radius-full)",
+            background: "var(--border)",
             overflow: "hidden",
-            marginTop: 8,
+            marginTop: "var(--space-2)",
           }}
         >
-          <div style={{ width: `${(budgetUsed * 100).toFixed(1)}%`, height: "100%", background: "var(--brand)" }} />
+          <div style={{ width: `${(budgetUsed * 100).toFixed(1)}%`, height: "100%", background: "var(--text)" }} />
         </div>
-        <p className="mono" style={{ marginTop: 6 }}>
+        <p className="mono" style={{ margin: "var(--space-2) 0 0", color: "var(--text-muted)" }}>
           ${(cost.data?.total_cost ?? 0).toFixed(4)} / ${budget.toFixed(2)}
         </p>
       </section>
-      <section className="card" style={{ gridColumn: "1 / -1" }}>
+
+      {/* Token usage */}
+      <section className="card" style={{ gridColumn: "span 2" }}>
         <h3>7d Token Usage</h3>
-        <div style={{ display: "grid", gap: 4 }}>
+        <div style={{ display: "grid", gap: 2 }}>
           {(tokens.data?.daily ?? []).map((day) => (
-            <div key={day.date} style={{ display: "grid", gridTemplateColumns: "100px 1fr 1fr", gap: 8 }}>
-              <span className="mono">{day.date}</span>
-              <span>in: {day.tokens_in}</span>
-              <span>out: {day.tokens_out}</span>
+            <div key={day.date} className="mono" style={{ display: "grid", gridTemplateColumns: "90px 1fr 1fr", gap: "var(--space-2)", color: "var(--text-muted)" }}>
+              <span>{day.date}</span>
+              <span>in: {day.tokens_in.toLocaleString()}</span>
+              <span>out: {day.tokens_out.toLocaleString()}</span>
             </div>
           ))}
         </div>
       </section>
+
+      {/* Tool performance */}
       <section className="card" style={{ gridColumn: "1 / -1" }}>
         <h3>Tool Performance (7d)</h3>
         <table className="table">
@@ -146,14 +173,14 @@ export function DashboardPage(): JSX.Element {
           <tbody>
             {(tools.data?.tools ?? []).map((row) => (
               <tr key={row.tool}>
-                <td>{row.tool}</td>
+                <td className="mono">{row.tool}</td>
                 <td>{row.count}</td>
                 <td>{(row.error_rate * 100).toFixed(1)}%</td>
               </tr>
             ))}
           </tbody>
         </table>
-        {overview.isLoading || latency.isLoading || cost.isLoading || tools.isLoading ? <p>Loading metrics...</p> : null}
+        {isLoading ? <p style={{ color: "var(--text-muted)", marginTop: "var(--space-2)" }}>Loading...</p> : null}
       </section>
     </div>
   );

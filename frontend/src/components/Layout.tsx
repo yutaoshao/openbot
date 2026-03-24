@@ -1,10 +1,9 @@
-import { useState } from "react";
-import { NavLink, Outlet } from "react-router-dom";
-
-import { ChatBar } from "./chat-bar";
+import { useEffect, useState } from "react";
+import { NavLink, Outlet, useLocation } from "react-router-dom";
 
 const navItems = [
   ["/", "Dashboard"],
+  ["/chat", "Chat"],
   ["/conversations", "Conversations"],
   ["/memory", "Memory"],
   ["/tools", "Tools"],
@@ -13,40 +12,67 @@ const navItems = [
   ["/settings", "Settings"],
 ] as const;
 
+function getInitialTheme(): "light" | "dark" {
+  const stored = localStorage.getItem("openbot_theme");
+  if (stored === "dark" || stored === "light") return stored;
+  return "light";
+}
+
 export function Layout(): JSX.Element {
-  const [collapsed, setCollapsed] = useState(false);
+  const [theme, setTheme] = useState<"light" | "dark">(getInitialTheme);
+  const location = useLocation();
+  const isChatPage = location.pathname === "/chat";
+
+  useEffect(() => {
+    document.documentElement.setAttribute("data-theme", theme);
+    localStorage.setItem("openbot_theme", theme);
+  }, [theme]);
+
+  const toggleTheme = () => {
+    setTheme((prev) => (prev === "light" ? "dark" : "light"));
+  };
 
   return (
-    <div className={`app-shell${collapsed ? " sidebar-collapsed" : ""}`}>
+    <div className="app-shell">
       <aside className="sidebar">
         <div className="brand">OpenBot</div>
-        <button className="btn secondary" type="button" onClick={() => setCollapsed((prev) => !prev)} style={{ marginBottom: 10 }}>
-          {collapsed ? "Expand" : "Collapse"}
-        </button>
-        {navItems.map(([to, label]) => (
-          <NavLink
-            key={to}
-            to={to}
-            className={({ isActive }) => `nav-link${isActive ? " active" : ""}`}
-            end={to === "/"}
-          >
-            {collapsed ? label.slice(0, 1) : label}
-          </NavLink>
-        ))}
+        <nav>
+          {navItems.map(([to, label]) => (
+            <NavLink
+              key={to}
+              to={to}
+              className={({ isActive }) => `nav-link${isActive ? " active" : ""}`}
+              end={to === "/"}
+            >
+              {label}
+            </NavLink>
+          ))}
+        </nav>
+        <div className="sidebar-footer">
+          <span className="sidebar-version">v0.1.0</span>
+          <button className="theme-toggle" type="button" onClick={toggleTheme}>
+            {theme === "light" ? "Dark" : "Light"}
+          </button>
+        </div>
       </aside>
-      <main className="main">
-        <header className="topbar">
-          <div>
-            <h1 style={{ margin: 0 }}>Management Console</h1>
-            <p style={{ margin: "4px 0 0", color: "var(--muted)" }}>
-              Phase 4 dashboard and control plane
-            </p>
-          </div>
-          <span className="status-chip">Agent Online</span>
-        </header>
-        <Outlet />
-      </main>
-      <ChatBar />
+      {isChatPage ? (
+        <main className="main-full">
+          <Outlet />
+        </main>
+      ) : (
+        <main className="main">
+          <header className="topbar">
+            <div>
+              <h1>Management Console</h1>
+            </div>
+            <div className="status-indicator">
+              <span className="status-dot" />
+              Agent Online
+            </div>
+          </header>
+          <Outlet />
+        </main>
+      )}
     </div>
   );
 }
