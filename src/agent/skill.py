@@ -64,38 +64,72 @@ class SkillMeta:
 # ---------------------------------------------------------------------------
 
 class SkillRegistry:
-    """Discovers and manages skills from the filesystem.
+    """Discovers and manages skills from multiple filesystem locations.
 
-    Scans ``skills_dir`` for subdirectories containing ``SKILL.md``,
-    parses their frontmatter, and provides:
+    Scans skill directories in priority order (lowest first), so that
+    project-level skills override global ones when names collide.
 
+    Default scan order (lowest → highest priority):
+    1. ``~/.claude/skills/``       — user global
+    2. ``.claude/skills/``         — project-level (Claude Code convention)
+    3. ``.agents/skills/``         — project-level (generic agent convention)
+    4. ``data/skills/``            — project built-in skills
+
+    Provides:
     - ``get_metadata_prompt()`` — one-liner summaries for system prompt
     - ``load(name)`` — full SKILL.md content for the Agent
     - ``list_references(name)`` — files in ``references/``
     """
 
-    def __init__(self, skills_dir: str | Path = "data/skills") -> None:
-        self._dir = Path(skills_dir)
+    def __init__(
+        self,
+        skills_dirs: list[str | Path] | None = None,
+    ) -> None:
+        if skills_dirs is not None:
+            self._dirs = [Path(d) for d in skills_dirs]
+        else:
+            self._dirs = self._default_dirs()
         self._skills: dict[str, SkillMeta] = {}
         self._scan()
 
+    @staticmethod
+    def _default_dirs() -> list[Path]:
+        """Return default skill directories in priority order (low → high)."""
+        home = Path.home()
+        return [
+            home / ".claude" / "skills",   # user global
+            Path(".claude") / "skills",    # project Claude Code
+            Path(".agents") / "skills",    # project generic
+            Path("data") / "skills",       # project built-in
+        ]
+
     def _scan(self) -> None:
-        """Scan skills directory and parse all SKILL.md frontmatters."""
+        """Scan all skill directories and parse SKILL.md frontmatters.
+
+        Scanned in order: later directories override earlier ones
+        when skill names collide (higher priority wins).
+        """
         self._skills.clear()
 
-        if not self._dir.is_dir():
-            logger.info("skill.no_dir", path=str(self._dir))
-            return
-
-        for skill_md in sorted(self._dir.glob("*/SKILL.md")):
-            meta = self._parse_frontmatter(skill_md)
-            if meta:
-                self._skills[meta.name] = meta
-                logger.debug(
-                    "skill.discovered",
-                    name=meta.name,
-                    description=meta.description[:60],
-                )
+        for skills_dir in self._dirs:
+            if not skills_dir.is_dir():
+                continue
+            for skill_md in sorted(skills_dir.glob("*/SKILL.md")):
+                meta = self._parse_frontmatter(skill_md)
+                if meta:
+                    if meta.name in self._skills:
+                        logger.debug(
+                            "skill.override",
+                            name=meta.name,
+                            old_path=str(self._skills[meta.name].path),
+                            new_path=str(skill_md),
+                        )
+                    self._skills[meta.name] = meta
+                    logger.debug(
+                        "skill.discovered",
+                        name=meta.name,
+                        source=str(skills_dir),
+                    )
 
         logger.info("skill.scan_complete", count=len(self._skills))
 

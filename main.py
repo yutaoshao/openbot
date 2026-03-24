@@ -91,8 +91,8 @@ class Application:
             event_bus=self.event_bus,
         )
 
-        # Skill system (needed by LoadSkillTool)
-        self.skill_registry = SkillRegistry(skills_dir="data/skills")
+        # Skill system (scans ~/.claude/skills, .claude/skills, .agents/skills, data/skills)
+        self.skill_registry = SkillRegistry()
 
         self._register_builtin_tools()
 
