@@ -114,6 +114,9 @@ class LogConfig(BaseModel):
 
     level: str = "INFO"
     format: Literal["console", "json"] = "console"
+    file: str | None = None  # e.g. "data/logs/openbot.log"
+    max_bytes: int = 10 * 1024 * 1024  # 10 MB
+    backup_count: int = 5
 
 
 class AgentConfig(BaseModel):

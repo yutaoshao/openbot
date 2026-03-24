@@ -157,6 +157,17 @@ class ModelGateway:
                 try:
                     response = await provider.chat(messages, tools, **kwargs)
 
+                    logger.info(
+                        "llm_completed",
+                        surface="operational",
+                        provider=provider_key,
+                        model=response.model,
+                        token_in=response.usage.tokens_in,
+                        token_out=response.usage.tokens_out,
+                        cost=response.usage.cost,
+                        latency_ms=response.latency_ms,
+                    )
+
                     await self.event_bus.publish("model.request", {
                         "provider": provider_key,
                         "model": response.model,
@@ -172,7 +183,9 @@ class ModelGateway:
                     last_error = e
                     delay = self.config.retry_base_delay * (2 ** attempt)
                     logger.warning(
-                        "model_gateway.retry",
+                        "llm_requested",
+                        surface="operational",
+                        status="retry",
                         provider=provider_key,
                         attempt=attempt + 1,
                         max_retries=self.config.max_retries,
@@ -182,7 +195,12 @@ class ModelGateway:
                     if attempt < self.config.max_retries - 1:
                         await asyncio.sleep(delay)
 
-            logger.error("model_gateway.provider_exhausted", provider=provider_key)
+            logger.error(
+                "llm_requested",
+                surface="operational",
+                status="exhausted",
+                provider=provider_key,
+            )
 
         raise RuntimeError(f"All model providers failed: {last_error}") from last_error
 
@@ -208,14 +226,14 @@ class ModelGateway:
             for attempt in range(self.config.max_retries):
                 try:
                     stream = provider.chat_stream(messages, tools, **kwargs)
-                    # Yield first chunk to verify the connection is live,
-                    # then forward remaining chunks to the caller.
                     first = True
                     async for chunk in stream:
                         if first:
                             first = False
                             logger.info(
-                                "model_gateway.stream_started",
+                                "llm_requested",
+                                surface="operational",
+                                status="streaming",
                                 provider=provider_key,
                             )
                         yield chunk
@@ -225,7 +243,9 @@ class ModelGateway:
                     last_error = e
                     delay = self.config.retry_base_delay * (2 ** attempt)
                     logger.warning(
-                        "model_gateway.stream_retry",
+                        "llm_requested",
+                        surface="operational",
+                        status="stream_retry",
                         provider=provider_key,
                         attempt=attempt + 1,
                         max_retries=self.config.max_retries,
@@ -236,7 +256,9 @@ class ModelGateway:
                         await asyncio.sleep(delay)
 
             logger.error(
-                "model_gateway.stream_provider_exhausted",
+                "llm_requested",
+                surface="operational",
+                status="stream_exhausted",
                 provider=provider_key,
             )
 

@@ -28,6 +28,7 @@ from src.channels.types import MessageContent, StreamingAdapter
 from src.core.config import load_config
 from src.core.logging import get_logger, setup_logging
 from src.core.monitor import MetricsCollector
+from src.core.trace import trace_scope
 from src.infrastructure.database import Database
 from src.infrastructure.embedding import EmbeddingService, NullEmbeddingService
 from src.infrastructure.event_bus import EventBus
@@ -158,52 +159,50 @@ class Application:
         self.tool_registry.register(LoadSkillTool(self.skill_registry))
 
     async def _on_message_receive(self, data: dict[str, Any]) -> None:
-        """Handle incoming message: run agent and publish response.
-
-        Uses streaming path when the adapter supports it, otherwise
-        falls back to the non-streaming ``Agent.run()`` path.
-        """
+        """Handle incoming message: run agent and publish response."""
         message = data["message"]
         input_text = message.content.text
 
         if not input_text:
             return
 
-        logger.info(
-            "app.processing",
+        with trace_scope(
+            interaction_id=message.conversation_id,
             platform=message.platform,
-            sender=message.sender_id,
-            text_preview=input_text[:50],
-        )
-
-        adapter = self.msg_hub.get_adapter(message.platform)
-
-        try:
-            # Streaming: use it if the adapter supports it.
-            # For Telegram, honour the enable_streaming config flag;
-            # for all other adapters (web, etc.) always stream.
-            use_streaming = isinstance(adapter, StreamingAdapter) and (
-                message.platform != "telegram"
-                or self.config.telegram.enable_streaming
+        ):
+            logger.info(
+                "task_received",
+                surface="contextual",
+                sender=message.sender_id,
+                text_length=len(input_text),
             )
 
-            if use_streaming:
-                await self._handle_streaming(message, adapter)
-            else:
-                await self._handle_non_streaming(message)
+            adapter = self.msg_hub.get_adapter(message.platform)
 
-        except Exception:
-            logger.exception(
-                "app.agent_error",
-                conversation_id=message.conversation_id,
-            )
-            await self.event_bus.publish("agent.response", {
-                "platform": message.platform,
-                "target_id": message.conversation_id,
-                "content": MessageContent(
-                    text="Sorry, an error occurred. Please try again.",
-                ),
-            })
+            try:
+                use_streaming = isinstance(adapter, StreamingAdapter) and (
+                    message.platform != "telegram"
+                    or self.config.telegram.enable_streaming
+                )
+
+                if use_streaming:
+                    await self._handle_streaming(message, adapter)
+                else:
+                    await self._handle_non_streaming(message)
+
+            except Exception:
+                logger.exception(
+                    "task_failed",
+                    surface="operational",
+                    reason="unhandled_exception",
+                )
+                await self.event_bus.publish("agent.response", {
+                    "platform": message.platform,
+                    "target_id": message.conversation_id,
+                    "content": MessageContent(
+                        text="Sorry, an error occurred. Please try again.",
+                    ),
+                })
 
     async def _handle_streaming(
         self, message: Any, adapter: StreamingAdapter,
@@ -223,8 +222,6 @@ class Application:
 
         latency_ms = int((time.monotonic() - start) * 1000)
 
-        # Publish metrics-only event (NOT "agent.response"
-        # to avoid MsgHub double-delivery).
         await self.event_bus.publish("agent.metrics", {
             "platform": message.platform,
             "conversation_id": message.conversation_id,
@@ -232,9 +229,10 @@ class Application:
         })
 
         logger.info(
-            "app.streaming_complete",
-            platform=message.platform,
+            "task_finished",
+            surface="operational",
             latency_ms=latency_ms,
+            mode="streaming",
         )
 
     async def _handle_non_streaming(self, message: Any) -> None:
@@ -256,11 +254,13 @@ class Application:
         })
 
         logger.info(
-            "app.response_sent",
-            platform=message.platform,
+            "task_finished",
+            surface="operational",
             latency_ms=result.latency_ms,
-            tokens=f"{result.tokens_in}/{result.tokens_out}",
+            token_in=result.tokens_in,
+            token_out=result.tokens_out,
             cost=f"${result.cost:.4f}",
+            mode="non_streaming",
         )
 
     async def start(self) -> None:
@@ -402,7 +402,13 @@ def main() -> None:
     """Application entrypoint."""
     # Pre-load config for logging setup
     config = load_config()
-    setup_logging(level=config.log.level, fmt=config.log.format)
+    setup_logging(
+        level=config.log.level,
+        fmt=config.log.format,
+        log_file=config.log.file,
+        max_bytes=config.log.max_bytes,
+        backup_count=config.log.backup_count,
+    )
 
     app = Application()
 

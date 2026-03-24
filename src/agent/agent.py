@@ -2,16 +2,23 @@
 
 Implements the Think -> Decide -> Act -> Observe cycle.
 Supports both non-streaming (run) and streaming (run_stream) execution.
+
+All log events follow the AgentTrace three-surface taxonomy:
+- Cognitive: thought_step, decision_made
+- Operational: tool_called, tool_returned, llm_requested, llm_completed, task_finished
+- Contextual: task_received (emitted by Application layer)
 """
 
 from __future__ import annotations
 
+import json
 import time
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 from src.core.logging import get_logger
+from src.core.trace import TraceContext
 from src.infrastructure.model_gateway import StreamChunk
 
 if TYPE_CHECKING:
@@ -98,7 +105,6 @@ class Agent:
             if chunk.type == "text":
                 content += chunk.text
             elif chunk.type == "tool_status":
-                # tool_status carries tool_name + optional detail in text
                 tool_calls_made.append({"name": chunk.tool_name})
             elif chunk.type == "done":
                 model = chunk.model
@@ -126,13 +132,26 @@ class Agent:
         conversation_id: str = "",
         platform: str = "unknown",
     ) -> AsyncIterator[StreamChunk]:
-        """Execute the agent ReAct loop, yielding StreamChunks.
+        """Execute the agent ReAct loop, yielding StreamChunks."""
+        # Create trace context for this request
+        ctx = TraceContext(
+            interaction_id=conversation_id,
+            platform=platform,
+        )
+        with ctx:
+            async for chunk in self._run_stream_inner(
+                input_text, conversation_id, platform, ctx,
+            ):
+                yield chunk
 
-        Yields:
-            StreamChunk(type="text")        — text token from the model
-            StreamChunk(type="tool_status") — tool about to execute
-            StreamChunk(type="done")        — final metadata (usage, model)
-        """
+    async def _run_stream_inner(
+        self,
+        input_text: str,
+        conversation_id: str,
+        platform: str,
+        ctx: TraceContext,
+    ) -> AsyncIterator[StreamChunk]:
+        """Inner streaming loop with trace context active."""
         messages, tools = await self._prepare(
             input_text, conversation_id, platform,
         )
@@ -152,8 +171,18 @@ class Agent:
 
         while iterations < self.max_iterations:
             iterations += 1
+            ctx.iteration = iterations
+
+            # Cognitive: thought step
+            logger.info(
+                "thought_step",
+                surface="cognitive",
+                iteration=iterations,
+                max_iterations=self.max_iterations,
+            )
+
             accumulated_text = ""
-            collected_tool_calls: list[Any] = []  # ToolCall objects
+            collected_tool_calls: list[Any] = []
             iter_usage: Usage | None = None
 
             async for chunk in self.model_gateway.chat_stream(
@@ -161,7 +190,7 @@ class Agent:
             ):
                 if chunk.type == "text":
                     accumulated_text += chunk.text
-                    yield chunk  # pass through to caller
+                    yield chunk
                 elif chunk.type == "tool_call":
                     collected_tool_calls.append(chunk.tool_call)
                 elif chunk.type == "done":
@@ -174,14 +203,27 @@ class Agent:
                 total_tokens_out += iter_usage.tokens_out
                 total_cost += iter_usage.cost
 
-            # No tool calls: final text response
+            # Cognitive: decision — tools or final reply
             if not collected_tool_calls:
+                logger.info(
+                    "decision_made",
+                    surface="cognitive",
+                    decision="final_reply",
+                    iteration=iterations,
+                )
                 final_text = accumulated_text
                 break
 
-            # Has tool calls: execute and continue loop
+            logger.info(
+                "decision_made",
+                surface="cognitive",
+                decision="tool_calls",
+                tool_count=len(collected_tool_calls),
+                tools=[tc.name for tc in collected_tool_calls],
+                iteration=iterations,
+            )
+
             # Build assistant message for context
-            import json
             assistant_msg: dict[str, Any] = {"role": "assistant"}
             if accumulated_text:
                 assistant_msg["content"] = accumulated_text
@@ -203,7 +245,19 @@ class Agent:
             for tc in collected_tool_calls:
                 yield StreamChunk(type="tool_status", tool_name=tc.name)
 
+                tool_start = time.monotonic()
                 tool_result = await self._execute_tool(tc.name, tc.arguments)
+                tool_latency = int((time.monotonic() - tool_start) * 1000)
+
+                # Operational: tool_called + tool_returned
+                logger.info(
+                    "tool_called",
+                    surface="operational",
+                    tool=tc.name,
+                    status="error" if tool_result.is_error else "success",
+                    latency_ms=tool_latency,
+                    result_length=len(tool_result.content),
+                )
 
                 all_tool_calls.append({
                     "name": tc.name,
@@ -221,16 +275,15 @@ class Agent:
                     "iteration": iterations,
                 })
 
-                logger.info(
-                    "agent.tool_executed",
-                    tool=tc.name,
-                    is_error=tool_result.is_error,
-                    result_length=len(tool_result.content),
-                )
-
         else:
             # Max iterations reached
             final_text = "Task exceeded maximum iterations."
+            logger.warning(
+                "task_failed",
+                surface="operational",
+                reason="max_iterations",
+                iterations=iterations,
+            )
 
         # Post-loop: persist and compress
         await self._finalize(
@@ -240,7 +293,7 @@ class Agent:
             tokens_in=total_tokens_in,
             tokens_out=total_tokens_out,
             cost=total_cost,
-            latency_ms=0,  # caller computes actual latency
+            latency_ms=0,
             iterations=iterations,
             all_tool_calls=all_tool_calls,
         )
@@ -279,11 +332,7 @@ class Agent:
         conversation_id: str,
         platform: str,
     ) -> tuple[list[dict[str, Any]], list[dict[str, Any]] | None]:
-        """Build messages and tools for the ReAct loop.
-
-        Returns:
-            (messages, tools) tuple.
-        """
+        """Build messages and tools for the ReAct loop."""
         if self.conversation_manager and conversation_id:
             await self.conversation_manager.get_or_create_conversation(
                 conversation_id, platform, self.config.token_budget,
@@ -358,5 +407,11 @@ class Agent:
         try:
             return await tool.execute(arguments)
         except Exception as e:
-            logger.exception("agent.tool_error", tool=name)
+            logger.exception(
+                "tool_called",
+                surface="operational",
+                tool=name,
+                status="exception",
+                error=str(e),
+            )
             return ToolResult(content=f"Tool error: {e}", is_error=True)
