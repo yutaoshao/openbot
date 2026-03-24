@@ -84,6 +84,16 @@ class Application:
 
         # Tool layer
         self.tool_registry = ToolRegistry()
+
+        # Deep research engine (needed by DeepResearchTool)
+        self.deep_research = DeepResearch(
+            model_gateway=self.model_gateway,
+            event_bus=self.event_bus,
+        )
+
+        # Skill system (needed by LoadSkillTool)
+        self.skill_registry = SkillRegistry(skills_dir="data/skills")
+
         self._register_builtin_tools()
 
         # Memory layer
@@ -106,9 +116,6 @@ class Application:
             self.procedural_memory,
         )
 
-        # Skill system (progressive disclosure)
-        self.skill_registry = SkillRegistry(skills_dir="data/skills")
-
         # Core layer
         self.agent = Agent(
             model_gateway=self.model_gateway,
@@ -125,12 +132,6 @@ class Application:
             event_bus=self.event_bus,
             config=self.config.agent,
             tool_registry=self.tool_registry,
-        )
-
-        # Deep research engine
-        self.deep_research = DeepResearch(
-            model_gateway=self.model_gateway,
-            event_bus=self.event_bus,
         )
 
         # Application layer
