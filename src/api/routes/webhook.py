@@ -1,0 +1,97 @@
+"""Webhook routes for platform integrations (Telegram, Feishu).
+
+These endpoints receive push notifications from external platforms
+and feed them into the corresponding adapter for processing.
+"""
+
+from __future__ import annotations
+
+from typing import Any
+
+from fastapi import APIRouter, Request
+from fastapi.responses import JSONResponse
+
+from src.core.logging import get_logger
+
+logger = get_logger(__name__)
+
+router = APIRouter(prefix="/webhook", tags=["webhook"])
+
+
+# ---------------------------------------------------------------------------
+# Telegram webhook
+# ---------------------------------------------------------------------------
+
+@router.post("/telegram")
+async def telegram_webhook(request: Request) -> JSONResponse:
+    """Receive Telegram Bot API updates via webhook.
+
+    Telegram sends a JSON-serialized ``Update`` object.
+    We deserialise it and pass it to the python-telegram-bot Application
+    for processing through the same handler pipeline as polling mode.
+    """
+    telegram = getattr(request.app.state, "telegram", None)
+    if telegram is None:
+        return JSONResponse(
+            status_code=503,
+            content={"ok": False, "error": "Telegram adapter not available"},
+        )
+
+    try:
+        from telegram import Update
+
+        data = await request.json()
+        update = Update.de_json(data, telegram.app.bot)
+        if update:
+            await telegram.app.process_update(update)
+        return JSONResponse(content={"ok": True})
+    except Exception:
+        logger.exception("webhook.telegram_error")
+        return JSONResponse(
+            status_code=500,
+            content={"ok": False, "error": "Internal error"},
+        )
+
+
+# ---------------------------------------------------------------------------
+# Feishu webhook
+# ---------------------------------------------------------------------------
+
+@router.post("/feishu")
+async def feishu_webhook(request: Request) -> JSONResponse:
+    """Receive Feishu event callbacks.
+
+    Handles:
+    - URL verification challenge (returns challenge token)
+    - im.message.receive_v1 events (incoming messages)
+    """
+    feishu = getattr(request.app.state, "feishu", None)
+    if feishu is None:
+        return JSONResponse(
+            status_code=503,
+            content={"ok": False, "error": "Feishu adapter not available"},
+        )
+
+    try:
+        body: dict[str, Any] = await request.json()
+
+        # Verify token if configured
+        config = getattr(request.app.state, "config", None)
+        if config and config.feishu.verification_token:
+            header = body.get("header", {})
+            token = header.get("token", body.get("token", ""))
+            if token != config.feishu.verification_token:
+                logger.warning("webhook.feishu_token_mismatch")
+                return JSONResponse(
+                    status_code=403,
+                    content={"ok": False, "error": "Invalid token"},
+                )
+
+        result = await feishu.process_event(body)
+        return JSONResponse(content=result)
+    except Exception:
+        logger.exception("webhook.feishu_error")
+        return JSONResponse(
+            status_code=500,
+            content={"ok": False, "error": "Internal error"},
+        )

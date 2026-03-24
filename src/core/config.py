@@ -54,6 +54,7 @@ class TelegramConfig(BaseModel):
     mode: Literal["polling", "webhook"] = "polling"
     bot_token_env: str = "TELEGRAM_BOT_TOKEN"
     webhook_url: str | None = None
+    webhook_secret: str | None = None
     allowed_user_ids: list[int] = Field(default_factory=list)
     stream_throttle: float = 0.5  # seconds between draft updates
     enable_streaming: bool = False
@@ -62,6 +63,32 @@ class TelegramConfig(BaseModel):
     def bot_token(self) -> str:
         """Resolve bot token from environment variable."""
         return os.environ.get(self.bot_token_env, "")
+
+
+class FeishuConfig(BaseModel):
+    """Feishu (Lark) bot configuration."""
+
+    enabled: bool = False
+    app_id_env: str = "FEISHU_APP_ID"
+    app_secret_env: str = "FEISHU_APP_SECRET"
+    verification_token_env: str = "FEISHU_VERIFICATION_TOKEN"
+    encrypt_key_env: str = "FEISHU_ENCRYPT_KEY"
+
+    @property
+    def app_id(self) -> str:
+        return os.environ.get(self.app_id_env, "")
+
+    @property
+    def app_secret(self) -> str:
+        return os.environ.get(self.app_secret_env, "")
+
+    @property
+    def verification_token(self) -> str:
+        return os.environ.get(self.verification_token_env, "")
+
+    @property
+    def encrypt_key(self) -> str:
+        return os.environ.get(self.encrypt_key_env, "")
 
 
 class StorageConfig(BaseModel):
@@ -142,6 +169,7 @@ class AppConfig(BaseModel):
 
     model: ModelConfig = Field(default_factory=ModelConfig)
     telegram: TelegramConfig = Field(default_factory=TelegramConfig)
+    feishu: FeishuConfig = Field(default_factory=FeishuConfig)
     storage: StorageConfig = Field(default_factory=StorageConfig)
     api: ApiConfig = Field(default_factory=ApiConfig)
     log: LogConfig = Field(default_factory=LogConfig)

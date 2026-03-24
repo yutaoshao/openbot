@@ -52,19 +52,33 @@ class TelegramAdapter:
         logger.info("telegram.init", mode=config.mode)
 
     async def start(self) -> None:
-        """Start the Telegram bot in polling mode."""
+        """Start the Telegram bot (polling or webhook mode)."""
         logger.info("telegram.starting", mode=self.config.mode)
         await self.app.initialize()
         await self.app.start()
 
-        if self.config.mode == "polling":
+        if self.config.mode == "webhook":
+            # In webhook mode, set the webhook URL.
+            # Incoming updates are handled by the /webhook/telegram API route.
+            webhook_url = self.config.webhook_url
+            if not webhook_url:
+                logger.error("telegram.webhook_url_missing")
+                return
+            await self.app.bot.set_webhook(url=webhook_url)
+            logger.info("telegram.webhook_set", url=webhook_url)
+        else:
             await self.app.updater.start_polling(drop_pending_updates=True)
             logger.info("telegram.polling_started")
 
     async def stop(self) -> None:
         """Stop the Telegram bot gracefully."""
         logger.info("telegram.stopping")
-        if self.app.updater and self.app.updater.running:
+        if self.config.mode == "webhook":
+            try:
+                await self.app.bot.delete_webhook()
+            except TelegramError:
+                logger.warning("telegram.delete_webhook_failed")
+        elif self.app.updater and self.app.updater.running:
             await self.app.updater.stop()
         await self.app.stop()
         await self.app.shutdown()
@@ -116,7 +130,8 @@ class TelegramAdapter:
     async def send_message(self, chat_id: str, content: MessageContent) -> None:
         """Send a message back to Telegram (non-streaming)."""
         if content.text:
-            await self._send_final_message(chat_id, content.text)
+            html = md_to_telegram_html(content.text, partial=False)
+            await self._send_final_message(chat_id, html, parse_mode="HTML")
 
         for attachment in content.attachments:
             if attachment.type == "image" and isinstance(attachment.data, bytes):

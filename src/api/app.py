@@ -17,6 +17,7 @@ from src.api.routes.metrics import router as metrics_router
 from src.api.routes.schedules import router as schedules_router
 from src.api.routes.settings import router as settings_router
 from src.api.routes.tools import router as tools_router
+from src.api.routes.webhook import router as webhook_router
 from src.api.schemas import HealthResponse
 from src.api.websocket import router as websocket_router
 from src.core.logging import get_logger
@@ -60,6 +61,9 @@ def create_api_app(
     app.state.web_adapter = web_adapter
     app.state.tool_registry = tool_registry
     app.state.monitor = monitor
+    # Populated later by Application.start() for webhook routes
+    app.state.telegram = None
+    app.state.feishu = None
 
     cors_origins = config.api.cors_origins if config else ["*"]
     app.add_middleware(
@@ -92,6 +96,7 @@ def create_api_app(
     app.include_router(metrics_router)
     app.include_router(settings_router)
     app.include_router(websocket_router)
+    app.include_router(webhook_router)
 
     frontend_dist: Path | None = None
     frontend_index: Path | None = None
