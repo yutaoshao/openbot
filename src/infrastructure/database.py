@@ -23,7 +23,7 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 # Bump this when schema changes require migration
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 _SCHEMA_SQL = """\
 -- Schema version tracking
@@ -113,6 +113,28 @@ CREATE INDEX IF NOT EXISTS idx_metrics_event_name
     ON metrics(event_name);
 CREATE INDEX IF NOT EXISTS idx_metrics_timestamp
     ON metrics(timestamp);
+
+-- Logs (AgentTrace three-surface structured logs)
+CREATE TABLE IF NOT EXISTS logs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp TEXT NOT NULL,
+    level TEXT NOT NULL,
+    event TEXT NOT NULL,
+    surface TEXT,
+    trace_id TEXT,
+    interaction_id TEXT,
+    platform TEXT,
+    iteration INTEGER,
+    data TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_logs_timestamp ON logs(timestamp);
+CREATE INDEX IF NOT EXISTS idx_logs_trace_id ON logs(trace_id);
+CREATE INDEX IF NOT EXISTS idx_logs_interaction_id ON logs(interaction_id);
+CREATE INDEX IF NOT EXISTS idx_logs_event ON logs(event);
+CREATE INDEX IF NOT EXISTS idx_logs_surface ON logs(surface);
+CREATE INDEX IF NOT EXISTS idx_logs_level ON logs(level);
 
 -- Schedules
 CREATE TABLE IF NOT EXISTS schedules (

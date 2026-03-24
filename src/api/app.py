@@ -13,6 +13,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from src.api.routes.chat import router as chat_router
 from src.api.routes.conversations import router as conversations_router
 from src.api.routes.knowledge import router as knowledge_router
+from src.api.routes.logs import router as logs_router
 from src.api.routes.metrics import router as metrics_router
 from src.api.routes.schedules import router as schedules_router
 from src.api.routes.settings import router as settings_router
@@ -91,6 +92,7 @@ def create_api_app(
     app.include_router(chat_router)
     app.include_router(conversations_router)
     app.include_router(knowledge_router)
+    app.include_router(logs_router)
     app.include_router(tools_router)
     app.include_router(schedules_router)
     app.include_router(metrics_router)

@@ -26,7 +26,7 @@ from src.channels.adapters.web import WebAdapter
 from src.channels.hub import MsgHub
 from src.channels.types import MessageContent, StreamingAdapter
 from src.core.config import load_config
-from src.core.logging import get_logger, setup_logging
+from src.core.logging import disable_db_logging, enable_db_logging, get_logger, setup_logging
 from src.core.monitor import MetricsCollector
 from src.core.trace import trace_scope
 from src.infrastructure.database import Database
@@ -270,6 +270,9 @@ class Application:
         # Initialize database (creates dir, schema, vec extension)
         await self.database.initialize()
 
+        # Start DB log persistence
+        enable_db_logging(self.storage.logs)
+
         if self.config.api.enabled:
             self.api_app = create_api_app(
                 agent=self.agent,
@@ -350,6 +353,7 @@ class Application:
         if self.telegram:
             await self.telegram.stop()
 
+        disable_db_logging()
         await self.database.close()
 
         logger.info("app.stopped")

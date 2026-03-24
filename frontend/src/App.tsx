@@ -4,6 +4,7 @@ import { Layout } from "./components/Layout";
 import { ChatPage } from "./pages/chat";
 import { ConversationsPage } from "./pages/conversations";
 import { DashboardPage } from "./pages/dashboard";
+import { LogsPage } from "./pages/logs";
 import { MemoryPage } from "./pages/memory";
 import { MonitoringPage } from "./pages/monitoring";
 import { SchedulerPage } from "./pages/scheduler";
@@ -21,6 +22,7 @@ export default function App(): JSX.Element {
         <Route path="tools" element={<ToolsPage />} />
         <Route path="scheduler" element={<SchedulerPage />} />
         <Route path="monitoring" element={<MonitoringPage />} />
+        <Route path="logs" element={<LogsPage />} />
         <Route path="settings" element={<SettingsPage />} />
       </Route>
     </Routes>

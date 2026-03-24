@@ -765,6 +765,133 @@ class ScheduleRepo:
 
 
 # ---------------------------------------------------------------------------
+# LogRepo
+# ---------------------------------------------------------------------------
+
+_LOG_COLS = [
+    "id", "timestamp", "level", "event", "surface",
+    "trace_id", "interaction_id", "platform", "iteration", "data",
+]
+
+
+class LogRepo:
+    """CRUD for the ``logs`` table (AgentTrace structured logs)."""
+
+    def __init__(self, db: Database) -> None:
+        self._db = db
+
+    async def insert(
+        self,
+        timestamp: str,
+        level: str,
+        event: str,
+        surface: str | None = None,
+        trace_id: str | None = None,
+        interaction_id: str | None = None,
+        platform: str | None = None,
+        iteration: int | None = None,
+        data: str | None = None,
+    ) -> None:
+        """Insert a single log entry."""
+        async with self._db.get_connection() as conn:
+            await conn.execute(
+                """
+                INSERT INTO logs
+                    (timestamp, level, event, surface, trace_id,
+                     interaction_id, platform, iteration, data)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    timestamp, level, event, surface, trace_id,
+                    interaction_id, platform, iteration, data,
+                ),
+            )
+            await conn.commit()
+
+    async def query(
+        self,
+        *,
+        trace_id: str | None = None,
+        interaction_id: str | None = None,
+        surface: str | None = None,
+        level: str | None = None,
+        event: str | None = None,
+        since: str | None = None,
+        until: str | None = None,
+        limit: int = 200,
+        offset: int = 0,
+    ) -> list[dict[str, Any]]:
+        """Query logs with optional filters."""
+        clauses: list[str] = []
+        params: list[Any] = []
+
+        if trace_id:
+            clauses.append("trace_id = ?")
+            params.append(trace_id)
+        if interaction_id:
+            clauses.append("interaction_id = ?")
+            params.append(interaction_id)
+        if surface:
+            clauses.append("surface = ?")
+            params.append(surface)
+        if level:
+            clauses.append("level = ?")
+            params.append(level)
+        if event:
+            clauses.append("event = ?")
+            params.append(event)
+        if since:
+            clauses.append("timestamp >= ?")
+            params.append(since)
+        if until:
+            clauses.append("timestamp <= ?")
+            params.append(until)
+
+        where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
+        params.extend([limit, offset])
+
+        async with self._db.get_connection() as conn:
+            cursor = await conn.execute(
+                f"""
+                SELECT {', '.join(_LOG_COLS)} FROM logs
+                {where}
+                ORDER BY id DESC
+                LIMIT ? OFFSET ?
+                """,
+                params,
+            )
+            rows = await cursor.fetchall()
+        return [_row_to_dict(r, _LOG_COLS) for r in rows]
+
+    async def count(
+        self,
+        *,
+        since: str | None = None,
+        surface: str | None = None,
+        level: str | None = None,
+    ) -> int:
+        """Count log entries with optional filters."""
+        clauses: list[str] = []
+        params: list[Any] = []
+        if since:
+            clauses.append("timestamp >= ?")
+            params.append(since)
+        if surface:
+            clauses.append("surface = ?")
+            params.append(surface)
+        if level:
+            clauses.append("level = ?")
+            params.append(level)
+        where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
+        async with self._db.get_connection() as conn:
+            cursor = await conn.execute(
+                f"SELECT COUNT(*) FROM logs {where}", params,
+            )
+            row = await cursor.fetchone()
+        return row[0] if row else 0
+
+
+# ---------------------------------------------------------------------------
 # Storage facade
 # ---------------------------------------------------------------------------
 
@@ -779,3 +906,4 @@ class Storage:
         self.preferences = PreferenceRepo(db)
         self.metrics = MetricsRepo(db)
         self.schedules = ScheduleRepo(db)
+        self.logs = LogRepo(db)

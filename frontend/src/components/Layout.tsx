@@ -9,6 +9,7 @@ const navItems = [
   ["/tools", "Tools"],
   ["/scheduler", "Scheduler"],
   ["/monitoring", "Monitoring"],
+  ["/logs", "Logs"],
   ["/settings", "Settings"],
 ] as const;
 
