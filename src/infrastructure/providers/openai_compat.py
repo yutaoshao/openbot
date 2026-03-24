@@ -150,12 +150,13 @@ class OpenAICompatibleProvider:
         tc_accum: dict[int, dict[str, str]] = {}
         tokens_in = 0
         tokens_out = 0
+        accumulated_text = ""
 
         async for event in stream:
             # Usage chunk (sent at stream end when include_usage=True)
             if event.usage:
-                tokens_in = event.usage.prompt_tokens
-                tokens_out = event.usage.completion_tokens
+                tokens_in = event.usage.prompt_tokens or 0
+                tokens_out = event.usage.completion_tokens or 0
 
             if not event.choices:
                 continue
@@ -164,6 +165,7 @@ class OpenAICompatibleProvider:
 
             # Text delta
             if delta.content:
+                accumulated_text += delta.content
                 yield StreamChunk(type="text", text=delta.content)
 
             # Tool call delta
@@ -202,8 +204,23 @@ class OpenAICompatibleProvider:
                 tool_call=ToolCall(id=acc["id"], name=acc["name"], arguments=args),
             )
 
-        # Cost
+        # Cost — estimate tokens if the API didn't report usage
         latency_ms = int((time.monotonic() - start) * 1000)
+
+        if tokens_in == 0 and tokens_out == 0:
+            # Rough estimate: ~3 chars/token for mixed CJK/Latin
+            input_chars = sum(len(str(m.get("content", ""))) for m in messages)
+            tokens_in = max(1, input_chars // 3)
+            output_chars = len(accumulated_text)
+            for acc in tc_accum.values():
+                output_chars += len(acc.get("arguments", ""))
+            tokens_out = max(1, output_chars // 3)
+            logger.debug(
+                "openai_compat.usage_estimated",
+                tokens_in=tokens_in,
+                tokens_out=tokens_out,
+            )
+
         cost = (
             tokens_in * self.config.pricing_input
             + tokens_out * self.config.pricing_output

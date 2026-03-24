@@ -2,17 +2,13 @@
 
 from __future__ import annotations
 
-import pytest
-
 from src.agent.deep_research import (
     DeepResearch,
     Finding,
     ResearchReport,
-    SearchResult,
     TavilyResearchProvider,
     _deduplicate_sources,
 )
-
 
 # ---------------------------------------------------------------------------
 # TavilyResearchProvider._parse_search_results

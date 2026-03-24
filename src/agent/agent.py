@@ -18,6 +18,7 @@ if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
     from src.agent.conversation import ConversationManager
+    from src.agent.skill import SkillRegistry
     from src.core.config import AgentConfig
     from src.infrastructure.event_bus import EventBus
     from src.infrastructure.model_gateway import ModelGateway, Usage
@@ -62,6 +63,7 @@ class Agent:
         config: AgentConfig,
         tool_registry: ToolRegistry | None = None,
         conversation_manager: ConversationManager | None = None,
+        skill_registry: SkillRegistry | None = None,
     ) -> None:
         self.model_gateway = model_gateway
         self.event_bus = event_bus
@@ -69,6 +71,7 @@ class Agent:
         self.max_iterations = config.max_iterations
         self.tool_registry = tool_registry
         self.conversation_manager = conversation_manager
+        self.skill_registry = skill_registry
 
 
     async def run(
@@ -256,11 +259,19 @@ class Agent:
 
 
     def _build_system_prompt(self) -> str:
-        """Build system prompt with current context."""
+        """Build system prompt with current context and skill metadata."""
         template = self.config.system_prompt or DEFAULT_SYSTEM_PROMPT
-        return template.format(
+        prompt = template.format(
             date=datetime.now(UTC).strftime("%Y-%m-%d"),
         )
+
+        # Inject skill metadata (Layer 1: progressive disclosure)
+        if self.skill_registry:
+            skills_block = self.skill_registry.get_metadata_prompt()
+            if skills_block:
+                prompt += "\n\n" + skills_block
+
+        return prompt
 
     async def _prepare(
         self,

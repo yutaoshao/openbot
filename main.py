@@ -17,8 +17,10 @@ from src.agent.agent import Agent
 from src.agent.conversation import ConversationManager
 from src.agent.deep_research import DeepResearch
 from src.agent.scheduler import AgentScheduler
+from src.agent.skill import LoadSkillTool, SkillRegistry
 from src.agent.sub_agent import SubAgent
 from src.api import create_api_app
+from src.channels.adapters.feishu import FeishuAdapter
 from src.channels.adapters.telegram import TelegramAdapter
 from src.channels.adapters.web import WebAdapter
 from src.channels.hub import MsgHub
@@ -35,7 +37,13 @@ from src.infrastructure.storage import Storage
 from src.memory.episodic import EpisodicMemory
 from src.memory.procedural import ProceduralMemory
 from src.memory.semantic import SemanticMemory
-from src.tools.builtin import CodeExecutorTool, FileManagerTool, WebFetchTool, WebSearchTool
+from src.tools.builtin import (
+    CodeExecutorTool,
+    DeepResearchTool,
+    FileManagerTool,
+    WebFetchTool,
+    WebSearchTool,
+)
 from src.tools.registry import ToolRegistry
 
 logger = get_logger(__name__)
@@ -97,6 +105,9 @@ class Application:
             self.procedural_memory,
         )
 
+        # Skill system (progressive disclosure)
+        self.skill_registry = SkillRegistry(skills_dir="data/skills")
+
         # Core layer
         self.agent = Agent(
             model_gateway=self.model_gateway,
@@ -104,6 +115,7 @@ class Application:
             config=self.config.agent,
             tool_registry=self.tool_registry,
             conversation_manager=self.conversation_manager,
+            skill_registry=self.skill_registry,
         )
 
         # Sub-agent delegator (shared gateway, scoped tools)
@@ -123,10 +135,12 @@ class Application:
         # Application layer
         self.msg_hub = MsgHub(self.event_bus)
         self.telegram: TelegramAdapter | None = None
+        self.feishu: FeishuAdapter | None = None
         self.web_adapter = WebAdapter()
         self.scheduler: AgentScheduler | None = None
         self.monitor = MetricsCollector(self.storage, self.event_bus)
         self.api_server: _UvicornServerNoSignals | None = None
+        self.api_app: Any | None = None
         self.api_task: asyncio.Task[None] | None = None
 
         self.msg_hub.register_adapter("web", self.web_adapter)
@@ -140,6 +154,8 @@ class Application:
         self.tool_registry.register(WebFetchTool())
         self.tool_registry.register(CodeExecutorTool())
         self.tool_registry.register(FileManagerTool(workspace=Path("/Users/yutaoshao/Project/openbot")))
+        self.tool_registry.register(DeepResearchTool(self.deep_research))
+        self.tool_registry.register(LoadSkillTool(self.skill_registry))
 
     async def _on_message_receive(self, data: dict[str, Any]) -> None:
         """Handle incoming message: run agent and publish response.
@@ -163,7 +179,15 @@ class Application:
         adapter = self.msg_hub.get_adapter(message.platform)
 
         try:
-            if self.config.telegram.enable_streaming and isinstance(adapter, StreamingAdapter):
+            # Streaming: use it if the adapter supports it.
+            # For Telegram, honour the enable_streaming config flag;
+            # for all other adapters (web, etc.) always stream.
+            use_streaming = isinstance(adapter, StreamingAdapter) and (
+                message.platform != "telegram"
+                or self.config.telegram.enable_streaming
+            )
+
+            if use_streaming:
                 await self._handle_streaming(message, adapter)
             else:
                 await self._handle_non_streaming(message)
@@ -247,7 +271,7 @@ class Application:
         await self.database.initialize()
 
         if self.config.api.enabled:
-            api_app = create_api_app(
+            self.api_app = create_api_app(
                 agent=self.agent,
                 storage=self.storage,
                 config=self.config,
@@ -257,7 +281,7 @@ class Application:
                 monitor=self.monitor,
             )
             uvicorn_config = uvicorn.Config(
-                app=api_app,
+                app=self.api_app,
                 host=self.config.api.host,
                 port=self.config.api.port,
                 log_level=self.config.log.level.lower(),
@@ -273,12 +297,28 @@ class Application:
                 self.telegram = TelegramAdapter(self.config.telegram, self.msg_hub)
                 self.msg_hub.register_adapter("telegram", self.telegram)
                 await self.telegram.start()
-                logger.info("app.telegram_ready")
+                # Inject into API state for webhook route
+                if self.api_app:
+                    self.api_app.state.telegram = self.telegram
+                logger.info("app.telegram_ready", mode=self.config.telegram.mode)
             except Exception:
                 self.telegram = None
                 logger.exception("app.telegram_failed")
         else:
             logger.warning("app.telegram_skipped", reason="no bot token configured")
+
+        # Start Feishu adapter
+        if self.config.feishu.enabled and self.config.feishu.app_id:
+            try:
+                self.feishu = FeishuAdapter(self.config.feishu, self.msg_hub)
+                self.msg_hub.register_adapter("feishu", self.feishu)
+                await self.feishu.start()
+                if self.api_app:
+                    self.api_app.state.feishu = self.feishu
+                logger.info("app.feishu_ready")
+            except Exception:
+                self.feishu = None
+                logger.exception("app.feishu_failed")
 
         # Start scheduler
         self.scheduler = AgentScheduler(
@@ -303,6 +343,9 @@ class Application:
 
         if self.scheduler:
             await self.scheduler.stop()
+
+        if self.feishu:
+            await self.feishu.stop()
 
         if self.telegram:
             await self.telegram.stop()
