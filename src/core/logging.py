@@ -27,12 +27,12 @@ if TYPE_CHECKING:
 # ---------------------------------------------------------------------------
 
 _PII_PATTERNS = [
-    # Phone numbers (international)
-    (re.compile(r"\b(\+?\d{1,3}[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}\b"), "[PHONE]"),
+    # Phone numbers — require leading + or at least 10 consecutive digits with separators
+    (re.compile(r"\+\d{1,3}[-.\s]?\(?\d{2,4}\)?[-.\s]?\d{3,4}[-.\s]?\d{3,4}\b"), "[PHONE]"),
     # Email addresses
     (re.compile(r"\b[\w.+-]+@[\w-]+\.[\w.-]+\b"), "[EMAIL]"),
     # API keys / tokens (long hex or base64 strings)
-    (re.compile(r"\b(?:sk-|tok_|key_)[A-Za-z0-9_-]{20,}\b"), "[API_KEY]"),
+    (re.compile(r"\b(?:sk-|tok_|key_|Bearer\s)[A-Za-z0-9_-]{20,}\b"), "[API_KEY]"),
 ]
 
 
@@ -106,6 +106,12 @@ class _LogDBWriter:
     def stop(self) -> None:
         if self._task and not self._task.done():
             self._task.cancel()
+        # Schedule a final flush to drain remaining queued logs
+        try:
+            loop = asyncio.get_running_loop()
+            loop.create_task(self._flush())
+        except RuntimeError:
+            pass  # No running loop (shutdown)
 
     def enqueue(self, entry: dict[str, Any]) -> None:
         with contextlib.suppress(asyncio.QueueFull):
@@ -123,9 +129,10 @@ class _LogDBWriter:
                 batch.append(self._queue.get_nowait())
             except asyncio.QueueEmpty:
                 break
-        for entry in batch:
-            with contextlib.suppress(Exception):
-                await self._repo.insert(**entry)
+        if not batch:
+            return
+        with contextlib.suppress(Exception):
+            await self._repo.insert_batch(batch)
 
 
 def _persist_to_db(

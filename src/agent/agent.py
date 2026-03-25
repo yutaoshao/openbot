@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING, Any
 
 from src.core.logging import get_logger
 from src.core.trace import TraceContext
-from src.infrastructure.model_gateway import StreamChunk
+from src.infrastructure.model_gateway import StreamChunk, Usage
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -28,7 +28,7 @@ if TYPE_CHECKING:
     from src.agent.skill import SkillRegistry
     from src.core.config import AgentConfig
     from src.infrastructure.event_bus import EventBus
-    from src.infrastructure.model_gateway import ModelGateway, Usage
+    from src.infrastructure.model_gateway import ModelGateway
     from src.tools.registry import ToolRegistry, ToolResult
 
 logger = get_logger(__name__)
@@ -108,6 +108,7 @@ class Agent:
                 tool_calls_made.append({"name": chunk.tool_name})
             elif chunk.type == "done":
                 model = chunk.model
+                iterations = chunk.iterations
                 if chunk.usage:
                     total_tokens_in = chunk.usage.tokens_in
                     total_tokens_out = chunk.usage.tokens_out
@@ -298,7 +299,6 @@ class Agent:
             all_tool_calls=all_tool_calls,
         )
 
-        from src.infrastructure.model_gateway import Usage
 
         yield StreamChunk(
             type="done",
@@ -308,6 +308,7 @@ class Agent:
                 cost=total_cost,
             ),
             model=final_model,
+            iterations=iterations,
         )
 
 

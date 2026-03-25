@@ -8,6 +8,8 @@ Integrates with Feishu Open Platform via:
 
 from __future__ import annotations
 
+import json
+import re
 import time
 from typing import TYPE_CHECKING, Any
 
@@ -97,8 +99,6 @@ class FeishuAdapter:
             )
             return
 
-        import json
-
         try:
             content_data = json.loads(message.get("content", "{}"))
             text = content_data.get("text", "")
@@ -147,8 +147,6 @@ class FeishuAdapter:
 
     async def _send_text(self, chat_id: str, text: str) -> None:
         """Send a plain text message."""
-        import json
-
         await self._api_request(
             "POST",
             "/im/v1/messages",
@@ -162,8 +160,6 @@ class FeishuAdapter:
 
     async def _send_card(self, chat_id: str, text: str) -> None:
         """Send an interactive card message with markdown-like formatting."""
-        import json
-
         card = self._build_card(text)
         await self._api_request(
             "POST",
@@ -311,7 +307,5 @@ class FeishuAdapter:
     @staticmethod
     def _strip_mentions(text: str) -> str:
         """Remove @bot mentions from message text."""
-        import re
-
         # Feishu mentions look like @_user_1 or @_all
         return re.sub(r"@_\w+\s*", "", text).strip()

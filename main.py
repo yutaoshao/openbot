@@ -67,7 +67,10 @@ class Application:
         # Infrastructure layer
         self.event_bus = EventBus()
         self.model_gateway = ModelGateway(self.config.model, self.event_bus)
-        self.database = Database(self.config.storage)
+        self.database = Database(
+            self.config.storage,
+            embedding_dimensions=self.config.embedding.dimensions,
+        )
         self.storage = Storage(self.database)
 
         # Embedding service
@@ -155,7 +158,7 @@ class Application:
         self.tool_registry.register(WebSearchTool())
         self.tool_registry.register(WebFetchTool())
         self.tool_registry.register(CodeExecutorTool())
-        self.tool_registry.register(FileManagerTool(workspace=Path("/Users/yutaoshao/Project/openbot")))
+        self.tool_registry.register(FileManagerTool(workspace=Path(self.config.storage.workspace_path)))
         self.tool_registry.register(DeepResearchTool(self.deep_research))
         self.tool_registry.register(LoadSkillTool(self.skill_registry))
 

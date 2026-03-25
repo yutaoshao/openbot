@@ -103,11 +103,19 @@ class MetricsCollector:
         )
 
     async def get_overview(self, period: str = "today") -> dict[str, Any]:
-        response_events = await self._query_period(period=period, event_name="agent.response")
-        stream_events = await self._query_period(period=period, event_name="agent.metrics")
-        think_events = await self._query_period(period=period, event_name="agent.think.complete")
-        model_events = await self._query_period(period=period, event_name="model.request")
-        error_events = await self._query_period(period=period, event_name="app.agent_error")
+        start = self._period_start(period).isoformat()
+        grouped = await self.storage.metrics.query_multi(
+            event_names=[
+                "agent.response", "agent.metrics",
+                "agent.think.complete", "model.request", "app.agent_error",
+            ],
+            start=start,
+        )
+        response_events = grouped.get("agent.response", [])
+        stream_events = grouped.get("agent.metrics", [])
+        think_events = grouped.get("agent.think.complete", [])
+        model_events = grouped.get("model.request", [])
+        error_events = grouped.get("app.agent_error", [])
 
         total_requests = len(response_events) + len(stream_events)
         if think_events:

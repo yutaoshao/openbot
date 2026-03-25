@@ -6,6 +6,7 @@ and feed them into the corresponding adapter for processing.
 
 from __future__ import annotations
 
+import hmac
 from typing import Any
 
 from fastapi import APIRouter, Request
@@ -27,8 +28,8 @@ async def telegram_webhook(request: Request) -> JSONResponse:
     """Receive Telegram Bot API updates via webhook.
 
     Telegram sends a JSON-serialized ``Update`` object.
-    We deserialise it and pass it to the python-telegram-bot Application
-    for processing through the same handler pipeline as polling mode.
+    When a ``webhook_secret`` is configured, validates the
+    ``X-Telegram-Bot-Api-Secret-Token`` header before processing.
     """
     telegram = getattr(request.app.state, "telegram", None)
     if telegram is None:
@@ -36,6 +37,17 @@ async def telegram_webhook(request: Request) -> JSONResponse:
             status_code=503,
             content={"ok": False, "error": "Telegram adapter not available"},
         )
+
+    # Verify secret token if configured
+    config = getattr(request.app.state, "config", None)
+    if config and config.telegram.webhook_secret:
+        secret_header = request.headers.get("X-Telegram-Bot-Api-Secret-Token", "")
+        if not hmac.compare_digest(secret_header, config.telegram.webhook_secret):
+            logger.warning("webhook.telegram_secret_mismatch")
+            return JSONResponse(
+                status_code=403,
+                content={"ok": False, "error": "Invalid secret token"},
+            )
 
     try:
         from telegram import Update

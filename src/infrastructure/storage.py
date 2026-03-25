@@ -303,6 +303,23 @@ class MessageRepo:
             row = await cursor.fetchone()
         return row[0] if row else 0
 
+    async def count_by_conversations(
+        self, conversation_ids: list[str],
+    ) -> dict[str, int]:
+        """Return message counts for multiple conversations in one query."""
+        if not conversation_ids:
+            return {}
+        placeholders = ", ".join("?" for _ in conversation_ids)
+        async with self._db.get_connection() as conn:
+            cursor = await conn.execute(
+                f"SELECT conversation_id, COUNT(*) FROM messages "
+                f"WHERE conversation_id IN ({placeholders}) "
+                f"GROUP BY conversation_id",
+                conversation_ids,
+            )
+            rows = await cursor.fetchall()
+        return {row[0]: row[1] for row in rows}
+
 
 # ---------------------------------------------------------------------------
 # KnowledgeRepo
@@ -646,6 +663,45 @@ class MetricsRepo:
             for r in rows
         ]
 
+    async def query_multi(
+        self,
+        event_names: list[str],
+        start: str | None = None,
+        limit: int = 5000,
+    ) -> dict[str, list[dict[str, Any]]]:
+        """Query multiple event types in a single DB call.
+
+        Returns a dict keyed by event_name -> list of rows.
+        """
+        if not event_names:
+            return {}
+        placeholders = ", ".join("?" for _ in event_names)
+        clauses = [f"event_name IN ({placeholders})"]
+        params: list[Any] = list(event_names)
+        if start is not None:
+            clauses.append("timestamp >= ?")
+            params.append(start)
+        where = "WHERE " + " AND ".join(clauses)
+        params.append(limit)
+        async with self._db.get_connection() as conn:
+            cursor = await conn.execute(
+                f"""
+                SELECT {', '.join(_METRIC_COLS)} FROM metrics
+                {where}
+                ORDER BY timestamp DESC
+                LIMIT ?
+                """,
+                params,
+            )
+            rows = await cursor.fetchall()
+        result: dict[str, list[dict[str, Any]]] = {name: [] for name in event_names}
+        for r in rows:
+            row_dict = _row_to_dict(r, _METRIC_COLS, _METRIC_JSON_FIELDS)
+            ev = row_dict.get("event_name", "")
+            if ev in result:
+                result[ev].append(row_dict)
+        return result
+
 
 # ---------------------------------------------------------------------------
 # ScheduleRepo
@@ -805,6 +861,31 @@ class LogRepo:
                     timestamp, level, event, surface, trace_id,
                     interaction_id, platform, iteration, data,
                 ),
+            )
+            await conn.commit()
+
+    async def insert_batch(self, entries: list[dict[str, Any]]) -> None:
+        """Insert multiple log entries in a single transaction."""
+        if not entries:
+            return
+        async with self._db.get_connection() as conn:
+            await conn.executemany(
+                """
+                INSERT INTO logs
+                    (timestamp, level, event, surface, trace_id,
+                     interaction_id, platform, iteration, data)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                [
+                    (
+                        e.get("timestamp", ""), e.get("level", "info"),
+                        e.get("event", ""), e.get("surface"),
+                        e.get("trace_id"), e.get("interaction_id"),
+                        e.get("platform"), e.get("iteration"),
+                        e.get("data"),
+                    )
+                    for e in entries
+                ],
             )
             await conn.commit()
 

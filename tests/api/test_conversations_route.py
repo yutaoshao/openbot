@@ -36,6 +36,14 @@ class _FakeMessageRepo:
     async def count_by_conversation(self, conversation_id: str) -> int:
         return len(self._messages_by_conv.get(conversation_id, []))
 
+    async def count_by_conversations(
+        self, conversation_ids: list[str],
+    ) -> dict[str, int]:
+        return {
+            cid: len(self._messages_by_conv.get(cid, []))
+            for cid in conversation_ids
+        }
+
     async def get_by_conversation(
         self,
         conversation_id: str,

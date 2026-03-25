@@ -41,6 +41,31 @@ class ClaudeProvider:
         for msg in messages:
             if msg["role"] == "system":
                 system_text += msg["content"] + "\n"
+            elif msg["role"] == "assistant" and "tool_calls" in msg:
+                # Convert OpenAI-format assistant+tool_calls to Anthropic format
+                content: list[dict[str, Any]] = []
+                if msg.get("content"):
+                    content.append({"type": "text", "text": msg["content"]})
+                for tc in msg["tool_calls"]:
+                    import json as _json
+                    args = tc["function"]["arguments"]
+                    content.append({
+                        "type": "tool_use",
+                        "id": tc["id"],
+                        "name": tc["function"]["name"],
+                        "input": _json.loads(args) if isinstance(args, str) else args,
+                    })
+                conversation.append({"role": "assistant", "content": content})
+            elif msg["role"] == "tool":
+                # Convert OpenAI-format tool result to Anthropic format
+                conversation.append({
+                    "role": "user",
+                    "content": [{
+                        "type": "tool_result",
+                        "tool_use_id": msg.get("tool_call_id", ""),
+                        "content": msg.get("content", ""),
+                    }],
+                })
             else:
                 conversation.append(msg)
 
@@ -108,6 +133,29 @@ class ClaudeProvider:
         for msg in messages:
             if msg["role"] == "system":
                 system_text += msg["content"] + "\n"
+            elif msg["role"] == "assistant" and "tool_calls" in msg:
+                import json as _json
+                content: list[dict[str, Any]] = []
+                if msg.get("content"):
+                    content.append({"type": "text", "text": msg["content"]})
+                for tc in msg["tool_calls"]:
+                    args = tc["function"]["arguments"]
+                    content.append({
+                        "type": "tool_use",
+                        "id": tc["id"],
+                        "name": tc["function"]["name"],
+                        "input": _json.loads(args) if isinstance(args, str) else args,
+                    })
+                conversation.append({"role": "assistant", "content": content})
+            elif msg["role"] == "tool":
+                conversation.append({
+                    "role": "user",
+                    "content": [{
+                        "type": "tool_result",
+                        "tool_use_id": msg.get("tool_call_id", ""),
+                        "content": msg.get("content", ""),
+                    }],
+                })
             else:
                 conversation.append(msg)
 

@@ -58,9 +58,13 @@ async def list_conversations(
     else:
         rows = await storage.conversations.list_recent(limit=limit, offset=offset)
 
+    # Batch count to avoid N+1 queries
+    conv_ids = [row["id"] for row in rows]
+    counts = await storage.messages.count_by_conversations(conv_ids)
+
     result: list[ConversationSummary] = []
     for row in rows:
-        count = await storage.messages.count_by_conversation(row["id"])
+        count = counts.get(row["id"], 0)
         result.append(_to_conversation_summary(row, message_count=count))
     return result
 

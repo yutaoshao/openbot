@@ -8,6 +8,7 @@ archive) and the "search-before-act" pattern.
 from __future__ import annotations
 
 import uuid
+from collections import OrderedDict
 from typing import TYPE_CHECKING, Any
 
 from src.core.logging import get_logger
@@ -47,8 +48,9 @@ class ConversationManager:
         self._semantic = semantic_memory
         self._episodic = episodic_memory
         self._procedural = procedural_memory
-        # Active working memories keyed by conversation_id
-        self._working: dict[str, WorkingMemory] = {}
+        # Active working memories keyed by conversation_id (LRU eviction)
+        self._working: OrderedDict[str, WorkingMemory] = OrderedDict()
+        self._max_working: int = 100  # max concurrent working memories
 
     # ------------------------------------------------------------------
     # Conversation lifecycle
@@ -62,6 +64,8 @@ class ConversationManager:
     ) -> WorkingMemory:
         """Get existing or create new working memory for a conversation."""
         if conversation_id in self._working:
+            # Move to end (most recently used)
+            self._working.move_to_end(conversation_id)
             return self._working[conversation_id]
 
         # Check if conversation exists in DB
@@ -92,6 +96,12 @@ class ConversationManager:
             wm.add({"role": msg["role"], "content": msg["content"]})
 
         self._working[conversation_id] = wm
+
+        # Evict oldest if over limit
+        while len(self._working) > self._max_working:
+            evicted_id, _ = self._working.popitem(last=False)
+            logger.debug("conversation.evicted", conversation_id=evicted_id)
+
         return wm
 
     async def build_messages(
@@ -126,11 +136,10 @@ class ConversationManager:
         ]
 
         # Add working memory context (pinned + summary + history)
+        # Note: current user message is already in working memory
+        # (added by add_user_message before build_messages is called)
         wm_messages = wm.get_messages()
         messages.extend(wm_messages)
-
-        # Add current user input
-        messages.append({"role": "user", "content": user_input})
 
         return messages
 

@@ -69,13 +69,9 @@ class EventBus:
         logger.debug("event_bus.publish", event_name=event, handler_count=len(matched_handlers))
 
         # Fire all handlers concurrently, isolate failures
-        results = await asyncio.gather(
+        await asyncio.gather(
             *(self._safe_call(handler, event, data) for handler in matched_handlers),
-            return_exceptions=True,
         )
-        for result in results:
-            if isinstance(result, Exception):
-                logger.error("event_bus.handler_error", event_name=event, error=str(result))
 
     async def _safe_call(
         self, handler: EventHandler, event: str, data: dict[str, Any]
@@ -89,4 +85,3 @@ class EventBus:
                 event_name=event,
                 handler=handler.__qualname__,
             )
-            raise

@@ -84,6 +84,7 @@ class StreamChunk:
     tool_name: str = ""           # type="tool_status"
     usage: Usage | None = None    # type="done"
     model: str = ""               # type="done"
+    iterations: int = 0           # type="done" — ReAct loop iteration count
 
 
 @runtime_checkable

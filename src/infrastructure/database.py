@@ -23,7 +23,7 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 # Bump this when schema changes require migration
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 _SCHEMA_SQL = """\
 -- Schema version tracking
@@ -37,7 +37,7 @@ CREATE TABLE IF NOT EXISTS conversations (
     id TEXT PRIMARY KEY,
     title TEXT,
     summary TEXT,
-    core TEXT NOT NULL,
+    platform TEXT NOT NULL DEFAULT 'unknown',
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
@@ -45,7 +45,7 @@ CREATE TABLE IF NOT EXISTS conversations (
 -- Messages
 CREATE TABLE IF NOT EXISTS messages (
     id TEXT PRIMARY KEY,
-    conversation_id TEXT NOT NULL REFERENCES conversations(id),
+    conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
     role TEXT NOT NULL,
     content TEXT NOT NULL,
     model TEXT,
@@ -160,12 +160,12 @@ CREATE INDEX IF NOT EXISTS idx_schedules_next_run_at
 _VEC_TABLES_SQL = """\
 CREATE VIRTUAL TABLE IF NOT EXISTS knowledge_embeddings USING vec0(
     knowledge_id TEXT PRIMARY KEY,
-    embedding float[1536]
+    embedding float[{dimensions}]
 );
 
 CREATE VIRTUAL TABLE IF NOT EXISTS conversation_embeddings USING vec0(
     conversation_id TEXT PRIMARY KEY,
-    embedding float[1536]
+    embedding float[{dimensions}]
 );
 """
 
@@ -182,8 +182,9 @@ class Database:
         await db.close()
     """
 
-    def __init__(self, config: StorageConfig) -> None:
+    def __init__(self, config: StorageConfig, *, embedding_dimensions: int = 1024) -> None:
         self._db_path = config.db_path
+        self._embedding_dimensions = embedding_dimensions
         self._conn: aiosqlite.Connection | None = None
 
     @property
@@ -284,7 +285,8 @@ class Database:
 
         # Apply vec0 virtual tables (executescript resets the connection
         # state which drops loaded extensions, so use individual executes)
-        for statement in _VEC_TABLES_SQL.strip().split(";"):
+        vec_sql = _VEC_TABLES_SQL.format(dimensions=self._embedding_dimensions)
+        for statement in vec_sql.strip().split(";"):
             statement = statement.strip()
             if statement:
                 await conn.execute(statement)

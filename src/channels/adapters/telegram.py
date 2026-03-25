@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import random
 import time
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from telegram.error import TelegramError
 from telegram.ext import ApplicationBuilder, ContextTypes, MessageHandler, filters
@@ -64,7 +64,10 @@ class TelegramAdapter:
             if not webhook_url:
                 logger.error("telegram.webhook_url_missing")
                 return
-            await self.app.bot.set_webhook(url=webhook_url)
+            webhook_kwargs: dict[str, Any] = {"url": webhook_url}
+            if self.config.webhook_secret:
+                webhook_kwargs["secret_token"] = self.config.webhook_secret
+            await self.app.bot.set_webhook(**webhook_kwargs)
             logger.info("telegram.webhook_set", url=webhook_url)
         else:
             await self.app.updater.start_polling(drop_pending_updates=True)

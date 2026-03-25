@@ -13,6 +13,7 @@ Usage::
 
 from __future__ import annotations
 
+import json
 import time
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
@@ -523,8 +524,6 @@ class DeepResearch:
     @staticmethod
     def _parse_json_list(text: str, *, fallback_topic: str = "") -> list[str]:
         """Parse a JSON array of strings from LLM output."""
-        import json
-
         # Strip markdown code fences if present
         cleaned = text.strip()
         if cleaned.startswith("```"):
@@ -550,8 +549,6 @@ class DeepResearch:
     @staticmethod
     def _parse_findings(text: str, round_num: int) -> list[Finding]:
         """Parse LLM findings JSON into Finding objects."""
-        import json
-
         cleaned = text.strip()
         if cleaned.startswith("```"):
             lines = cleaned.split("\n")
