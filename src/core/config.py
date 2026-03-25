@@ -117,6 +117,7 @@ class LogConfig(BaseModel):
     file: str | None = None  # e.g. "data/logs/openbot.log"
     max_bytes: int = 10 * 1024 * 1024  # 10 MB
     backup_count: int = 5
+    otlp_endpoint: str | None = None  # e.g. "http://localhost:4317"
 
 
 class AgentConfig(BaseModel):

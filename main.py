@@ -28,7 +28,7 @@ from src.channels.types import MessageContent, StreamingAdapter
 from src.core.config import load_config
 from src.core.logging import disable_db_logging, enable_db_logging, get_logger, setup_logging
 from src.core.monitor import MetricsCollector
-from src.core.trace import trace_scope
+from src.core.trace import setup_tracing, trace_scope
 from src.infrastructure.database import Database
 from src.infrastructure.embedding import EmbeddingService, NullEmbeddingService
 from src.infrastructure.event_bus import EventBus
@@ -414,6 +414,13 @@ def main() -> None:
         max_bytes=config.log.max_bytes,
         backup_count=config.log.backup_count,
     )
+
+    # Initialize OTel tracing (optional, requires otlp_endpoint in config)
+    if config.log.otlp_endpoint:
+        setup_tracing(
+            service_name="openbot",
+            otlp_endpoint=config.log.otlp_endpoint,
+        )
 
     app = Application()
 

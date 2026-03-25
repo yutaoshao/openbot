@@ -84,11 +84,43 @@ function inlineFormat(text: string): string {
   return text;
 }
 
+// ---------- list grouping ----------
+
+type Block = { type: "html"; html: string } | { type: "li"; tag: "ul" | "ol"; html: string };
+
+function groupLists(blocks: Block[]): string[] {
+  const out: string[] = [];
+  let currentTag: "ul" | "ol" | null = null;
+
+  const flushList = () => {
+    if (currentTag) {
+      out.push(`</${currentTag}>`);
+      currentTag = null;
+    }
+  };
+
+  for (const block of blocks) {
+    if (block.type === "li") {
+      if (currentTag !== block.tag) {
+        flushList();
+        currentTag = block.tag;
+        out.push(`<${currentTag}>`);
+      }
+      out.push(block.html);
+    } else {
+      flushList();
+      out.push(block.html);
+    }
+  }
+  flushList();
+  return out;
+}
+
 // ---------- main ----------
 
 export function renderMarkdown(md: string): string {
   const lines = md.split("\n");
-  const out: string[] = [];
+  const blocks: Block[] = [];
 
   let inCode = false;
   let codeLang = "";
@@ -98,7 +130,7 @@ export function renderMarkdown(md: string): string {
 
   const flushTable = () => {
     if (tableRows.length > 0) {
-      out.push(renderTable(tableRows));
+      blocks.push({ type: "html", html: renderTable(tableRows) });
       tableRows = [];
     }
   };
@@ -106,7 +138,7 @@ export function renderMarkdown(md: string): string {
   const flushBlockquote = () => {
     if (bqLines.length > 0) {
       const inner = bqLines.map((l) => inlineFormat(esc(l))).join("<br>");
-      out.push(`<blockquote>${inner}</blockquote>`);
+      blocks.push({ type: "html", html: `<blockquote>${inner}</blockquote>` });
       bqLines = [];
     }
   };
@@ -123,7 +155,7 @@ export function renderMarkdown(md: string): string {
     }
     if (inCode) {
       if (/^```\s*$/.test(line)) {
-        out.push(renderCodeBlock(codeLang, codeLines));
+        blocks.push({ type: "html", html: renderCodeBlock(codeLang, codeLines) });
         inCode = false;
         codeLang = "";
         codeLines = [];
@@ -153,49 +185,50 @@ export function renderMarkdown(md: string): string {
     const hMatch = line.match(/^(#{1,6})\s+(.*)/);
     if (hMatch) {
       const level = hMatch[1].length;
-      out.push(`<h${level}>${inlineFormat(esc(hMatch[2]))}</h${level}>`);
+      blocks.push({ type: "html", html: `<h${level}>${inlineFormat(esc(hMatch[2]))}</h${level}>` });
       continue;
     }
 
     // Horizontal rule
     if (/^(-{3,}|\*{3,}|_{3,})\s*$/.test(line)) {
-      out.push("<hr>");
+      blocks.push({ type: "html", html: "<hr>" });
       continue;
     }
 
     // Unordered list item
     if (/^[-*]\s+/.test(line)) {
       const content = line.replace(/^[-*]\s+/, "");
-      out.push(`<li>${inlineFormat(esc(content))}</li>`);
+      blocks.push({ type: "li", tag: "ul", html: `<li>${inlineFormat(esc(content))}</li>` });
       continue;
     }
 
     // Ordered list item
     if (/^\d+\.\s+/.test(line)) {
       const content = line.replace(/^\d+\.\s+/, "");
-      out.push(`<li>${inlineFormat(esc(content))}</li>`);
+      blocks.push({ type: "li", tag: "ol", html: `<li>${inlineFormat(esc(content))}</li>` });
       continue;
     }
 
-    // Empty line — just a spacer, avoid stacking <br>s
+    // Empty line
     if (line.trim() === "") {
-      // Only add spacing if last output wasn't already a spacer
-      if (out.length > 0 && out[out.length - 1] !== '<div class="md-spacer"></div>') {
-        out.push('<div class="md-spacer"></div>');
+      const lastBlock = blocks[blocks.length - 1];
+      const lastHtml = lastBlock?.type === "html" ? lastBlock.html : "";
+      if (blocks.length > 0 && lastHtml !== '<div class="md-gap"></div>') {
+        blocks.push({ type: "html", html: '<div class="md-gap"></div>' });
       }
       continue;
     }
 
-    // Regular text line (no <p> wrapper to avoid excessive margins)
-    out.push(`<div>${inlineFormat(esc(line))}</div>`);
+    // Regular text
+    blocks.push({ type: "html", html: `<div>${inlineFormat(esc(line))}</div>` });
   }
 
   // Flush remaining
   flushTable();
   flushBlockquote();
   if (inCode) {
-    out.push(renderCodeBlock(codeLang, codeLines));
+    blocks.push({ type: "html", html: renderCodeBlock(codeLang, codeLines) });
   }
 
-  return out.join("\n");
+  return groupLists(blocks).join("\n");
 }

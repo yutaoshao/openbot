@@ -31,3 +31,6 @@ frontend/dist/
 # Misc
 *.log
 .superpowers/
+/.claude/
+/.agents/
+/skills-lock.json

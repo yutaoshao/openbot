@@ -94,7 +94,6 @@ a {
   display: grid;
   grid-template-columns: 200px 1fr;
   height: 100vh;
-  overflow: hidden;
 }
 
 /* -- Sidebar -------------------------------------------------------------- */
@@ -106,7 +105,10 @@ a {
   display: flex;
   flex-direction: column;
   gap: var(--space-1);
+  height: 100vh;
   overflow-y: auto;
+  position: sticky;
+  top: 0;
 }
 
 .brand {
@@ -170,6 +172,7 @@ a {
 .main {
   padding: var(--space-6);
   min-width: 0;
+  max-height: 100vh;
   overflow-y: auto;
 }
 
@@ -179,6 +182,7 @@ a {
   min-width: 0;
   display: flex;
   flex-direction: column;
+  height: 100vh;
   overflow: hidden;
 }
 
@@ -300,17 +304,22 @@ a {
   margin: 0 0 var(--space-1);
 }
 
-.chat-bubble-content div {
+.chat-bubble-content > div {
   margin: 0;
 }
 
-.chat-bubble-content .md-spacer {
-  height: var(--space-3);
+.chat-bubble-content .md-gap {
+  height: var(--space-2);
+}
+
+.chat-bubble-content ul,
+.chat-bubble-content ol {
+  margin: var(--space-1) 0;
+  padding-left: var(--space-6);
 }
 
 .chat-bubble-content li {
-  margin-left: var(--space-4);
-  margin-bottom: var(--space-1);
+  margin-bottom: 2px;
 }
 
 .chat-bubble-content pre {
@@ -537,7 +546,6 @@ button {
 
 .chat-bubble-content {
   line-height: 1.6;
-  white-space: pre-wrap;
   word-break: break-word;
 }
 
