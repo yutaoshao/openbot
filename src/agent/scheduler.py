@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
@@ -19,6 +20,7 @@ from src.core.logging import get_logger
 if TYPE_CHECKING:
     from src.agent.agent import Agent
     from src.channels.hub import MsgHub
+    from src.core.config import SchedulerConfig
     from src.infrastructure.event_bus import EventBus
     from src.infrastructure.storage import Storage
 
@@ -39,12 +41,21 @@ class AgentScheduler:
         agent: Agent,
         event_bus: EventBus,
         msg_hub: MsgHub,
+        config: SchedulerConfig | None = None,
     ) -> None:
         self._storage = storage
         self._agent = agent
         self._event_bus = event_bus
         self._msg_hub = msg_hub
-        self._scheduler = AsyncIOScheduler(timezone="UTC")
+        self._timezone = self._resolve_timezone(config.timezone if config else "")
+        self._scheduler = AsyncIOScheduler(timezone=self._timezone)
+
+    @property
+    def timezone_name(self) -> str:
+        """Return a human-readable scheduler timezone label."""
+        if isinstance(self._timezone, ZoneInfo):
+            return self._timezone.key
+        return str(self._timezone)
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -57,7 +68,11 @@ class AgentScheduler:
             self._add_job(sched)
 
         self._scheduler.start()
-        logger.info("scheduler.started", active_jobs=len(active))
+        logger.info(
+            "scheduler.started",
+            active_jobs=len(active),
+            timezone=self.timezone_name,
+        )
 
     async def stop(self) -> None:
         """Gracefully shut down the scheduler."""
@@ -68,13 +83,14 @@ class AgentScheduler:
     # Runtime management (called by REST API / Application)
     # ------------------------------------------------------------------
 
-    async def add_schedule(
+    async def create_schedule(
         self,
         name: str,
         prompt: str,
         cron: str,
         target_platform: str | None = None,
         target_id: str | None = None,
+        status: str = "active",
     ) -> dict[str, Any]:
         """Create a new schedule, persist it, and register the job."""
         next_run = self._compute_next_run(cron)
@@ -84,43 +100,109 @@ class AgentScheduler:
             cron=cron,
             target_platform=target_platform,
             target_id=target_id,
-            status="active",
-            next_run_at=next_run,
+            status=status,
+            next_run_at=next_run if status == "active" else None,
         )
-        self._add_job(sched)
-        logger.info("scheduler.schedule_added", name=name, cron=cron)
+        if status == "active":
+            self._add_job(sched)
+        logger.info(
+            "scheduler.schedule_added",
+            name=name,
+            cron=cron,
+            status=status,
+            timezone=self.timezone_name,
+        )
         return sched
 
-    async def remove_schedule(self, schedule_id: str) -> None:
+    async def add_schedule(
+        self,
+        name: str,
+        prompt: str,
+        cron: str,
+        target_platform: str | None = None,
+        target_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Backward-compatible alias for creating an active schedule."""
+        return await self.create_schedule(
+            name=name,
+            prompt=prompt,
+            cron=cron,
+            target_platform=target_platform,
+            target_id=target_id,
+            status="active",
+        )
+
+    async def list_schedules(
+        self,
+        *,
+        status: str | None = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[dict[str, Any]]:
+        """List schedules from storage."""
+        return await self._storage.schedules.list_all(
+            status=status,
+            limit=limit,
+            offset=offset,
+        )
+
+    async def get_schedule(self, schedule_id: str) -> dict[str, Any] | None:
+        """Fetch a single schedule from storage."""
+        return await self._storage.schedules.get(schedule_id)
+
+    async def update_schedule(self, schedule_id: str, **fields: Any) -> dict[str, Any] | None:
+        """Update a schedule and keep the in-memory scheduler in sync."""
+        existing = await self._storage.schedules.get(schedule_id)
+        if existing is None:
+            return None
+
+        merged = {**existing, **fields}
+        status = merged.get("status", existing["status"])
+        cron = merged.get("cron", existing["cron"])
+        next_run_at = self._compute_next_run(cron) if status == "active" else None
+
+        update_fields = dict(fields)
+        update_fields["next_run_at"] = next_run_at
+        updated = await self._storage.schedules.update(
+            schedule_id,
+            **update_fields,
+        )
+        if updated is None:
+            return None
+
+        if status == "active":
+            self._add_job(updated)
+        else:
+            self._remove_job(schedule_id)
+
+        logger.info(
+            "scheduler.schedule_updated",
+            schedule_id=schedule_id,
+            status=status,
+            cron=cron,
+        )
+        return updated
+
+    async def delete_schedule(self, schedule_id: str) -> None:
         """Remove a schedule from DB and APScheduler."""
-        job_id = f"schedule_{schedule_id}"
-        if self._scheduler.get_job(job_id):
-            self._scheduler.remove_job(job_id)
+        self._remove_job(schedule_id)
         await self._storage.schedules.delete(schedule_id)
         logger.info("scheduler.schedule_removed", schedule_id=schedule_id)
 
+    async def remove_schedule(self, schedule_id: str) -> None:
+        """Backward-compatible alias for deleting a schedule."""
+        await self.delete_schedule(schedule_id)
+
     async def pause_schedule(self, schedule_id: str) -> None:
         """Pause a schedule (set status to 'paused')."""
-        job_id = f"schedule_{schedule_id}"
-        if self._scheduler.get_job(job_id):
-            self._scheduler.pause_job(job_id)
-        await self._storage.schedules.update(schedule_id, status="paused")
+        await self.update_schedule(schedule_id, status="paused")
         logger.info("scheduler.schedule_paused", schedule_id=schedule_id)
 
     async def resume_schedule(self, schedule_id: str) -> None:
         """Resume a paused schedule."""
-        sched = await self._storage.schedules.get(schedule_id)
-        if sched is None:
-            return
-        job_id = f"schedule_{schedule_id}"
-        job = self._scheduler.get_job(job_id)
-        if job:
-            self._scheduler.resume_job(job_id)
-        else:
-            sched["status"] = "active"
-            self._add_job(sched)
-        await self._storage.schedules.update(schedule_id, status="active")
-        logger.info("scheduler.schedule_resumed", schedule_id=schedule_id)
+        updated = await self.update_schedule(schedule_id, status="active")
+        if updated is not None:
+            logger.info("scheduler.schedule_resumed", schedule_id=schedule_id)
 
 
     async def _execute_schedule(self, schedule_id: str) -> None:
@@ -200,7 +282,7 @@ class AgentScheduler:
         if self._scheduler.get_job(job_id):
             self._scheduler.remove_job(job_id)
 
-        trigger = CronTrigger.from_crontab(sched["cron"])
+        trigger = CronTrigger.from_crontab(sched["cron"], timezone=self._timezone)
         self._scheduler.add_job(
             self._execute_schedule,
             trigger=trigger,
@@ -210,12 +292,32 @@ class AgentScheduler:
             replace_existing=True,
         )
 
-    @staticmethod
-    def _compute_next_run(cron_expr: str) -> str | None:
+    def _remove_job(self, schedule_id: str) -> None:
+        """Remove a registered APScheduler job if it exists."""
+        job_id = f"schedule_{schedule_id}"
+        if self._scheduler.get_job(job_id):
+            self._scheduler.remove_job(job_id)
+
+    def _compute_next_run(self, cron_expr: str) -> str | None:
         """Compute the next fire time for a cron expression."""
         try:
-            trigger = CronTrigger.from_crontab(cron_expr)
-            next_fire = trigger.get_next_fire_time(None, datetime.now(UTC))
+            trigger = CronTrigger.from_crontab(cron_expr, timezone=self._timezone)
+            next_fire = trigger.get_next_fire_time(
+                None,
+                datetime.now(self._timezone),
+            )
             return next_fire.isoformat() if next_fire else None
         except Exception:
             return None
+
+    @staticmethod
+    def _resolve_timezone(timezone_name: str):
+        """Resolve configured timezone, falling back to the host local timezone."""
+        if timezone_name:
+            try:
+                return ZoneInfo(timezone_name)
+            except ZoneInfoNotFoundError:
+                logger.warning("scheduler.invalid_timezone", timezone=timezone_name)
+
+        local_tz = datetime.now().astimezone().tzinfo
+        return local_tz or UTC

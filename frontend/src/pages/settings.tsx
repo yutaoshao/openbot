@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
+import { useI18n, type Language } from "../i18n";
 import { api } from "../lib/api";
 
 type Settings = {
@@ -25,6 +26,7 @@ type Settings = {
 
 export function SettingsPage(): JSX.Element {
   const qc = useQueryClient();
+  const { language, setLanguage, t } = useI18n();
   const [streaming, setStreaming] = useState(false);
   const [mode, setMode] = useState("polling");
   const [maxRetries, setMaxRetries] = useState(3);
@@ -62,11 +64,24 @@ export function SettingsPage(): JSX.Element {
 
   return (
     <section className="card" style={{ maxWidth: 800 }}>
-      <h3>Settings</h3>
+      <h3>{t("settings.title")}</h3>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "var(--space-4)" }}>
         <div>
           <label style={{ display: "block", marginBottom: "var(--space-1)", fontSize: 13, color: "var(--text-muted)" }}>
-            Telegram mode
+            {t("settings.language")}
+          </label>
+          <select
+            className="select"
+            value={language}
+            onChange={(e) => setLanguage(e.target.value as Language)}
+          >
+            <option value="zh-CN">{t("settings.language.zh-CN")}</option>
+            <option value="en-US">{t("settings.language.en-US")}</option>
+          </select>
+        </div>
+        <div>
+          <label style={{ display: "block", marginBottom: "var(--space-1)", fontSize: 13, color: "var(--text-muted)" }}>
+            {t("settings.telegramMode")}
           </label>
           <select className="select" value={mode} onChange={(e) => setMode(e.target.value)}>
             <option value="polling">polling</option>
@@ -75,7 +90,7 @@ export function SettingsPage(): JSX.Element {
         </div>
         <div>
           <label style={{ display: "block", marginBottom: "var(--space-1)", fontSize: 13, color: "var(--text-muted)" }}>
-            Model max retries
+            {t("settings.modelMaxRetries")}
           </label>
           <input
             className="input"
@@ -94,22 +109,22 @@ export function SettingsPage(): JSX.Element {
           checked={streaming}
           onChange={(e) => setStreaming(e.target.checked)}
         />
-        Enable Telegram streaming drafts
+        {t("settings.enableStreaming")}
       </label>
 
       <div style={{ marginTop: "var(--space-6)", borderTop: "1px solid var(--border)", paddingTop: "var(--space-4)" }}>
-        <h3>API Keys</h3>
+        <h3>{t("settings.apiKeys")}</h3>
         <div className="mono" style={{ color: "var(--text-dim)", display: "flex", flexDirection: "column", gap: "var(--space-1)" }}>
-          <span>primary ({settings.data?.model.primary.api_key_env}): {mask}</span>
+          <span>{t("settings.primary")} ({settings.data?.model.primary.api_key_env}): {mask}</span>
           {settings.data?.model.fallback ? (
-            <span>fallback ({settings.data.model.fallback.api_key_env}): {mask}</span>
+            <span>{t("settings.fallback")} ({settings.data.model.fallback.api_key_env}): {mask}</span>
           ) : null}
-          <span>telegram ({settings.data?.telegram.bot_token_env}): {mask}</span>
+          <span>{t("settings.telegram")} ({settings.data?.telegram.bot_token_env}): {mask}</span>
         </div>
       </div>
 
       <button className="btn" type="button" onClick={() => update.mutate()} style={{ marginTop: "var(--space-4)" }}>
-        Save
+        {t("settings.save")}
       </button>
 
       <pre className="code-block" style={{ marginTop: "var(--space-4)" }}>

@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
+import { useI18n } from "../i18n";
 import { api } from "../lib/api";
 
 type Conversation = {
@@ -19,6 +20,7 @@ type Detail = {
 };
 
 export function ConversationsPage(): JSX.Element {
+  const { t, formatDateTime, formatNumber } = useI18n();
   const [query, setQuery] = useState("");
   const [platformFilter, setPlatformFilter] = useState("all");
   const [selectedId, setSelectedId] = useState<string>("");
@@ -57,13 +59,20 @@ export function ConversationsPage(): JSX.Element {
     return ["all", ...Array.from(set)];
   }, [list.data]);
 
+  const roleLabel = (role: string) => {
+    if (role === "user" || role === "assistant") {
+      return t(`chat.role.${role}`);
+    }
+    return role;
+  };
+
   return (
     <div className="grid" style={{ gridTemplateColumns: "320px 1fr" }}>
       <section className="card">
-        <h3>Conversations</h3>
+        <h3>{t("conversations.title")}</h3>
         <input
           className="input"
-          placeholder="Search..."
+          placeholder={t("conversations.search")}
           value={query}
           onChange={(e) => setQuery(e.target.value)}
         />
@@ -75,7 +84,7 @@ export function ConversationsPage(): JSX.Element {
         >
           {platforms.map((item) => (
             <option key={item} value={item}>
-              {item}
+              {item === "all" ? t("conversations.allPlatforms") : item}
             </option>
           ))}
         </select>
@@ -100,37 +109,43 @@ export function ConversationsPage(): JSX.Element {
                 {item.title || item.id.slice(0, 10)}
               </div>
               <div className="mono" style={{ color: "var(--text-dim)", marginTop: 2 }}>
-                {item.platform} / {item.message_count} msgs
+                {item.platform} / {t("conversations.messages", { count: formatNumber(item.message_count) })}
               </div>
             </div>
           ))}
         </div>
       </section>
       <section className="card">
-        <h3>Detail</h3>
-        {!selectedId ? <p style={{ color: "var(--text-muted)" }}>Select a conversation.</p> : null}
+        <h3>{t("conversations.detail")}</h3>
+        {!selectedId ? <p style={{ color: "var(--text-muted)" }}>{t("conversations.selectPrompt")}</p> : null}
         {detail.data ? (
           <>
             <p className="mono" style={{ margin: "0 0 var(--space-1)", color: "var(--text-dim)" }}>
               {detail.data.conversation.id}
             </p>
             <p className="mono" style={{ margin: "0 0 var(--space-3)", color: "var(--text-muted)" }}>
-              {detail.data.conversation.platform} / {new Date(detail.data.conversation.updated_at).toLocaleString()}
+              {t("conversations.updatedAt", {
+                platform: detail.data.conversation.platform,
+                time: formatDateTime(detail.data.conversation.updated_at, {
+                  dateStyle: "medium",
+                  timeStyle: "short",
+                }),
+              })}
             </p>
             <button className="btn danger" onClick={() => remove.mutate(selectedId)} type="button">
-              Delete
+              {t("memory.delete")}
             </button>
             <table className="table" style={{ marginTop: "var(--space-3)" }}>
               <thead>
                 <tr>
-                  <th style={{ width: 80 }}>Role</th>
-                  <th>Message</th>
+                  <th style={{ width: 80 }}>{t("conversations.table.role")}</th>
+                  <th>{t("conversations.table.message")}</th>
                 </tr>
               </thead>
               <tbody>
                 {detail.data.messages.map((msg) => (
                   <tr key={msg.id}>
-                    <td className="mono" style={{ color: msg.role === "user" ? "var(--text)" : "var(--text-muted)" }}>{msg.role}</td>
+                    <td className="mono" style={{ color: msg.role === "user" ? "var(--text)" : "var(--text-muted)" }}>{roleLabel(msg.role)}</td>
                     <td style={{ whiteSpace: "pre-wrap" }}>{msg.content}</td>
                   </tr>
                 ))}

@@ -1,16 +1,18 @@
 import { useEffect, useState } from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
 
+import { useI18n } from "../i18n";
+
 const navItems = [
-  ["/", "Dashboard"],
-  ["/chat", "Chat"],
-  ["/conversations", "Conversations"],
-  ["/memory", "Memory"],
-  ["/tools", "Tools"],
-  ["/scheduler", "Scheduler"],
-  ["/monitoring", "Monitoring"],
-  ["/logs", "Logs"],
-  ["/settings", "Settings"],
+  ["/", "nav.dashboard"],
+  ["/chat", "nav.chat"],
+  ["/conversations", "nav.conversations"],
+  ["/memory", "nav.memory"],
+  ["/tools", "nav.tools"],
+  ["/scheduler", "nav.scheduler"],
+  ["/monitoring", "nav.monitoring"],
+  ["/logs", "nav.logs"],
+  ["/settings", "nav.settings"],
 ] as const;
 
 function getInitialTheme(): "light" | "dark" {
@@ -21,6 +23,7 @@ function getInitialTheme(): "light" | "dark" {
 
 export function Layout(): JSX.Element {
   const [theme, setTheme] = useState<"light" | "dark">(getInitialTheme);
+  const { t } = useI18n();
   const location = useLocation();
   const isChatPage = location.pathname === "/chat";
 
@@ -45,14 +48,14 @@ export function Layout(): JSX.Element {
               className={({ isActive }) => `nav-link${isActive ? " active" : ""}`}
               end={to === "/"}
             >
-              {label}
+              {t(label)}
             </NavLink>
           ))}
         </nav>
         <div className="sidebar-footer">
           <span className="sidebar-version">v0.1.0</span>
           <button className="theme-toggle" type="button" onClick={toggleTheme}>
-            {theme === "light" ? "Dark" : "Light"}
+            {theme === "light" ? t("theme.dark") : t("theme.light")}
           </button>
         </div>
       </aside>
@@ -64,11 +67,11 @@ export function Layout(): JSX.Element {
         <main className="main">
           <header className="topbar">
             <div>
-              <h1>Management Console</h1>
+              <h1>{t("layout.consoleTitle")}</h1>
             </div>
             <div className="status-indicator">
               <span className="status-dot" />
-              Agent Online
+              {t("layout.agentOnline")}
             </div>
           </header>
           <Outlet />

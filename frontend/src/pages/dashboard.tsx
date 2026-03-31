@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from "recharts";
 
+import { useI18n } from "../i18n";
 import { api, cssVar } from "../lib/api";
 
 type Overview = {
@@ -48,6 +49,7 @@ const tooltipStyle = {
 };
 
 export function DashboardPage(): JSX.Element {
+  const { t, formatDateTime, formatNumber } = useI18n();
   const overview = useQuery({
     queryKey: ["metrics", "overview"],
     queryFn: () => api.get<Overview>("/api/metrics/overview?period=today"),
@@ -72,9 +74,16 @@ export function DashboardPage(): JSX.Element {
   const successRate = overview.data?.success_rate ?? (1 - (overview.data?.error_rate ?? 0));
   const budget = cost.data?.monthly_budget ?? 1;
   const budgetUsed = Math.min(1, cost.data?.budget_progress ?? ((cost.data?.total_cost ?? 0) / budget));
+  const formatCurrency = (value: number, fractionDigits: number) =>
+    formatNumber(value, {
+      style: "currency",
+      currency: "USD",
+      minimumFractionDigits: fractionDigits,
+      maximumFractionDigits: fractionDigits,
+    });
   const pieData = [
-    { name: "used", value: +(cost.data?.total_cost ?? 0).toFixed(4) },
-    { name: "remaining", value: +Math.max(0, budget - (cost.data?.total_cost ?? 0)).toFixed(4) },
+    { name: t("dashboard.budgetUsed"), value: +(cost.data?.total_cost ?? 0).toFixed(4) },
+    { name: t("dashboard.budgetRemaining"), value: +Math.max(0, budget - (cost.data?.total_cost ?? 0)).toFixed(4) },
   ];
 
   const isLoading = overview.isLoading || latency.isLoading || cost.isLoading;
@@ -83,41 +92,41 @@ export function DashboardPage(): JSX.Element {
     <div className="grid">
       {/* Top stat cards */}
       <section className="card">
-        <h3>Requests (Today)</h3>
-        <strong>{overview.data?.total_requests ?? 0}</strong>
+        <h3>{t("dashboard.requestsToday")}</h3>
+        <strong>{formatNumber(overview.data?.total_requests ?? 0)}</strong>
       </section>
       <section className="card">
-        <h3>Success Rate</h3>
-        <strong>{(successRate * 100).toFixed(1)}%</strong>
+        <h3>{t("dashboard.successRate")}</h3>
+        <strong>{formatNumber(successRate * 100, { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%</strong>
       </section>
       <section className="card">
-        <h3>Avg Response</h3>
-        <strong>{latency.data?.avg_response_time ?? 0}ms</strong>
+        <h3>{t("dashboard.avgResponse")}</h3>
+        <strong>{formatNumber(latency.data?.avg_response_time ?? 0)}ms</strong>
       </section>
       <section className="card">
-        <h3>30d Cost</h3>
-        <strong>${(cost.data?.total_cost ?? 0).toFixed(4)}</strong>
+        <h3>{t("dashboard.cost30d")}</h3>
+        <strong>{formatCurrency(cost.data?.total_cost ?? 0, 4)}</strong>
       </section>
 
       {/* Latency snapshot */}
       <section className="card" style={{ gridColumn: "1 / -1" }}>
-        <h3>Latency Snapshot</h3>
+        <h3>{t("dashboard.latencySnapshot")}</h3>
         <p className="mono" style={{ margin: 0, color: "var(--text-muted)" }}>
-          avg {latency.data?.avg_response_time ?? 0}ms
-          {" / "}p50 {latency.data?.p50 ?? 0}ms
-          {" / "}p95 {latency.data?.p95 ?? 0}ms
-          {" / "}p99 {latency.data?.p99 ?? 0}ms
+          {t("dashboard.latency.avg")} {formatNumber(latency.data?.avg_response_time ?? 0)}ms
+          {" / "}{t("dashboard.latency.p50")} {formatNumber(latency.data?.p50 ?? 0)}ms
+          {" / "}{t("dashboard.latency.p95")} {formatNumber(latency.data?.p95 ?? 0)}ms
+          {" / "}{t("dashboard.latency.p99")} {formatNumber(latency.data?.p99 ?? 0)}ms
         </p>
         <p className="mono" style={{ margin: "var(--space-1) 0 0", color: "var(--text-dim)" }}>
-          steps {(overview.data?.avg_steps ?? 0).toFixed(1)}
-          {" / "}turns {(overview.data?.avg_turns ?? 0).toFixed(1)}
-          {" / "}llm calls {overview.data?.llm_api_calls ?? 0}
+          {t("dashboard.steps")} {formatNumber(overview.data?.avg_steps ?? 0, { minimumFractionDigits: 1, maximumFractionDigits: 1 })}
+          {" / "}{t("dashboard.turns")} {formatNumber(overview.data?.avg_turns ?? 0, { minimumFractionDigits: 1, maximumFractionDigits: 1 })}
+          {" / "}{t("dashboard.llmCalls")} {formatNumber(overview.data?.llm_api_calls ?? 0)}
         </p>
       </section>
 
       {/* Budget */}
       <section className="card" style={{ minHeight: 240 }}>
-        <h3>Budget</h3>
+        <h3>{t("dashboard.budget")}</h3>
         <div style={{ height: 140 }}>
           <ResponsiveContainer width="100%" height="100%">
             <PieChart>
@@ -141,19 +150,19 @@ export function DashboardPage(): JSX.Element {
           <div style={{ width: `${(budgetUsed * 100).toFixed(1)}%`, height: "100%", background: "var(--text)" }} />
         </div>
         <p className="mono" style={{ margin: "var(--space-2) 0 0", color: "var(--text-muted)" }}>
-          ${(cost.data?.total_cost ?? 0).toFixed(4)} / ${budget.toFixed(2)}
+          {formatCurrency(cost.data?.total_cost ?? 0, 4)} / {formatCurrency(budget, 2)}
         </p>
       </section>
 
       {/* Token usage */}
       <section className="card" style={{ gridColumn: "span 2" }}>
-        <h3>7d Token Usage</h3>
+        <h3>{t("dashboard.tokenUsage7d")}</h3>
         <div style={{ display: "grid", gap: 2 }}>
           {(tokens.data?.daily ?? []).map((day) => (
             <div key={day.date} className="mono" style={{ display: "grid", gridTemplateColumns: "90px 1fr 1fr", gap: "var(--space-2)", color: "var(--text-muted)" }}>
-              <span>{day.date}</span>
-              <span>in: {day.tokens_in.toLocaleString()}</span>
-              <span>out: {day.tokens_out.toLocaleString()}</span>
+              <span>{formatDateTime(day.date, { month: "numeric", day: "numeric" })}</span>
+              <span>{t("dashboard.tokensIn")}: {formatNumber(day.tokens_in)}</span>
+              <span>{t("dashboard.tokensOut")}: {formatNumber(day.tokens_out)}</span>
             </div>
           ))}
         </div>
@@ -161,26 +170,26 @@ export function DashboardPage(): JSX.Element {
 
       {/* Tool performance */}
       <section className="card" style={{ gridColumn: "1 / -1" }}>
-        <h3>Tool Performance (7d)</h3>
+        <h3>{t("dashboard.toolPerformance7d")}</h3>
         <table className="table">
           <thead>
             <tr>
-              <th>Tool</th>
-              <th>Calls</th>
-              <th>Error Rate</th>
+              <th>{t("dashboard.table.tool")}</th>
+              <th>{t("dashboard.table.calls")}</th>
+              <th>{t("dashboard.table.errorRate")}</th>
             </tr>
           </thead>
           <tbody>
             {(tools.data?.tools ?? []).map((row) => (
               <tr key={row.tool}>
                 <td className="mono">{row.tool}</td>
-                <td>{row.count}</td>
-                <td>{(row.error_rate * 100).toFixed(1)}%</td>
+                <td>{formatNumber(row.count)}</td>
+                <td>{formatNumber(row.error_rate * 100, { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%</td>
               </tr>
             ))}
           </tbody>
         </table>
-        {isLoading ? <p style={{ color: "var(--text-muted)", marginTop: "var(--space-2)" }}>Loading...</p> : null}
+        {isLoading ? <p style={{ color: "var(--text-muted)", marginTop: "var(--space-2)" }}>{t("common.loading")}</p> : null}
       </section>
     </div>
   );

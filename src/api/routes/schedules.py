@@ -19,6 +19,10 @@ def _get_storage(request: Request):
     return storage
 
 
+def _get_scheduler(request: Request):
+    return getattr(request.app.state, "scheduler", None)
+
+
 @router.get("", response_model=list[ScheduleItem])
 async def list_schedules(
     request: Request,
@@ -41,15 +45,26 @@ async def create_schedule(
     request: Request,
 ) -> ScheduleItem:
     storage = _get_storage(request)
-    item = await storage.schedules.create(
-        name=payload.name,
-        prompt=payload.prompt,
-        cron=payload.cron,
-        target_platform=payload.target_platform,
-        target_id=payload.target_id,
-        status=payload.status,
-        next_run_at=payload.next_run_at,
-    )
+    scheduler = _get_scheduler(request)
+    if scheduler is not None:
+        item = await scheduler.create_schedule(
+            name=payload.name,
+            prompt=payload.prompt,
+            cron=payload.cron,
+            target_platform=payload.target_platform,
+            target_id=payload.target_id,
+            status=payload.status,
+        )
+    else:
+        item = await storage.schedules.create(
+            name=payload.name,
+            prompt=payload.prompt,
+            cron=payload.cron,
+            target_platform=payload.target_platform,
+            target_id=payload.target_id,
+            status=payload.status,
+            next_run_at=payload.next_run_at,
+        )
     return ScheduleItem(**item)
 
 
@@ -60,14 +75,21 @@ async def update_schedule(
     request: Request,
 ) -> ScheduleItem:
     storage = _get_storage(request)
+    scheduler = _get_scheduler(request)
     existing = await storage.schedules.get(schedule_id)
     if existing is None:
         raise HTTPException(status_code=404, detail="Schedule not found")
 
-    updated = await storage.schedules.update(
-        schedule_id,
-        **payload.model_dump(exclude_none=True),
-    )
+    if scheduler is not None:
+        updated = await scheduler.update_schedule(
+            schedule_id,
+            **payload.model_dump(exclude_none=True),
+        )
+    else:
+        updated = await storage.schedules.update(
+            schedule_id,
+            **payload.model_dump(exclude_none=True),
+        )
     if updated is None:
         raise HTTPException(status_code=500, detail="Failed to update schedule")
     return ScheduleItem(**updated)
@@ -76,8 +98,12 @@ async def update_schedule(
 @router.delete("/{schedule_id}")
 async def delete_schedule(schedule_id: str, request: Request) -> dict[str, str]:
     storage = _get_storage(request)
+    scheduler = _get_scheduler(request)
     existing = await storage.schedules.get(schedule_id)
     if existing is None:
         raise HTTPException(status_code=404, detail="Schedule not found")
-    await storage.schedules.delete(schedule_id)
+    if scheduler is not None:
+        await scheduler.delete_schedule(schedule_id)
+    else:
+        await storage.schedules.delete(schedule_id)
     return {"status": "deleted", "schedule_id": schedule_id}

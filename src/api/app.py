@@ -25,6 +25,7 @@ from src.core.logging import get_logger
 
 if TYPE_CHECKING:
     from src.agent.agent import Agent
+    from src.agent.scheduler import AgentScheduler
     from src.channels.adapters.web import WebAdapter
     from src.channels.hub import MsgHub
     from src.core.config import AppConfig
@@ -38,6 +39,7 @@ def create_api_app(
     agent: Agent | None = None,
     storage: Storage | None = None,
     config: AppConfig | None = None,
+    scheduler: AgentScheduler | None = None,
     msg_hub: MsgHub | None = None,
     web_adapter: WebAdapter | None = None,
     tool_registry: Any | None = None,
@@ -58,6 +60,7 @@ def create_api_app(
     app.state.agent = agent
     app.state.storage = storage
     app.state.config = config
+    app.state.scheduler = scheduler
     app.state.msg_hub = msg_hub
     app.state.web_adapter = web_adapter
     app.state.tool_registry = tool_registry
@@ -82,7 +85,7 @@ def create_api_app(
         logger.exception("api.unhandled_exception", path=str(request.url.path))
         return JSONResponse(
             status_code=500,
-            content={"detail": f"Internal server error: {exc.__class__.__name__}"},
+            content={"detail": "Internal server error"},
         )
 
     @app.get("/health", response_model=HealthResponse, tags=["system"])

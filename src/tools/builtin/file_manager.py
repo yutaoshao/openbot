@@ -32,11 +32,16 @@ class FileManagerTool:
         return "file_manager"
 
     @property
+    def workspace_root(self) -> str:
+        """Return the resolved workspace root as a string."""
+        return str(self.workspace)
+
+    @property
     def description(self) -> str:
         return (
-            "Read, write, and list files in the workspace. "
+            f"Read, write, and list files in the workspace rooted at {self.workspace_root}. "
             "Supports operations: read_file, write_file, list_directory. "
-            "All paths are relative to the workspace root."
+            "All paths are relative to that workspace root."
         )
 
     @property
@@ -51,7 +56,10 @@ class FileManagerTool:
                 },
                 "path": {
                     "type": "string",
-                    "description": "Relative path within workspace (default: '.' for list)",
+                    "description": (
+                        "Relative path within workspace root "
+                        f"{self.workspace_root} (default: '.' for list)"
+                    ),
                     "default": ".",
                 },
                 "content": {
@@ -173,12 +181,26 @@ class FileManagerTool:
                 lines.append(f"  {rel}{suffix}")
 
             if not lines:
-                return ToolResult(content="(empty directory)", metadata={"path": path})
+                return ToolResult(
+                    content=(
+                        f"Workspace root: {self.workspace_root}\n"
+                        f"Path: {path}\n"
+                        "(empty directory)"
+                    ),
+                    metadata={"path": path, "workspace_root": self.workspace_root},
+                )
 
-            header = f"Workspace: {path}\n"
+            header = (
+                f"Workspace root: {self.workspace_root}\n"
+                f"Path: {path}\n"
+            )
             return ToolResult(
                 content=header + "\n".join(lines),
-                metadata={"path": path, "count": len(lines)},
+                metadata={
+                    "path": path,
+                    "count": len(lines),
+                    "workspace_root": self.workspace_root,
+                },
             )
         except OSError as e:
             return ToolResult(content=f"List failed: {e}", is_error=True)

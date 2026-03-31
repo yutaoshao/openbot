@@ -16,7 +16,7 @@ from typing import Literal
 
 import yaml
 from dotenv import load_dotenv
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class ModelProviderConfig(BaseModel):
@@ -29,6 +29,11 @@ class ModelProviderConfig(BaseModel):
     temperature: float = 0.7
     # Name of the environment variable that holds the API key
     api_key_env: str = "ANTHROPIC_API_KEY"
+    # Connection timeout: max seconds to establish TCP connection (fast-fail)
+    connect_timeout: float = 30.0
+    # Read timeout: max seconds to wait for first token from model
+    # Set higher for slow-thinking models (DeepSeek R1, o1, etc.)
+    read_timeout: float = 300.0
     # Pricing per 1M tokens (for cost tracking)
     pricing_input: float = 0.0
     pricing_output: float = 0.0
@@ -97,6 +102,14 @@ class StorageConfig(BaseModel):
     db_path: str = "data/openbot.db"
     workspace_path: str = "data/workspace"
 
+    @field_validator("db_path", "workspace_path", mode="before")
+    @classmethod
+    def _expand_path(cls, value: str) -> str:
+        """Expand ``~`` and env vars while preserving relative paths."""
+        if not isinstance(value, str):
+            return value
+        return str(Path(os.path.expandvars(value)).expanduser())
+
 
 class ApiConfig(BaseModel):
     """REST/WebSocket API server configuration."""
@@ -104,9 +117,18 @@ class ApiConfig(BaseModel):
     enabled: bool = True
     host: str = "127.0.0.1"
     port: int = 8000
-    cors_origins: list[str] = Field(default_factory=lambda: ["*"])
+    cors_origins: list[str] = Field(
+        default_factory=lambda: ["*"],
+        description="Allowed CORS origins. Use specific origins in production.",
+    )
     serve_frontend: bool = True
     frontend_dist: str = "frontend/dist"
+
+
+class SchedulerConfig(BaseModel):
+    """Background scheduler configuration."""
+
+    timezone: str = ""
 
 
 class LogConfig(BaseModel):
@@ -123,9 +145,17 @@ class LogConfig(BaseModel):
 class AgentConfig(BaseModel):
     """Agent core configuration."""
 
-    max_iterations: int = 10
+    max_iterations: int = 50
     system_prompt: str = ""
     token_budget: int = 8000
+    # Max total seconds for a single agent run (0 = no limit)
+    task_timeout: int = 0
+    # Max seconds for a single tool call (0 = no limit)
+    tool_timeout: float = 120.0
+    # Max cost in dollars for a single agent run (0 = no limit)
+    max_task_cost: float = 0.0
+    # Consecutive identical tool calls before declaring "stuck" (0 = disable)
+    stuck_detection_threshold: int = 3
 
 
 class EmbeddingConfig(BaseModel):
@@ -176,6 +206,7 @@ class AppConfig(BaseModel):
     feishu: FeishuConfig = Field(default_factory=FeishuConfig)
     storage: StorageConfig = Field(default_factory=StorageConfig)
     api: ApiConfig = Field(default_factory=ApiConfig)
+    scheduler: SchedulerConfig = Field(default_factory=SchedulerConfig)
     log: LogConfig = Field(default_factory=LogConfig)
     agent: AgentConfig = Field(default_factory=AgentConfig)
     embedding: EmbeddingConfig = Field(default_factory=EmbeddingConfig)

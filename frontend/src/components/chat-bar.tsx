@@ -1,5 +1,6 @@
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 
+import { useI18n } from "../i18n";
 import { api, wsBaseUrl } from "../lib/api";
 
 type StreamEvent = {
@@ -18,10 +19,12 @@ type ChatItem = {
 };
 
 export function ChatBar(): JSX.Element {
+  const { t } = useI18n();
   const [message, setMessage] = useState("");
   const [conversationId, setConversationId] = useState("");
   const [preview, setPreview] = useState("");
-  const [status, setStatus] = useState("idle");
+  const [statusKey, setStatusKey] = useState("chatbar.status.idle");
+  const [toolName, setToolName] = useState("");
   const [expanded, setExpanded] = useState(false);
   const [attachments, setAttachments] = useState<string[]>([]);
   const [history, setHistory] = useState<ChatItem[]>([]);
@@ -65,10 +68,12 @@ export function ChatBar(): JSX.Element {
         setPreview((prev) => prev + (payload.text || ""));
       }
       if (payload.chunk_type === "tool_status") {
-        setStatus(`Tool: ${payload.tool_name}`);
+        setToolName(payload.tool_name || "");
+        setStatusKey("chatbar.status.tool");
       }
       if (payload.chunk_type === "done") {
-        setStatus("done");
+        setToolName("");
+        setStatusKey("chatbar.status.done");
         pendingResolveRef.current?.();
         pendingResolveRef.current = null;
       }
@@ -87,7 +92,8 @@ export function ChatBar(): JSX.Element {
       : "";
     const merged = `${text}${attachmentSuffix}`;
 
-    setStatus("sending");
+    setStatusKey("chatbar.status.sending");
+    setToolName("");
     setPreview("");
     setMessage("");
 
@@ -114,7 +120,7 @@ export function ChatBar(): JSX.Element {
       });
       setConversationId(body.conversation_id);
       setPreview(body.reply);
-      setStatus("done (fallback)");
+      setStatusKey("chatbar.status.fallback");
       setHistory((prev) => [
         {
           id: crypto.randomUUID(),
@@ -129,21 +135,25 @@ export function ChatBar(): JSX.Element {
     }
   };
 
+  const statusText = statusKey === "chatbar.status.tool"
+    ? t(statusKey, { tool: toolName })
+    : t(statusKey);
+
   return (
     <div className="chatbar">
       <form onSubmit={submit}>
         <input
           className="input"
-          placeholder="Ask OpenBot..."
+          placeholder={t("chatbar.placeholder")}
           value={message}
           onChange={(e) => setMessage(e.target.value)}
         />
         <button className="btn" type="submit">
-          Send
+          {t("chat.send")}
         </button>
       </form>
       <div className="chatbar-meta">
-        <span className="mono">{status}</span>
+        <span className="mono">{statusText}</span>
         {preview ? <span style={{ marginLeft: 4 }}>{preview.slice(0, 220)}</span> : null}
       </div>
       <div className="chatbar-actions">
@@ -157,24 +167,24 @@ export function ChatBar(): JSX.Element {
         />
         {attachments.length ? <span className="mono" style={{ color: "var(--text-muted)" }}>{attachments.join(", ")}</span> : null}
         <button className="btn secondary" type="button" onClick={() => setExpanded((prev) => !prev)}>
-          {expanded ? "Collapse" : "Expand"}
+          {expanded ? t("chatbar.collapse") : t("chatbar.expand")}
         </button>
       </div>
       {expanded ? (
         <section className="card" style={{ maxWidth: 1100, margin: "var(--space-3) auto 0" }}>
-          <h3>Chat History</h3>
+          <h3>{t("chatbar.history")}</h3>
           <div style={{ whiteSpace: "pre-wrap" }} className="mono">
-            {preview || "(empty)"}
+            {preview || t("chatbar.empty")}
           </div>
           <div style={{ maxHeight: 260, overflow: "auto", marginTop: "var(--space-2)" }}>
             {history.map((item) => (
               <div key={item.id} style={{ borderTop: "1px solid var(--border-soft)", paddingTop: "var(--space-2)", marginTop: "var(--space-2)" }}>
                 <p style={{ color: "var(--text-muted)", margin: "0 0 4px" }}>
-                  <strong style={{ color: "var(--text)", fontSize: 14 }}>Q:</strong> {item.prompt}
+                  <strong style={{ color: "var(--text)", fontSize: 14 }}>{t("chatbar.question")}</strong> {item.prompt}
                 </p>
                 {item.attachments.length ? <p className="mono" style={{ color: "var(--text-dim)", margin: "0 0 4px" }}>{item.attachments.join(", ")}</p> : null}
                 <p style={{ margin: 0 }}>
-                  <strong style={{ color: "var(--text)", fontSize: 14 }}>A:</strong> {item.reply || "(streaming...)"}
+                  <strong style={{ color: "var(--text)", fontSize: 14 }}>{t("chatbar.answer")}</strong> {item.reply || t("chatbar.streaming")}
                 </p>
               </div>
             ))}

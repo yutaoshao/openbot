@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
+import { useI18n } from "../i18n";
 import { api } from "../lib/api";
 
 type Knowledge = {
@@ -12,6 +13,7 @@ type Knowledge = {
 };
 
 export function MemoryPage(): JSX.Element {
+  const { t } = useI18n();
   const qc = useQueryClient();
   const [category, setCategory] = useState("fact");
   const [priority, setPriority] = useState("P1");
@@ -73,16 +75,20 @@ export function MemoryPage(): JSX.Element {
   });
 
   const items = useMemo(() => list.data ?? [], [list.data]);
+  const categoryLabel = (value: string) => {
+    const key = `memory.category.${value}`;
+    return t(key) === key ? value : t(key);
+  };
 
   return (
     <div className="grid" style={{ gridTemplateColumns: "1fr 2fr" }}>
       <section className="card">
-        <h3>Add Knowledge</h3>
+        <h3>{t("memory.addKnowledge")}</h3>
         <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-3)" }}>
           <select className="select" value={category} onChange={(e) => setCategory(e.target.value)}>
-            <option value="fact">fact</option>
-            <option value="concept">concept</option>
-            <option value="procedure">procedure</option>
+            <option value="fact">{categoryLabel("fact")}</option>
+            <option value="concept">{categoryLabel("concept")}</option>
+            <option value="procedure">{categoryLabel("procedure")}</option>
           </select>
           <select className="select" value={priority} onChange={(e) => setPriority(e.target.value)}>
             <option value="P1">P1</option>
@@ -93,30 +99,30 @@ export function MemoryPage(): JSX.Element {
             className="textarea"
             value={content}
             onChange={(e) => setContent(e.target.value)}
-            placeholder="Knowledge content..."
+            placeholder={t("memory.contentPlaceholder")}
           />
           <button className="btn" onClick={() => create.mutate()} type="button" disabled={!content.trim()}>
-            Save
+            {t("memory.save")}
           </button>
         </div>
       </section>
       <section className="card">
-        <h3>Knowledge Base</h3>
+        <h3>{t("memory.knowledgeBase")}</h3>
         <input
           className="input"
-          placeholder="Search..."
+          placeholder={t("memory.search")}
           value={search}
           onChange={(e) => setSearch(e.target.value)}
         />
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "var(--space-2)", marginTop: "var(--space-2)" }}>
           <select className="select" value={filterCategory} onChange={(e) => setFilterCategory(e.target.value)}>
-            <option value="all">all categories</option>
-            <option value="fact">fact</option>
-            <option value="concept">concept</option>
-            <option value="procedure">procedure</option>
+            <option value="all">{t("memory.allCategories")}</option>
+            <option value="fact">{categoryLabel("fact")}</option>
+            <option value="concept">{categoryLabel("concept")}</option>
+            <option value="procedure">{categoryLabel("procedure")}</option>
           </select>
           <select className="select" value={filterPriority} onChange={(e) => setFilterPriority(e.target.value)}>
-            <option value="all">all priorities</option>
+            <option value="all">{t("memory.allPriorities")}</option>
             <option value="P1">P1</option>
             <option value="P2">P2</option>
             <option value="P3">P3</option>
@@ -125,9 +131,9 @@ export function MemoryPage(): JSX.Element {
         <table className="table" style={{ marginTop: "var(--space-3)" }}>
           <thead>
             <tr>
-              <th>Category</th>
-              <th>Priority</th>
-              <th>Content</th>
+              <th>{t("memory.table.category")}</th>
+              <th>{t("memory.table.priority")}</th>
+              <th>{t("memory.table.content")}</th>
               <th style={{ width: 100 }} />
             </tr>
           </thead>
@@ -136,7 +142,7 @@ export function MemoryPage(): JSX.Element {
               const editing = editingId === item.id;
               return (
                 <tr key={item.id}>
-                  <td className="mono">{item.category}</td>
+                  <td className="mono">{categoryLabel(item.category)}</td>
                   <td>
                     {editing ? (
                       <select
@@ -168,7 +174,7 @@ export function MemoryPage(): JSX.Element {
                       {editing ? (
                         <>
                           <button className="btn secondary" type="button" onClick={() => update.mutate(item.id)}>
-                            Save
+                            {t("memory.save")}
                           </button>
                           <button
                             className="btn secondary"
@@ -179,7 +185,7 @@ export function MemoryPage(): JSX.Element {
                               setEditingPriority("P1");
                             }}
                           >
-                            Cancel
+                            {t("memory.cancel")}
                           </button>
                         </>
                       ) : (
@@ -193,19 +199,19 @@ export function MemoryPage(): JSX.Element {
                               setEditingPriority(item.priority);
                             }}
                           >
-                            Edit
+                            {t("memory.edit")}
                           </button>
                           <button
                             className="btn danger"
                             onClick={() => {
-                              const ok = window.confirm("Delete this knowledge item?");
+                              const ok = window.confirm(t("memory.confirmDelete"));
                               if (ok) {
                                 remove.mutate(item.id);
                               }
                             }}
                             type="button"
                           >
-                            Delete
+                            {t("memory.delete")}
                           </button>
                         </>
                       )}

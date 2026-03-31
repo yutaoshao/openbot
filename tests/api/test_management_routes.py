@@ -155,6 +155,42 @@ class _FakeMonitor:
         return {"period": period, "total_cost": 0.0123}
 
 
+class _FakeRuntimeScheduler:
+    def __init__(self, storage: _FakeStorage) -> None:
+        self.storage = storage
+        self.calls: list[tuple[str, Any]] = []
+        self.timezone_name = "Asia/Shanghai"
+
+    async def create_schedule(
+        self,
+        *,
+        name: str,
+        prompt: str,
+        cron: str,
+        target_platform: str | None = None,
+        target_id: str | None = None,
+        status: str = "active",
+    ) -> dict[str, Any]:
+        self.calls.append(("create", {"name": name, "cron": cron, "status": status}))
+        return await self.storage.schedules.create(
+            name=name,
+            prompt=prompt,
+            cron=cron,
+            target_platform=target_platform,
+            target_id=target_id,
+            status=status,
+            next_run_at="2026-03-29T08:00:00+08:00" if status == "active" else None,
+        )
+
+    async def update_schedule(self, schedule_id: str, **fields: Any) -> dict[str, Any] | None:
+        self.calls.append(("update", {"id": schedule_id, "fields": fields}))
+        return await self.storage.schedules.update(schedule_id, **fields)
+
+    async def delete_schedule(self, schedule_id: str) -> None:
+        self.calls.append(("delete", {"id": schedule_id}))
+        await self.storage.schedules.delete(schedule_id)
+
+
 @dataclass
 class _DummyTool:
     name: str = "dummy"
@@ -170,8 +206,12 @@ class _DummyTool:
         return ToolResult(content="ok")
 
 
-def _client() -> TestClient:
-    storage = _FakeStorage()
+def _client(
+    *,
+    storage: _FakeStorage | None = None,
+    scheduler: Any | None = None,
+) -> TestClient:
+    storage = storage or _FakeStorage()
     registry = ToolRegistry()
     registry.register(_DummyTool())
     app = create_api_app(
@@ -179,6 +219,7 @@ def _client() -> TestClient:
         tool_registry=registry,
         monitor=_FakeMonitor(),
         config=AppConfig(),
+        scheduler=scheduler,
     )
     return TestClient(app)
 
@@ -245,6 +286,28 @@ def test_schedules_crud() -> None:
 
     deleted = client.delete(f"/api/schedules/{schedule_id}")
     assert deleted.status_code == 200
+
+
+def test_schedules_routes_sync_runtime_scheduler() -> None:
+    storage = _FakeStorage()
+    scheduler = _FakeRuntimeScheduler(storage)
+    client = _client(storage=storage, scheduler=scheduler)
+
+    created = client.post(
+        "/api/schedules",
+        json={"name": "daily", "prompt": "summary", "cron": "0 8 * * *"},
+    )
+    assert created.status_code == 201
+    schedule_id = created.json()["id"]
+    assert scheduler.calls[0][0] == "create"
+
+    updated = client.put(f"/api/schedules/{schedule_id}", json={"status": "paused"})
+    assert updated.status_code == 200
+    assert scheduler.calls[1][0] == "update"
+
+    deleted = client.delete(f"/api/schedules/{schedule_id}")
+    assert deleted.status_code == 200
+    assert scheduler.calls[2][0] == "delete"
 
 
 def test_metrics_endpoints() -> None:

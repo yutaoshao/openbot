@@ -1,5 +1,6 @@
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 
+import { useI18n } from "../i18n";
 import { api, wsBaseUrl } from "../lib/api";
 import { renderMarkdown } from "../lib/markdown";
 
@@ -18,11 +19,12 @@ type ChatMessage = {
 };
 
 export function ChatPage(): JSX.Element {
+  const { t } = useI18n();
   const [message, setMessage] = useState("");
   const [conversationId, setConversationId] = useState("");
   const [streaming, setStreaming] = useState(false);
   const [streamText, setStreamText] = useState("");
-  const [status, setStatus] = useState("");
+  const [toolName, setToolName] = useState("");
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const socketRef = useRef<WebSocket | null>(null);
   const streamTextRef = useRef("");
@@ -77,10 +79,10 @@ export function ChatPage(): JSX.Element {
         setStreamText((prev) => prev + (payload.text || ""));
       }
       if (payload.chunk_type === "tool_status") {
-        setStatus(`Using tool: ${payload.tool_name}`);
+        setToolName(payload.tool_name || "");
       }
       if (payload.chunk_type === "done") {
-        setStatus("");
+        setToolName("");
         pendingResolveRef.current?.();
         pendingResolveRef.current = null;
       }
@@ -99,7 +101,7 @@ export function ChatPage(): JSX.Element {
     setMessage("");
     setStreaming(true);
     setStreamText("");
-    setStatus("");
+    setToolName("");
 
     try {
       const ws = await ensureSocket();
@@ -126,10 +128,13 @@ export function ChatPage(): JSX.Element {
     } finally {
       setStreaming(false);
       setStreamText("");
+      setToolName("");
     }
   };
 
   const hasMessages = messages.length > 0;
+  const streamStatus = toolName ? t("chat.usingTool", { tool: toolName }) : t("chat.thinking");
+  const roleLabel = (role: ChatMessage["role"]) => t(`chat.role.${role}`);
 
   // Empty state: centered input
   if (!hasMessages && !streaming) {
@@ -137,17 +142,17 @@ export function ChatPage(): JSX.Element {
       <div className="chat-container">
         <div className="chat-empty">
           <h2 className="chat-empty-title">OpenBot</h2>
-          <p className="chat-empty-subtitle">Ask me anything</p>
+          <p className="chat-empty-subtitle">{t("chat.askAnything")}</p>
           <form onSubmit={submit}>
             <input
               className="input"
-              placeholder="Type your message..."
+              placeholder={t("chat.inputPlaceholder")}
               value={message}
               onChange={(e) => setMessage(e.target.value)}
               autoFocus
             />
             <button className="btn" type="submit" disabled={!message.trim()}>
-              Send
+              {t("chat.send")}
             </button>
           </form>
         </div>
@@ -161,7 +166,7 @@ export function ChatPage(): JSX.Element {
       <div className="chat-messages">
         {messages.map((msg) => (
           <div className="chat-bubble" key={msg.id}>
-            <div className="chat-bubble-role">{msg.role}</div>
+            <div className="chat-bubble-role">{roleLabel(msg.role)}</div>
             <div
               className="chat-bubble-content"
               dangerouslySetInnerHTML={{ __html: renderMarkdown(msg.content) }}
@@ -170,11 +175,11 @@ export function ChatPage(): JSX.Element {
         ))}
         {streaming && (
           <div className="chat-bubble">
-            <div className="chat-bubble-role">assistant</div>
+            <div className="chat-bubble-role">{t("chat.role.assistant")}</div>
             <div className="chat-bubble-content">
               {streamText
                 ? <span dangerouslySetInnerHTML={{ __html: renderMarkdown(streamText) }} />
-                : <span className="chat-bubble-streaming">{status || "Thinking..."}</span>
+                : <span className="chat-bubble-streaming">{streamStatus}</span>
               }
             </div>
           </div>
@@ -185,17 +190,17 @@ export function ChatPage(): JSX.Element {
         <form onSubmit={submit}>
           <input
             className="input"
-            placeholder="Type your message..."
+            placeholder={t("chat.inputPlaceholder")}
             value={message}
             onChange={(e) => setMessage(e.target.value)}
             disabled={streaming}
             autoFocus
           />
           <button className="btn" type="submit" disabled={streaming || !message.trim()}>
-            Send
+            {t("chat.send")}
           </button>
         </form>
-        {status ? <div className="chat-meta mono">{status}</div> : null}
+        {toolName ? <div className="chat-meta mono">{streamStatus}</div> : null}
       </div>
     </div>
   );

@@ -24,9 +24,20 @@ class ClaudeProvider:
 
     def __init__(self, config: ModelProviderConfig) -> None:
         import anthropic
+        import httpx
 
         self.config = config
-        self.client = anthropic.AsyncAnthropic(api_key=config.api_key)
+        timeout = httpx.Timeout(
+            connect=config.connect_timeout,
+            read=config.read_timeout,
+            write=config.connect_timeout,
+            pool=config.connect_timeout,
+        )
+        self.client = anthropic.AsyncAnthropic(
+            api_key=config.api_key,
+            timeout=timeout,
+            max_retries=0,  # We handle retries in ModelGateway
+        )
         self.model = config.model
 
     async def chat(

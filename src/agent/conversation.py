@@ -7,6 +7,7 @@ archive) and the "search-before-act" pattern.
 
 from __future__ import annotations
 
+import time
 import uuid
 from collections import OrderedDict
 from typing import TYPE_CHECKING, Any
@@ -22,6 +23,8 @@ if TYPE_CHECKING:
     from src.memory.working import WorkingMemory
 
 logger = get_logger(__name__)
+
+_WORKING_MEMORY_IDLE_TTL_SECONDS = 30 * 60
 
 
 class ConversationManager:
@@ -51,6 +54,7 @@ class ConversationManager:
         # Active working memories keyed by conversation_id (LRU eviction)
         self._working: OrderedDict[str, WorkingMemory] = OrderedDict()
         self._max_working: int = 100  # max concurrent working memories
+        self._working_last_active: dict[str, float] = {}
 
     # ------------------------------------------------------------------
     # Conversation lifecycle
@@ -63,9 +67,11 @@ class ConversationManager:
         token_budget: int = 8000,
     ) -> WorkingMemory:
         """Get existing or create new working memory for a conversation."""
+        self._prune_stale_working_memories()
         if conversation_id in self._working:
             # Move to end (most recently used)
             self._working.move_to_end(conversation_id)
+            self._touch_working(conversation_id)
             return self._working[conversation_id]
 
         # Check if conversation exists in DB
@@ -96,10 +102,12 @@ class ConversationManager:
             wm.add({"role": msg["role"], "content": msg["content"]})
 
         self._working[conversation_id] = wm
+        self._touch_working(conversation_id)
 
         # Evict oldest if over limit
         while len(self._working) > self._max_working:
             evicted_id, _ = self._working.popitem(last=False)
+            self._working_last_active.pop(evicted_id, None)
             logger.debug("conversation.evicted", conversation_id=evicted_id)
 
         return wm
@@ -124,6 +132,7 @@ class ConversationManager:
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_input},
             ]
+        self._touch_working(conversation_id)
 
         # Search-before-act: recall relevant knowledge and past conversations
         enriched_prompt = await self._enrich_system_prompt(
@@ -155,6 +164,7 @@ class ConversationManager:
         wm = self._working.get(conversation_id)
         if wm:
             wm.add({"role": "user", "content": content})
+            self._touch_working(conversation_id)
 
         # Persist to storage
         await self._storage.messages.add(
@@ -182,6 +192,7 @@ class ConversationManager:
         wm = self._working.get(conversation_id)
         if wm:
             wm.add({"role": "assistant", "content": content})
+            self._touch_working(conversation_id)
 
         # Persist to storage
         await self._storage.messages.add(
@@ -209,6 +220,7 @@ class ConversationManager:
         wm = self._working.get(conversation_id)
         if not wm or not wm.needs_compression():
             return
+        self._touch_working(conversation_id)
 
         logger.info(
             "conversation.compression_triggered",
@@ -288,6 +300,7 @@ class ConversationManager:
 
         # Clean up working memory
         self._working.pop(conversation_id, None)
+        self._working_last_active.pop(conversation_id, None)
 
         logger.info(
             "conversation.ended",
@@ -356,3 +369,20 @@ class ConversationManager:
             )
 
         return "\n\n".join(sections)
+
+    def _touch_working(self, conversation_id: str) -> None:
+        """Refresh the last-access time for an in-memory conversation."""
+        self._working_last_active[conversation_id] = time.monotonic()
+
+    def _prune_stale_working_memories(self, *, now: float | None = None) -> None:
+        """Drop idle working memories so abandoned chats do not linger forever."""
+        current = time.monotonic() if now is None else now
+        stale_ids = [
+            conversation_id
+            for conversation_id, last_active in self._working_last_active.items()
+            if current - last_active > _WORKING_MEMORY_IDLE_TTL_SECONDS
+        ]
+        for conversation_id in stale_ids:
+            self._working.pop(conversation_id, None)
+            self._working_last_active.pop(conversation_id, None)
+            logger.debug("conversation.evicted_idle", conversation_id=conversation_id)

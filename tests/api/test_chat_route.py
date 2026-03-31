@@ -103,3 +103,29 @@ def test_chat_generates_conversation_id_when_missing() -> None:
     assert isinstance(generated, str)
     assert len(generated) > 0
     assert fake_agent.calls == [("hello", generated, "web")]
+
+
+def test_chat_rejects_blank_messages() -> None:
+    fake_agent = _FakeAgent()
+    client = TestClient(create_api_app(agent=fake_agent))
+
+    response = client.post(
+        "/api/chat",
+        json={"message": "   "},
+    )
+
+    assert response.status_code == 422
+    assert fake_agent.calls == []
+
+
+def test_chat_rejects_overly_long_messages() -> None:
+    fake_agent = _FakeAgent()
+    client = TestClient(create_api_app(agent=fake_agent))
+
+    response = client.post(
+        "/api/chat",
+        json={"message": "x" * 32001},
+    )
+
+    assert response.status_code == 422
+    assert fake_agent.calls == []

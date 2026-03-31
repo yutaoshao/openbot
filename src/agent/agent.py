@@ -11,6 +11,7 @@ All log events follow the AgentTrace three-surface taxonomy:
 
 from __future__ import annotations
 
+import asyncio
 import json
 import time
 from dataclasses import dataclass, field
@@ -20,6 +21,7 @@ from typing import TYPE_CHECKING, Any
 from src.core.logging import get_logger
 from src.core.trace import TraceContext
 from src.infrastructure.model_gateway import StreamChunk, Usage
+from src.tools.runtime import ToolExecutionContext, tool_execution_context
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -42,6 +44,8 @@ Guidelines:
 - If you don't know something, say so honestly
 - Respond in the same language as the user's message
 - Use tools when they would help answer the question
+- When the user asks you to do something on a schedule or repeatedly,
+  use a scheduling tool if one is available
 - Always explain what you found after using a tool
 """
 
@@ -169,8 +173,47 @@ class Agent:
         all_tool_calls: list[dict[str, Any]] = []
         final_text = ""
         final_model = ""
+        task_start = time.monotonic()
+        task_timeout = self.config.task_timeout  # 0 = no limit
+        max_task_cost = self.config.max_task_cost  # 0 = no limit
+        stuck_threshold = self.config.stuck_detection_threshold  # 0 = disable
+        # Track recent tool call signatures for stuck detection
+        _recent_tool_sigs: list[str] = []
 
         while iterations < self.max_iterations:
+            # Check task-level timeout
+            if task_timeout > 0:
+                elapsed = time.monotonic() - task_start
+                if elapsed >= task_timeout:
+                    final_text = (
+                        f"Task exceeded time limit ({task_timeout}s). "
+                        f"Completed {iterations} iterations."
+                    )
+                    logger.warning(
+                        "task_failed",
+                        surface="operational",
+                        reason="task_timeout",
+                        elapsed_s=int(elapsed),
+                        iterations=iterations,
+                    )
+                    break
+
+            # Check cost cap
+            if max_task_cost > 0 and total_cost >= max_task_cost:
+                final_text = (
+                    f"Task exceeded cost limit (${max_task_cost:.2f}). "
+                    f"Spent ${total_cost:.4f} over {iterations} iterations."
+                )
+                logger.warning(
+                    "task_failed",
+                    surface="operational",
+                    reason="cost_limit",
+                    cost=total_cost,
+                    limit=max_task_cost,
+                    iterations=iterations,
+                )
+                break
+
             iterations += 1
             ctx.iteration = iterations
 
@@ -247,7 +290,17 @@ class Agent:
                 yield StreamChunk(type="tool_status", tool_name=tc.name)
 
                 tool_start = time.monotonic()
-                tool_result = await self._execute_tool(tc.name, tc.arguments)
+                tool_result = await self._execute_tool(
+                    tc.name,
+                    tc.arguments,
+                    conversation_id=conversation_id,
+                    platform=platform,
+                    timeout_override=(
+                        max(0.001, task_timeout - (time.monotonic() - task_start))
+                        if task_timeout > 0
+                        else None
+                    ),
+                )
                 tool_latency = int((time.monotonic() - tool_start) * 1000)
 
                 # Operational: tool_called + tool_returned
@@ -275,6 +328,35 @@ class Agent:
                     "is_error": tool_result.is_error,
                     "iteration": iterations,
                 })
+
+            # Stuck detection: check if the same tool calls repeat consecutively
+            if stuck_threshold > 0:
+                # Build a signature from this iteration's tool calls
+                sig = "|".join(
+                    f"{tc.name}:{json.dumps(tc.arguments, sort_keys=True)}"
+                    for tc in collected_tool_calls
+                )
+                _recent_tool_sigs.append(sig)
+                # Only keep the last N signatures
+                if len(_recent_tool_sigs) > stuck_threshold:
+                    _recent_tool_sigs.pop(0)
+                # If last N are identical, agent is stuck
+                if (
+                    len(_recent_tool_sigs) >= stuck_threshold
+                    and len(set(_recent_tool_sigs)) == 1
+                ):
+                    final_text = (
+                        "Agent appears stuck — repeating the same tool calls. "
+                        "Stopping to avoid wasting resources."
+                    )
+                    logger.warning(
+                        "task_failed",
+                        surface="operational",
+                        reason="stuck_loop",
+                        repeated_sig=sig[:200],
+                        iterations=iterations,
+                    )
+                    break
 
         else:
             # Max iterations reached
@@ -393,7 +475,13 @@ class Agent:
             await self.conversation_manager.maybe_compress(conversation_id)
 
     async def _execute_tool(
-        self, name: str, arguments: dict[str, Any],
+        self,
+        name: str,
+        arguments: dict[str, Any],
+        *,
+        conversation_id: str,
+        platform: str,
+        timeout_override: float | None = None,
     ) -> ToolResult:
         """Execute a single tool call by name."""
         from src.tools.registry import ToolResult
@@ -405,8 +493,38 @@ class Agent:
         if not tool:
             return ToolResult(content=f"Unknown tool: {name}", is_error=True)
 
+        configured_timeout = self.config.tool_timeout if self.config.tool_timeout > 0 else None
+        timeout_candidates = [
+            timeout
+            for timeout in (configured_timeout, timeout_override)
+            if timeout is not None and timeout > 0
+        ]
+        effective_timeout = min(timeout_candidates) if timeout_candidates else None
+
         try:
-            return await tool.execute(arguments)
+            with tool_execution_context(
+                ToolExecutionContext(
+                    conversation_id=conversation_id,
+                    platform=platform,
+                )
+            ):
+                if effective_timeout is None:
+                    return await tool.execute(arguments)
+                return await asyncio.wait_for(
+                    tool.execute(arguments),
+                    timeout=effective_timeout,
+                )
+        except asyncio.TimeoutError:
+            logger.warning(
+                "tool_timeout",
+                surface="operational",
+                tool=name,
+                timeout_s=round(effective_timeout or 0.0, 3),
+            )
+            return ToolResult(
+                content=f"Tool '{name}' timed out after {effective_timeout:.2f}s",
+                is_error=True,
+            )
         except Exception as e:
             logger.exception(
                 "tool_called",

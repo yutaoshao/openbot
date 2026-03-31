@@ -42,6 +42,7 @@ from src.tools.builtin import (
     CodeExecutorTool,
     DeepResearchTool,
     FileManagerTool,
+    ScheduleManagerTool,
     WebFetchTool,
     WebSearchTool,
 )
@@ -159,6 +160,7 @@ class Application:
         self.tool_registry.register(WebFetchTool())
         self.tool_registry.register(CodeExecutorTool())
         self.tool_registry.register(FileManagerTool(workspace=Path(self.config.storage.workspace_path)))
+        self.tool_registry.register(ScheduleManagerTool(lambda: self.scheduler))
         self.tool_registry.register(DeepResearchTool(self.deep_research))
         self.tool_registry.register(LoadSkillTool(self.skill_registry))
 
@@ -282,6 +284,7 @@ class Application:
                 agent=self.agent,
                 storage=self.storage,
                 config=self.config,
+                scheduler=self.scheduler,
                 msg_hub=self.msg_hub,
                 web_adapter=self.web_adapter,
                 tool_registry=self.tool_registry,
@@ -330,8 +333,11 @@ class Application:
         # Start scheduler
         self.scheduler = AgentScheduler(
             self.storage, self.agent, self.event_bus, self.msg_hub,
+            config=self.config.scheduler,
         )
         await self.scheduler.start()
+        if self.api_app:
+            self.api_app.state.scheduler = self.scheduler
 
         logger.info("app.started")
 
@@ -375,7 +381,7 @@ class Application:
                 exc = self.api_task.exception()
                 if exc is not None:
                     raise RuntimeError("API server failed to start") from exc
-                break
+                raise RuntimeError("API server exited before becoming ready")
             if loop.time() >= deadline:
                 logger.warning(
                     "app.api_start_timeout",

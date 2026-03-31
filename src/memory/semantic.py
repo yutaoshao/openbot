@@ -8,6 +8,7 @@ and deduplication.
 from __future__ import annotations
 
 import json
+import math
 import uuid
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
@@ -59,6 +60,22 @@ If nothing worth extracting, return an empty array: []
 
 Conversation:
 """
+
+
+def _normalize_embedding(embedding: list[float]) -> list[float]:
+    """Normalize embeddings so L2 distance tracks angular similarity."""
+    if not embedding:
+        return []
+    norm = math.sqrt(sum(value * value for value in embedding))
+    if norm == 0:
+        return []
+    return [value / norm for value in embedding]
+
+
+def _l2_distance_to_cosine_similarity(distance: float) -> float:
+    """Convert L2 distance on normalized vectors to cosine similarity."""
+    similarity = 1.0 - ((distance * distance) / 2.0)
+    return max(-1.0, min(1.0, similarity))
 
 
 class SemanticMemory:
@@ -335,7 +352,8 @@ class SemanticMemory:
         Uses vector similarity when embeddings are available, otherwise
         skips dedup (returns None).
         """
-        if not embedding:
+        normalized_embedding = _normalize_embedding(embedding)
+        if not normalized_embedding:
             return None
 
         try:
@@ -348,7 +366,7 @@ class SemanticMemory:
                     ORDER BY distance
                     LIMIT 1
                     """,
-                    (json.dumps(embedding),),
+                    (json.dumps(normalized_embedding),),
                 )
                 row = await cursor.fetchone()
         except Exception:
@@ -363,8 +381,8 @@ class SemanticMemory:
         knowledge_id = row[0]
         distance = row[1]
 
-        # sqlite-vec returns cosine *distance*; similarity = 1 - distance
-        similarity = 1.0 - distance
+        # vec0 defaults to L2 distance; embeddings are normalized before search.
+        similarity = _l2_distance_to_cosine_similarity(distance)
         if similarity < _DUPLICATE_THRESHOLD:
             return None
 
@@ -386,6 +404,9 @@ class SemanticMemory:
         limit: int,
     ) -> list[dict[str, Any]]:
         """Search knowledge_embeddings vec0 table for similar entries."""
+        normalized_embedding = _normalize_embedding(embedding)
+        if not normalized_embedding:
+            return []
         try:
             async with self._db.get_connection() as conn:
                 cursor = await conn.execute(
@@ -396,7 +417,7 @@ class SemanticMemory:
                     ORDER BY distance
                     LIMIT ?
                     """,
-                    (json.dumps(embedding), limit),
+                    (json.dumps(normalized_embedding), limit),
                 )
                 rows = await cursor.fetchall()
         except Exception:
@@ -421,7 +442,8 @@ class SemanticMemory:
         embedding: list[float],
     ) -> None:
         """Insert an embedding vector into the knowledge_embeddings table."""
-        if not embedding:
+        normalized_embedding = _normalize_embedding(embedding)
+        if not normalized_embedding:
             return
         try:
             async with self._db.get_connection() as conn:
@@ -431,7 +453,7 @@ class SemanticMemory:
                         (knowledge_id, embedding)
                     VALUES (?, ?)
                     """,
-                    (knowledge_id, json.dumps(embedding)),
+                    (knowledge_id, json.dumps(normalized_embedding)),
                 )
                 await conn.commit()
         except Exception:
@@ -447,7 +469,8 @@ class SemanticMemory:
         embedding: list[float],
     ) -> None:
         """Replace the embedding for an existing knowledge entry."""
-        if not embedding:
+        normalized_embedding = _normalize_embedding(embedding)
+        if not normalized_embedding:
             return
         try:
             async with self._db.get_connection() as conn:
@@ -463,7 +486,7 @@ class SemanticMemory:
                         (knowledge_id, embedding)
                     VALUES (?, ?)
                     """,
-                    (knowledge_id, json.dumps(embedding)),
+                    (knowledge_id, json.dumps(normalized_embedding)),
                 )
                 await conn.commit()
         except Exception:

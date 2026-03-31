@@ -2,13 +2,19 @@
 
 from __future__ import annotations
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+
+MAX_CHAT_MESSAGE_CHARS = 32000
 
 
 class ChatRequest(BaseModel):
     """Request payload for ``POST /api/chat``."""
 
-    message: str = Field(min_length=1, description="User message text")
+    message: str = Field(
+        min_length=1,
+        max_length=MAX_CHAT_MESSAGE_CHARS,
+        description="User message text",
+    )
     conversation_id: str = Field(
         default="",
         description="Optional conversation id for memory continuity",
@@ -17,6 +23,14 @@ class ChatRequest(BaseModel):
         default="web",
         description="Source platform label used by the agent pipeline",
     )
+
+    @field_validator("message")
+    @classmethod
+    def _validate_message(cls, value: str) -> str:
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("message must not be blank")
+        return stripped
 
 
 class ChatResponse(BaseModel):

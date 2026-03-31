@@ -286,8 +286,22 @@ class SubAgent:
         if not tool:
             return ToolResult(content=f"Unknown tool: {name}", is_error=True)
 
+        tool_timeout = self._config.tool_timeout if self._config.tool_timeout > 0 else None
+
         try:
-            return await tool.execute(arguments)
+            if tool_timeout is None:
+                return await tool.execute(arguments)
+            return await asyncio.wait_for(tool.execute(arguments), timeout=tool_timeout)
+        except asyncio.TimeoutError:
+            logger.warning(
+                "sub_agent.tool_timeout",
+                tool=name,
+                timeout_s=round(tool_timeout or 0.0, 3),
+            )
+            return ToolResult(
+                content=f"Tool '{name}' timed out after {tool_timeout:.2f}s",
+                is_error=True,
+            )
         except Exception as e:
             logger.warning("sub_agent.tool_error", tool=name, error=str(e))
             return ToolResult(content=f"Tool error: {e}", is_error=True)

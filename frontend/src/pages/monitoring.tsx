@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 
+import { useI18n } from "../i18n";
 import { api, cssVar } from "../lib/api";
 
 type Latency = {
@@ -39,6 +40,7 @@ function useChartTheme() {
 }
 
 export function MonitoringPage(): JSX.Element {
+  const { t, formatDateTime, formatNumber } = useI18n();
   const latency = useQuery({
     queryKey: ["metrics", "latency", "30d"],
     queryFn: () => api.get<Latency>("/api/metrics/latency?period=30d"),
@@ -57,52 +59,71 @@ export function MonitoringPage(): JSX.Element {
   const costDeltaPct = prev7Cost > 0 ? ((last7Cost - prev7Cost) / prev7Cost) * 100 : 0;
 
   const ct = useChartTheme();
+  const latencyRows = (latency.data?.daily ?? []).map((item) => ({
+    ...item,
+    label: formatDateTime(item.date, { month: "numeric", day: "numeric" }),
+  }));
+  const tokenRows = (tokens.data?.daily ?? []).map((item) => ({
+    ...item,
+    label: formatDateTime(item.date, { month: "numeric", day: "numeric" }),
+  }));
+  const costRows = (cost.data?.daily ?? []).map((item) => ({
+    ...item,
+    label: formatDateTime(item.date, { month: "numeric", day: "numeric" }),
+  }));
+  const formatCurrency = (value: number) =>
+    formatNumber(value, {
+      style: "currency",
+      currency: "USD",
+      minimumFractionDigits: 4,
+      maximumFractionDigits: 4,
+    });
 
   return (
     <div className="grid" style={{ gridTemplateColumns: "1fr 1fr" }}>
       <section className="card" style={{ height: 320, gridColumn: "1 / -1" }}>
-        <h3>Latency Trend (30d)</h3>
+        <h3>{t("monitoring.latencyTrend30d")}</h3>
         <ResponsiveContainer width="100%" height="85%">
-          <LineChart data={latency.data?.daily ?? []}>
-            <XAxis dataKey="date" {...ct.axisProps} />
+          <LineChart data={latencyRows}>
+            <XAxis dataKey="label" {...ct.axisProps} />
             <YAxis {...ct.axisProps} />
             <Tooltip {...ct.tooltipProps} />
-            <Line type="monotone" dataKey="avg" stroke={ct.line1} strokeWidth={1.5} dot={false} />
-            <Line type="monotone" dataKey="p95" stroke={ct.line2} strokeWidth={1.5} dot={false} />
+            <Line type="monotone" dataKey="avg" name={t("monitoring.avg")} stroke={ct.line1} strokeWidth={1.5} dot={false} />
+            <Line type="monotone" dataKey="p95" name={t("monitoring.p95")} stroke={ct.line2} strokeWidth={1.5} dot={false} />
           </LineChart>
         </ResponsiveContainer>
       </section>
       <section className="card" style={{ height: 300 }}>
-        <h3>Token Trend (30d)</h3>
+        <h3>{t("monitoring.tokenTrend30d")}</h3>
         <ResponsiveContainer width="100%" height="85%">
-          <LineChart data={tokens.data?.daily ?? []}>
-            <XAxis dataKey="date" {...ct.axisProps} />
+          <LineChart data={tokenRows}>
+            <XAxis dataKey="label" {...ct.axisProps} />
             <YAxis {...ct.axisProps} />
             <Tooltip {...ct.tooltipProps} />
-            <Line type="monotone" dataKey="tokens_in" stroke={ct.line1} strokeWidth={1.5} dot={false} />
-            <Line type="monotone" dataKey="tokens_out" stroke={ct.line2} strokeWidth={1.5} dot={false} />
+            <Line type="monotone" dataKey="tokens_in" name={t("monitoring.tokensIn")} stroke={ct.line1} strokeWidth={1.5} dot={false} />
+            <Line type="monotone" dataKey="tokens_out" name={t("monitoring.tokensOut")} stroke={ct.line2} strokeWidth={1.5} dot={false} />
           </LineChart>
         </ResponsiveContainer>
       </section>
       <section className="card" style={{ height: 300 }}>
-        <h3>Cost Trend (30d)</h3>
+        <h3>{t("monitoring.costTrend30d")}</h3>
         <ResponsiveContainer width="100%" height="85%">
-          <LineChart data={cost.data?.daily ?? []}>
-            <XAxis dataKey="date" {...ct.axisProps} />
+          <LineChart data={costRows}>
+            <XAxis dataKey="label" {...ct.axisProps} />
             <YAxis {...ct.axisProps} />
             <Tooltip {...ct.tooltipProps} />
-            <Line type="monotone" dataKey="cost" stroke={ct.line1} strokeWidth={1.5} dot={false} />
+            <Line type="monotone" dataKey="cost" name={t("monitoring.cost")} stroke={ct.line1} strokeWidth={1.5} dot={false} />
           </LineChart>
         </ResponsiveContainer>
       </section>
       <section className="card" style={{ gridColumn: "1 / -1" }}>
-        <h3>Historical Comparison</h3>
+        <h3>{t("monitoring.history")}</h3>
         <p className="mono" style={{ margin: 0, color: "var(--text-muted)" }}>
-          Last 7d: ${last7Cost.toFixed(4)}
-          {" / "}Prev 7d: ${prev7Cost.toFixed(4)}
-          {" / "}Delta:{" "}
+          {t("monitoring.last7d")}: {formatCurrency(last7Cost)}
+          {" / "}{t("monitoring.prev7d")}: {formatCurrency(prev7Cost)}
+          {" / "}{t("monitoring.delta")}:{" "}
           <span style={{ color: costDeltaPct > 0 ? "var(--danger)" : "var(--success)" }}>
-            {costDeltaPct >= 0 ? "+" : ""}{costDeltaPct.toFixed(1)}%
+            {costDeltaPct >= 0 ? "+" : ""}{formatNumber(costDeltaPct, { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%
           </span>
         </p>
       </section>

@@ -8,6 +8,7 @@ provides both vector-based and text-based search for past conversations.
 from __future__ import annotations
 
 import json
+import math
 from typing import TYPE_CHECKING, Any
 
 from src.core.logging import get_logger
@@ -60,6 +61,18 @@ def _format_messages_for_llm(
     return formatted
 
 
+def _render_transcript(messages: list[dict[str, Any]]) -> str:
+    """Render conversation turns into a plain-text transcript for summarization prompts."""
+    lines: list[str] = []
+    for msg in messages:
+        role = msg.get("role", "user")
+        content = msg.get("content", "")
+        if not content:
+            continue
+        lines.append(f"{role}: {content}")
+    return "\n".join(lines)
+
+
 def _truncate_for_summary(
     messages: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
@@ -76,6 +89,16 @@ def _truncate_for_summary(
         "content": f"[... {omitted} messages omitted ...]",
     }
     return [*head, placeholder, *tail]
+
+
+def _normalize_embedding(embedding: list[float]) -> list[float]:
+    """Normalize embeddings so vec0's default L2 distance stays scale-invariant."""
+    if not embedding:
+        return []
+    norm = math.sqrt(sum(value * value for value in embedding))
+    if norm == 0:
+        return []
+    return [value / norm for value in embedding]
 
 
 class EpisodicMemory:
@@ -189,9 +212,13 @@ class EpisodicMemory:
         """Generate a concise title (< 50 chars) from the opening
         messages of a conversation."""
         context = messages[:_TITLE_CONTEXT_MESSAGES]
+        transcript = _render_transcript(context)
         llm_messages: list[dict[str, Any]] = [
             {"role": "system", "content": _TITLE_SYSTEM_PROMPT},
-            *context,
+            {
+                "role": "user",
+                "content": f"Conversation opening:\n{transcript}",
+            },
         ]
         try:
             response = await self._gateway.chat(llm_messages)
@@ -209,9 +236,13 @@ class EpisodicMemory:
     ) -> str:
         """Generate a 2-3 sentence summary of a conversation."""
         truncated = _truncate_for_summary(messages)
+        transcript = _render_transcript(truncated)
         llm_messages: list[dict[str, Any]] = [
             {"role": "system", "content": _SUMMARY_SYSTEM_PROMPT},
-            *truncated,
+            {
+                "role": "user",
+                "content": f"Conversation transcript:\n{transcript}",
+            },
         ]
         try:
             response = await self._gateway.chat(llm_messages)
@@ -244,7 +275,8 @@ class EpisodicMemory:
     ) -> None:
         """Embed the summary and upsert into the vec0 table."""
         embedding = await self._embedding.embed(summary)
-        if not embedding:
+        normalized_embedding = _normalize_embedding(embedding)
+        if not normalized_embedding:
             logger.debug(
                 "episodic.embedding_skipped",
                 conversation_id=conversation_id,
@@ -252,7 +284,7 @@ class EpisodicMemory:
             )
             return
 
-        embedding_json = json.dumps(embedding)
+        embedding_json = json.dumps(normalized_embedding)
         try:
             async with self._db.get_connection() as conn:
                 # Upsert: delete then insert (vec0 does not support
@@ -271,7 +303,7 @@ class EpisodicMemory:
             logger.debug(
                 "episodic.embedding_stored",
                 conversation_id=conversation_id,
-                dimensions=len(embedding),
+                dimensions=len(normalized_embedding),
             )
         except Exception:
             logger.warning(
@@ -287,7 +319,10 @@ class EpisodicMemory:
     ) -> list[dict[str, Any]]:
         """Search conversation_embeddings via cosine similarity and
         hydrate matching conversation records."""
-        embedding_json = json.dumps(query_embedding)
+        normalized_query = _normalize_embedding(query_embedding)
+        if not normalized_query:
+            return []
+        embedding_json = json.dumps(normalized_query)
         try:
             async with self._db.get_connection() as conn:
                 cursor = await conn.execute(

@@ -33,15 +33,28 @@ class OpenAICompatibleProvider:
 
         self.config = config
         self.model = config.model
+
+        import httpx
+
+        timeout = httpx.Timeout(
+            connect=config.connect_timeout,
+            read=config.read_timeout,
+            write=config.connect_timeout,
+            pool=config.connect_timeout,
+        )
         self.client = AsyncOpenAI(
             api_key=config.api_key,
             base_url=config.base_url,
+            timeout=timeout,
+            max_retries=0,  # We handle retries in ModelGateway
         )
 
         logger.info(
             "openai_compat.init",
             model=self.model,
             base_url=config.base_url,
+            connect_timeout=config.connect_timeout,
+            read_timeout=config.read_timeout,
         )
 
     async def chat(

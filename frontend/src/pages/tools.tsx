@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
+import { useI18n } from "../i18n";
 import { api } from "../lib/api";
 
 type ToolItem = {
@@ -12,6 +13,7 @@ type ToolItem = {
 };
 
 export function ToolsPage(): JSX.Element {
+  const { t, formatDateTime } = useI18n();
   const qc = useQueryClient();
   const list = useQuery({
     queryKey: ["tools"],
@@ -37,12 +39,12 @@ export function ToolsPage(): JSX.Element {
             {tool.description}
           </p>
           <div className="mono" style={{ color: "var(--text-dim)", display: "flex", flexDirection: "column", gap: 2, marginBottom: "var(--space-3)" }}>
-            <span>category: {tool.category}</span>
-            <span>last used: {tool.last_used || "never"}</span>
+            <span>{t("tools.category")}: {tool.category}</span>
+            <span>{t("tools.lastUsed")}: {tool.last_used ? formatDateTime(tool.last_used, { dateStyle: "medium", timeStyle: "short" }) : t("tools.never")}</span>
             <span>
-              status:{" "}
+              {t("tools.status")}:{" "}
               <span style={{ color: tool.enabled ? "var(--success)" : "var(--text-dim)" }}>
-                {tool.enabled ? "enabled" : "disabled"}
+                {tool.enabled ? t("tools.enabled") : t("tools.disabled")}
               </span>
             </span>
           </div>
@@ -55,7 +57,7 @@ export function ToolsPage(): JSX.Element {
             type="button"
             style={{ marginTop: "var(--space-3)" }}
           >
-            {tool.enabled ? "Disable" : "Enable"}
+            {tool.enabled ? t("tools.disable") : t("tools.enable")}
           </button>
         </section>
       ))}
