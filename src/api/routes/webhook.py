@@ -7,11 +7,11 @@ and feed them into the corresponding adapter for processing.
 from __future__ import annotations
 
 import hmac
-from typing import Any
 
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
+from src.channels.adapters.feishu_security import FeishuWebhookError
 from src.core.logging import get_logger
 
 logger = get_logger(__name__)
@@ -85,22 +85,19 @@ async def feishu_webhook(request: Request) -> JSONResponse:
         )
 
     try:
-        body: dict[str, Any] = await request.json()
-
-        # Verify token if configured
-        config = getattr(request.app.state, "config", None)
-        if config and config.feishu.verification_token:
-            header = body.get("header", {})
-            token = header.get("token", body.get("token", ""))
-            if token != config.feishu.verification_token:
-                logger.warning("webhook.feishu_token_mismatch")
-                return JSONResponse(
-                    status_code=403,
-                    content={"ok": False, "error": "Invalid token"},
-                )
-
-        result = await feishu.process_event(body)
+        payload = await request.body()
+        result = await feishu.process_callback(payload, request.headers)
         return JSONResponse(content=result)
+    except FeishuWebhookError as exc:
+        logger.warning(
+            "webhook.feishu_validation_failed",
+            status_code=exc.status_code,
+            error=str(exc),
+        )
+        return JSONResponse(
+            status_code=exc.status_code,
+            content={"ok": False, "error": str(exc)},
+        )
     except Exception:
         logger.exception("webhook.feishu_error")
         return JSONResponse(

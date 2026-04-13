@@ -42,6 +42,7 @@ class UnifiedMessage:
     sender_id: str
     conversation_id: str
     content: MessageContent
+    user_id: str | None = None
     reply_to: str | None = None
     timestamp: datetime = field(default_factory=lambda: datetime.now(UTC))
 

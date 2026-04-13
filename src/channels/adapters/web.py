@@ -86,7 +86,6 @@ class WebAdapter:
                         {
                             "tokens_in": chunk.usage.tokens_in,
                             "tokens_out": chunk.usage.tokens_out,
-                            "cost": chunk.usage.cost,
                         }
                         if chunk.usage
                         else None
