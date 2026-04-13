@@ -5,9 +5,9 @@
 model:
   primary:
     provider: openai_compatible
-    model: kimi-k2.5
-    base_url: https://ark.cn-beijing.volces.com/api/coding/v3
-    api_key_env: ARK_API_KEY          # reads from .env: ARK_API_KEY=xxx
+    model: qwen3-max-2026-01-23
+    base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
+    api_key_env: DASHSCOPE_API_KEY
     max_tokens: 4096
     temperature: 0.7
     pricing_input: 0.6                # per 1M tokens
@@ -23,10 +23,19 @@ model:
   max_retries: 3
 
 telegram:
+  enabled: true
   mode: polling
   bot_token_env: TELEGRAM_BOT_TOKEN   # reads from .env: TELEGRAM_BOT_TOKEN=xxx
   enable_streaming: false
   # allowed_user_ids: []  # Empty = allow all, set IDs to restrict access
+
+feishu:
+  enabled: true
+  mode: long_connection                    # webhook | long_connection
+  app_id_env: FEISHU_APP_ID
+  app_secret_env: FEISHU_APP_SECRET
+  verification_token_env: FEISHU_VERIFICATION_TOKEN
+  encrypt_key_env: FEISHU_ENCRYPT_KEY
 
 storage:
   db_path: data/openbot.db
