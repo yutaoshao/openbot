@@ -23,7 +23,7 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 # Bump this when schema changes require migration
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 6
 
 _SCHEMA_SQL = """\
 -- Schema version tracking
@@ -35,6 +35,7 @@ CREATE TABLE IF NOT EXISTS schema_version (
 -- Conversations
 CREATE TABLE IF NOT EXISTS conversations (
     id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL DEFAULT '',
     title TEXT,
     summary TEXT,
     platform TEXT NOT NULL DEFAULT 'unknown',
@@ -51,7 +52,6 @@ CREATE TABLE IF NOT EXISTS messages (
     model TEXT,
     tokens_in INTEGER DEFAULT 0,
     tokens_out INTEGER DEFAULT 0,
-    cost REAL DEFAULT 0.0,
     latency_ms INTEGER DEFAULT 0,
     tool_calls TEXT,
     metadata TEXT,
@@ -66,6 +66,7 @@ CREATE INDEX IF NOT EXISTS idx_messages_created_at
 -- Knowledge
 CREATE TABLE IF NOT EXISTS knowledge (
     id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL DEFAULT '',
     source_conversation_id TEXT,
     category TEXT NOT NULL,
     content TEXT NOT NULL,
@@ -88,6 +89,7 @@ CREATE INDEX IF NOT EXISTS idx_knowledge_expires_at
 -- Preferences
 CREATE TABLE IF NOT EXISTS preferences (
     id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL DEFAULT '',
     category TEXT NOT NULL,
     key TEXT NOT NULL,
     value TEXT NOT NULL,
@@ -95,11 +97,24 @@ CREATE TABLE IF NOT EXISTS preferences (
     confidence REAL DEFAULT 0.5,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
-    UNIQUE(category, key)
+    UNIQUE(user_id, category, key)
 );
 
 CREATE INDEX IF NOT EXISTS idx_preferences_category
     ON preferences(category);
+-- User identities
+CREATE TABLE IF NOT EXISTS user_identities (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    platform TEXT NOT NULL,
+    platform_user_id TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE(platform, platform_user_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_user_identities_user_id
+    ON user_identities(user_id);
 
 -- Metrics
 CREATE TABLE IF NOT EXISTS metrics (
@@ -283,6 +298,11 @@ class Database:
         # Apply core tables and indexes
         await conn.executescript(_SCHEMA_SQL)
 
+        if current_version != 0:
+            await self._apply_migrations(current_version)
+
+        await self._ensure_user_scope_indexes()
+
         # Apply vec0 virtual tables (executescript resets the connection
         # state which drops loaded extensions, so use individual executes)
         vec_sql = _VEC_TABLES_SQL.format(dimensions=self._embedding_dimensions)
@@ -318,3 +338,127 @@ class Database:
         except aiosqlite.OperationalError:
             # Table does not exist yet
             return 0
+
+    async def _apply_migrations(self, current_version: int) -> None:
+        """Apply incremental migrations required after the base schema."""
+        if current_version < 5:
+            await self._migrate_to_v5()
+        if current_version < 6:
+            await self._migrate_to_v6()
+
+    async def _migrate_to_v5(self) -> None:
+        """Backfill user-scoped memory tables and identity mapping support."""
+        await self._ensure_column(
+            "conversations",
+            "user_id",
+            "TEXT NOT NULL DEFAULT ''",
+        )
+        await self._ensure_column(
+            "knowledge",
+            "user_id",
+            "TEXT NOT NULL DEFAULT ''",
+        )
+        await self._recreate_preferences_with_user_scope()
+
+    async def _migrate_to_v6(self) -> None:
+        """Remove the deprecated cost column from the messages table."""
+        if not await self._has_column("messages", "cost"):
+            return
+
+        await self.connection.executescript(
+            """
+            CREATE TABLE messages_v6 (
+                id TEXT PRIMARY KEY,
+                conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+                role TEXT NOT NULL,
+                content TEXT NOT NULL,
+                model TEXT,
+                tokens_in INTEGER DEFAULT 0,
+                tokens_out INTEGER DEFAULT 0,
+                latency_ms INTEGER DEFAULT 0,
+                tool_calls TEXT,
+                metadata TEXT,
+                created_at TEXT NOT NULL
+            );
+
+            INSERT INTO messages_v6
+                (id, conversation_id, role, content, model, tokens_in,
+                 tokens_out, latency_ms, tool_calls, metadata, created_at)
+            SELECT
+                id, conversation_id, role, content, model, tokens_in,
+                tokens_out, latency_ms, tool_calls, metadata, created_at
+            FROM messages;
+
+            DROP TABLE messages;
+            ALTER TABLE messages_v6 RENAME TO messages;
+            """
+        )
+
+    async def _ensure_column(
+        self,
+        table: str,
+        column: str,
+        definition: str,
+    ) -> None:
+        """Add a missing column without failing on already-migrated DBs."""
+        if await self._has_column(table, column):
+            return
+        await self.connection.execute(
+            f"ALTER TABLE {table} ADD COLUMN {column} {definition}",
+        )
+
+    async def _has_column(self, table: str, column: str) -> bool:
+        """Return True when *table* already has *column*."""
+        cursor = await self.connection.execute(f"PRAGMA table_info({table})")
+        rows = await cursor.fetchall()
+        return any(row[1] == column for row in rows)
+
+    async def _recreate_preferences_with_user_scope(self) -> None:
+        """Rebuild the preferences table so uniqueness includes user_id."""
+        if await self._has_column("preferences", "user_id"):
+            return
+
+        await self.connection.executescript(
+            """
+            CREATE TABLE preferences_v5 (
+                id TEXT PRIMARY KEY,
+                user_id TEXT NOT NULL DEFAULT '',
+                category TEXT NOT NULL,
+                key TEXT NOT NULL,
+                value TEXT NOT NULL,
+                evidence TEXT,
+                confidence REAL DEFAULT 0.5,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                UNIQUE(user_id, category, key)
+            );
+
+            INSERT INTO preferences_v5
+                (id, user_id, category, key, value, evidence, confidence,
+                 created_at, updated_at)
+            SELECT
+                id, '', category, key, value, evidence, confidence,
+                created_at, updated_at
+            FROM preferences;
+
+            DROP TABLE preferences;
+            ALTER TABLE preferences_v5 RENAME TO preferences;
+            """
+        )
+
+    async def _ensure_user_scope_indexes(self) -> None:
+        """Create indexes that may need to be recreated after migrations."""
+        statements = [
+            "CREATE INDEX IF NOT EXISTS idx_messages_conversation_id "
+            "ON messages(conversation_id)",
+            "CREATE INDEX IF NOT EXISTS idx_messages_created_at "
+            "ON messages(created_at)",
+            "CREATE INDEX IF NOT EXISTS idx_conversations_user_id "
+            "ON conversations(user_id)",
+            "CREATE INDEX IF NOT EXISTS idx_knowledge_user_id "
+            "ON knowledge(user_id)",
+            "CREATE INDEX IF NOT EXISTS idx_preferences_user_id "
+            "ON preferences(user_id)",
+        ]
+        for statement in statements:
+            await self.connection.execute(statement)

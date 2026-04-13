@@ -41,12 +41,9 @@ class MetricsCollector:
         self,
         storage: Storage,
         event_bus: EventBus,
-        *,
-        monthly_budget: float | None = None,
     ) -> None:
         self.storage = storage
         self.event_bus = event_bus
-        self.monthly_budget = monthly_budget
         self._subscribe()
 
     def _subscribe(self) -> None:
@@ -54,6 +51,9 @@ class MetricsCollector:
         self.event_bus.subscribe("agent.metrics", self._record_agent_metrics)
         self.event_bus.subscribe("agent.think.complete", self._record_think_complete)
         self.event_bus.subscribe("agent.tool.executed", self._record_tool_event)
+        self.event_bus.subscribe("harness.completion_verified", self._record_completion_verified)
+        self.event_bus.subscribe("harness.queue_wait", self._record_queue_wait)
+        self.event_bus.subscribe("harness.tool_activated", self._record_tool_activation)
         self.event_bus.subscribe("model.request", self._record_model_request)
         self.event_bus.subscribe("app.agent_error", self._record_error_event)
 
@@ -71,6 +71,15 @@ class MetricsCollector:
 
     async def _record_tool_event(self, data: dict[str, Any]) -> None:
         await self._record("agent.tool.executed", data)
+
+    async def _record_completion_verified(self, data: dict[str, Any]) -> None:
+        await self._record("harness.completion_verified", data)
+
+    async def _record_queue_wait(self, data: dict[str, Any]) -> None:
+        await self._record("harness.queue_wait", data)
+
+    async def _record_tool_activation(self, data: dict[str, Any]) -> None:
+        await self._record("harness.tool_activated", data)
 
     async def _record_model_request(self, data: dict[str, Any]) -> None:
         await self._record("model.request", data)
@@ -236,31 +245,29 @@ class MetricsCollector:
         rows.sort(key=lambda item: item["count"], reverse=True)
         return {"period": period, "tools": rows}
 
-    async def get_cost(self, period: str = "30d") -> dict[str, Any]:
-        events = await self._query_period(period=period, event_name="model.request")
-        total = 0.0
-        daily: dict[str, float] = defaultdict(float)
-
-        for item in events:
-            data = item.get("data") or {}
-            cost = float(data.get("cost") or 0.0)
-            total += cost
-            ts = _parse_iso(item.get("timestamp"))
-            day = (ts.date().isoformat() if ts else "unknown")
-            daily[day] += cost
-
-        budget_progress = None
-        if self.monthly_budget and self.monthly_budget > 0:
-            budget_progress = total / self.monthly_budget
-
+    async def get_harness(self, period: str = "7d") -> dict[str, Any]:
+        """Return runtime metrics for harness-specific behaviors."""
+        start = self._period_start(period).isoformat()
+        grouped = await self.storage.metrics.query_multi(
+            event_names=[
+                "harness.queue_wait",
+                "harness.tool_activated",
+                "harness.completion_verified",
+            ],
+            start=start,
+        )
+        queue_events = grouped.get("harness.queue_wait", [])
+        queue_waits = [
+            int((item.get("data") or {}).get("queue_wait_ms") or 0)
+            for item in queue_events
+        ]
+        activated = grouped.get("harness.tool_activated", [])
+        verified = grouped.get("harness.completion_verified", [])
         return {
             "period": period,
-            "total_cost": total,
-            "per_request_cost": (total / len(events)) if events else 0.0,
-            "monthly_budget": self.monthly_budget,
-            "budget_progress": budget_progress,
-            "daily": [
-                {"date": date, "cost": value}
-                for date, value in sorted(daily.items(), key=lambda x: x[0])
-            ],
+            "queue_wait_avg_ms": int(mean(queue_waits)) if queue_waits else 0,
+            "queue_wait_p95_ms": _percentile(queue_waits, 0.95),
+            "serialized_requests": len(queue_events),
+            "tool_activation_events": len(activated),
+            "completion_rewrites": len(verified),
         }

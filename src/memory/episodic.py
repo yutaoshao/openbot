@@ -124,7 +124,9 @@ class EpisodicMemory:
     # ------------------------------------------------------------------
 
     async def on_conversation_end(
-        self, conversation_id: str,
+        self,
+        conversation_id: str,
+        user_id: str,
     ) -> None:
         """Archive a completed conversation.
 
@@ -167,6 +169,7 @@ class EpisodicMemory:
         logger.info(
             "episodic.archived",
             conversation_id=conversation_id,
+            user_id=user_id,
             title=title,
             summary_len=len(summary),
         )
@@ -174,6 +177,7 @@ class EpisodicMemory:
     async def recall(
         self,
         query: str,
+        user_id: str,
         limit: int = 5,
     ) -> list[dict[str, Any]]:
         """Recall past conversations relevant to *query*.
@@ -185,7 +189,7 @@ class EpisodicMemory:
 
         if embedding:
             fetch_n = limit * 3 if self._reranker else limit
-            items = await self._recall_by_vector(embedding, fetch_n)
+            items = await self._recall_by_vector(embedding, fetch_n, user_id)
         else:
             logger.debug(
                 "episodic.recall_fallback_text",
@@ -195,6 +199,7 @@ class EpisodicMemory:
             items = await self._storage.conversations.search(
                 query, fetch_n,
             )
+            items = self._filter_conversations(items, user_id)
 
         # Rerank if available
         if self._reranker and items:
@@ -316,6 +321,7 @@ class EpisodicMemory:
         self,
         query_embedding: list[float],
         limit: int,
+        user_id: str,
     ) -> list[dict[str, Any]]:
         """Search conversation_embeddings via cosine similarity and
         hydrate matching conversation records."""
@@ -346,7 +352,24 @@ class EpisodicMemory:
             conv_id = row[0]
             distance = row[1]
             conv = await self._storage.conversations.get(conv_id)
-            if conv is not None:
+            if conv is not None and self._belongs_to_user(conv, user_id):
                 conv["distance"] = distance
                 results.append(conv)
         return results
+
+    @staticmethod
+    def _filter_conversations(
+        items: list[dict[str, Any]],
+        user_id: str,
+    ) -> list[dict[str, Any]]:
+        return [
+            item
+            for item in items
+            if EpisodicMemory._belongs_to_user(item, user_id)
+        ]
+
+    @staticmethod
+    def _belongs_to_user(conv: dict[str, Any], user_id: str) -> bool:
+        """Allow user-specific and legacy conversations during recall."""
+        conversation_user_id = conv.get("user_id", "")
+        return conversation_user_id in {"", user_id}

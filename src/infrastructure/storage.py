@@ -88,7 +88,7 @@ def _row_to_dict(
 # ---------------------------------------------------------------------------
 
 _CONV_COLS = [
-    "id", "title", "summary", "platform", "created_at", "updated_at",
+    "id", "user_id", "title", "summary", "platform", "created_at", "updated_at",
 ]
 
 
@@ -102,16 +102,18 @@ class ConversationRepo:
         self,
         id: str,
         platform: str,
+        user_id: str = "",
         title: str | None = None,
     ) -> None:
         now = _now()
         async with self._db.get_connection() as conn:
             await conn.execute(
                 """
-                INSERT INTO conversations (id, platform, title, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?)
+                INSERT INTO conversations
+                    (id, user_id, platform, title, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?)
                 """,
-                (id, platform, title, now, now),
+                (id, user_id, platform, title, now, now),
             )
             await conn.commit()
 
@@ -127,7 +129,7 @@ class ConversationRepo:
         return _row_to_dict(row, _CONV_COLS)
 
     async def update(self, id: str, **fields: Any) -> None:
-        allowed = {"title", "summary", "updated_at"}
+        allowed = {"user_id", "title", "summary", "updated_at"}
         to_set = {k: v for k, v in fields.items() if k in allowed}
         if not to_set:
             return
@@ -138,6 +140,25 @@ class ConversationRepo:
             await conn.execute(
                 f"UPDATE conversations SET {set_clause} WHERE id = ?",
                 params,
+            )
+            await conn.commit()
+
+    async def reassign_user(
+        self,
+        source_user_id: str,
+        target_user_id: str,
+    ) -> None:
+        """Move all conversation ownership from one user to another."""
+        if not source_user_id or source_user_id == target_user_id:
+            return
+        async with self._db.get_connection() as conn:
+            await conn.execute(
+                """
+                UPDATE conversations
+                SET user_id = ?, updated_at = ?
+                WHERE user_id = ?
+                """,
+                (target_user_id, _now(), source_user_id),
             )
             await conn.commit()
 
@@ -191,7 +212,7 @@ class ConversationRepo:
 
 _MSG_COLS = [
     "id", "conversation_id", "role", "content", "model",
-    "tokens_in", "tokens_out", "cost", "latency_ms",
+    "tokens_in", "tokens_out", "latency_ms",
     "tool_calls", "metadata", "created_at",
 ]
 _MSG_JSON_FIELDS = {"tool_calls", "metadata"}
@@ -212,7 +233,6 @@ class MessageRepo:
         model: str | None = None,
         tokens_in: int | None = None,
         tokens_out: int | None = None,
-        cost: float | None = None,
         latency_ms: int | None = None,
         tool_calls: list[dict[str, Any]] | None = None,
         metadata: dict[str, Any] | None = None,
@@ -222,13 +242,13 @@ class MessageRepo:
                 """
                 INSERT INTO messages
                     (id, conversation_id, role, content, model,
-                     tokens_in, tokens_out, cost, latency_ms,
+                     tokens_in, tokens_out, latency_ms,
                      tool_calls, metadata, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     id, conversation_id, role, content, model,
-                    tokens_in, tokens_out, cost, latency_ms,
+                    tokens_in, tokens_out, latency_ms,
                     _json_dumps(tool_calls), _json_dumps(metadata),
                     _now(),
                 ),
@@ -283,11 +303,11 @@ class MessageRepo:
         used = 0
         for row in rows:
             content = row[_MSG_COLS.index("content")] or ""
-            cost = len(content)
-            if used + cost > char_budget:
+            content_chars = len(content)
+            if used + content_chars > char_budget:
                 break
             selected.append(row)
-            used += cost
+            used += content_chars
 
         selected.reverse()
         return [
@@ -326,7 +346,7 @@ class MessageRepo:
 # ---------------------------------------------------------------------------
 
 _KNOW_COLS = [
-    "id", "source_conversation_id", "category", "content", "tags",
+    "id", "user_id", "source_conversation_id", "category", "content", "tags",
     "priority", "confidence", "access_count",
     "created_at", "updated_at", "expires_at",
 ]
@@ -342,6 +362,7 @@ class KnowledgeRepo:
     async def add(
         self,
         id: str,
+        user_id: str,
         category: str,
         content: str,
         tags: list[str] | None = None,
@@ -355,13 +376,13 @@ class KnowledgeRepo:
             await conn.execute(
                 """
                 INSERT INTO knowledge
-                    (id, source_conversation_id, category, content, tags,
+                    (id, user_id, source_conversation_id, category, content, tags,
                      priority, confidence, access_count,
                      created_at, updated_at, expires_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)
                 """,
                 (
-                    id, source_conversation_id, category, content,
+                    id, user_id, source_conversation_id, category, content,
                     _json_dumps(tags), priority, confidence,
                     now, now, expires_at,
                 ),
@@ -438,17 +459,27 @@ class KnowledgeRepo:
         self,
         query: str,
         limit: int = 10,
+        user_id: str | None = None,
+        include_legacy: bool = False,
     ) -> list[dict[str, Any]]:
         pattern = f"%{query}%"
+        clauses = ["(content LIKE ? OR tags LIKE ?)"]
+        params: list[Any] = [pattern, pattern]
+        if user_id is not None:
+            if include_legacy:
+                clauses.append("(user_id = ? OR user_id = '')")
+            else:
+                clauses.append("user_id = ?")
+            params.append(user_id)
         async with self._db.get_connection() as conn:
             cursor = await conn.execute(
                 f"""
                 SELECT {', '.join(_KNOW_COLS)} FROM knowledge
-                WHERE content LIKE ? OR tags LIKE ?
+                WHERE {' AND '.join(clauses)}
                 ORDER BY access_count DESC, updated_at DESC
                 LIMIT ?
                 """,
-                (pattern, pattern, limit),
+                [*params, limit],
             )
             rows = await cursor.fetchall()
         return [
@@ -483,13 +514,32 @@ class KnowledgeRepo:
             await conn.commit()
             return cursor.rowcount
 
+    async def reassign_user(
+        self,
+        source_user_id: str,
+        target_user_id: str,
+    ) -> None:
+        """Move all user-scoped knowledge from one user to another."""
+        if not source_user_id or source_user_id == target_user_id:
+            return
+        async with self._db.get_connection() as conn:
+            await conn.execute(
+                """
+                UPDATE knowledge
+                SET user_id = ?, updated_at = ?
+                WHERE user_id = ?
+                """,
+                (target_user_id, _now(), source_user_id),
+            )
+            await conn.commit()
+
 
 # ---------------------------------------------------------------------------
 # PreferenceRepo
 # ---------------------------------------------------------------------------
 
 _PREF_COLS = [
-    "id", "category", "key", "value", "evidence",
+    "id", "user_id", "category", "key", "value", "evidence",
     "confidence", "created_at", "updated_at",
 ]
 _PREF_JSON_FIELDS = {"evidence"}
@@ -504,19 +554,20 @@ class PreferenceRepo:
     async def set(
         self,
         id: str,
+        user_id: str,
         category: str,
         key: str,
         value: str,
         evidence: list[str] | None = None,
         confidence: float | None = None,
     ) -> None:
-        """Insert or update a preference keyed by (category, key)."""
+        """Insert or update a preference keyed by (user_id, category, key)."""
         now = _now()
         async with self._db.get_connection() as conn:
             cursor = await conn.execute(
                 "SELECT id FROM preferences "
-                "WHERE category = ? AND key = ?",
-                (category, key),
+                "WHERE user_id = ? AND category = ? AND key = ?",
+                (user_id, category, key),
             )
             existing = await cursor.fetchone()
             if existing:
@@ -525,23 +576,23 @@ class PreferenceRepo:
                     UPDATE preferences
                     SET value = ?, evidence = ?, confidence = ?,
                         updated_at = ?
-                    WHERE category = ? AND key = ?
+                    WHERE user_id = ? AND category = ? AND key = ?
                     """,
                     (
                         value, _json_dumps(evidence), confidence,
-                        now, category, key,
+                        now, user_id, category, key,
                     ),
                 )
             else:
                 await conn.execute(
                     """
                     INSERT INTO preferences
-                        (id, category, key, value, evidence, confidence,
+                        (id, user_id, category, key, value, evidence, confidence,
                          created_at, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
-                        id, category, key, value,
+                        id, user_id, category, key, value,
                         _json_dumps(evidence), confidence, now, now,
                     ),
                 )
@@ -549,14 +600,30 @@ class PreferenceRepo:
 
     async def get(
         self,
+        user_id: str,
         category: str,
         key: str,
+        *,
+        include_legacy: bool = False,
     ) -> dict[str, Any] | None:
+        sql = (
+            f"SELECT {', '.join(_PREF_COLS)} FROM preferences "
+            "WHERE user_id = ? AND category = ? AND key = ?"
+        )
+        params: list[Any] = [user_id, category, key]
+        if include_legacy:
+            sql = (
+                f"SELECT {', '.join(_PREF_COLS)} FROM preferences "
+                "WHERE (user_id = ? OR user_id = '') "
+                "AND category = ? AND key = ? "
+                "ORDER BY CASE WHEN user_id = ? THEN 0 ELSE 1 END "
+                "LIMIT 1"
+            )
+            params.append(user_id)
         async with self._db.get_connection() as conn:
             cursor = await conn.execute(
-                f"SELECT {', '.join(_PREF_COLS)} FROM preferences "
-                "WHERE category = ? AND key = ?",
-                (category, key),
+                sql,
+                params,
             )
             row = await cursor.fetchone()
         if row is None:
@@ -565,35 +632,275 @@ class PreferenceRepo:
 
     async def get_by_category(
         self,
+        user_id: str,
         category: str,
+        *,
+        include_legacy: bool = True,
     ) -> list[dict[str, Any]]:
+        sql = (
+            f"SELECT {', '.join(_PREF_COLS)} FROM preferences "
+            "WHERE user_id = ? AND category = ? "
+            "ORDER BY key ASC"
+        )
+        params: list[Any] = [user_id, category]
+        if include_legacy:
+            sql = (
+                f"SELECT {', '.join(_PREF_COLS)} FROM preferences "
+                "WHERE (user_id = ? OR user_id = '') AND category = ? "
+                "ORDER BY user_id DESC, key ASC"
+            )
         async with self._db.get_connection() as conn:
             cursor = await conn.execute(
-                f"SELECT {', '.join(_PREF_COLS)} FROM preferences "
-                "WHERE category = ? ORDER BY key ASC",
-                (category,),
+                sql,
+                params,
             )
             rows = await cursor.fetchall()
         return [
             _row_to_dict(r, _PREF_COLS, _PREF_JSON_FIELDS) for r in rows
         ]
 
-    async def get_all(self) -> list[dict[str, Any]]:
+    async def get_all(
+        self,
+        user_id: str,
+        *,
+        include_legacy: bool = True,
+    ) -> list[dict[str, Any]]:
+        sql = (
+            f"SELECT {', '.join(_PREF_COLS)} FROM preferences "
+            "WHERE user_id = ? "
+            "ORDER BY category ASC, key ASC"
+        )
+        params: list[Any] = [user_id]
+        if include_legacy:
+            sql = (
+                f"SELECT {', '.join(_PREF_COLS)} FROM preferences "
+                "WHERE user_id = ? OR user_id = '' "
+                "ORDER BY user_id DESC, category ASC, key ASC"
+            )
         async with self._db.get_connection() as conn:
             cursor = await conn.execute(
-                f"SELECT {', '.join(_PREF_COLS)} FROM preferences "
-                "ORDER BY category ASC, key ASC",
+                sql,
+                params,
             )
             rows = await cursor.fetchall()
         return [
             _row_to_dict(r, _PREF_COLS, _PREF_JSON_FIELDS) for r in rows
         ]
 
-    async def delete(self, category: str, key: str) -> None:
+    async def delete(self, user_id: str, category: str, key: str) -> None:
         async with self._db.get_connection() as conn:
             await conn.execute(
-                "DELETE FROM preferences WHERE category = ? AND key = ?",
-                (category, key),
+                """
+                DELETE FROM preferences
+                WHERE user_id = ? AND category = ? AND key = ?
+                """,
+                (user_id, category, key),
+            )
+            await conn.commit()
+
+    async def reassign_user(
+        self,
+        source_user_id: str,
+        target_user_id: str,
+    ) -> None:
+        """Move preferences to another user, merging duplicate keys."""
+        if not source_user_id or source_user_id == target_user_id:
+            return
+
+        async with self._db.get_connection() as conn:
+            cursor = await conn.execute(
+                f"""
+                SELECT {', '.join(_PREF_COLS)} FROM preferences
+                WHERE user_id = ?
+                ORDER BY category ASC, key ASC
+                """,
+                (source_user_id,),
+            )
+            rows = await cursor.fetchall()
+            for row in rows:
+                pref = _row_to_dict(row, _PREF_COLS, _PREF_JSON_FIELDS)
+                target_cursor = await conn.execute(
+                    f"""
+                    SELECT {', '.join(_PREF_COLS)} FROM preferences
+                    WHERE user_id = ? AND category = ? AND key = ?
+                    """,
+                    (target_user_id, pref["category"], pref["key"]),
+                )
+                target_row = await target_cursor.fetchone()
+                if target_row is None:
+                    await conn.execute(
+                        """
+                        UPDATE preferences
+                        SET user_id = ?, updated_at = ?
+                        WHERE id = ?
+                        """,
+                        (target_user_id, _now(), pref["id"]),
+                    )
+                    continue
+
+                target_pref = _row_to_dict(
+                    target_row,
+                    _PREF_COLS,
+                    _PREF_JSON_FIELDS,
+                )
+                merged_evidence = self._merge_evidence(
+                    target_pref.get("evidence"),
+                    pref.get("evidence"),
+                )
+                merged_confidence = max(
+                    float(target_pref.get("confidence") or 0.0),
+                    float(pref.get("confidence") or 0.0),
+                )
+                await conn.execute(
+                    """
+                    UPDATE preferences
+                    SET evidence = ?, confidence = ?, updated_at = ?
+                    WHERE id = ?
+                    """,
+                    (
+                        _json_dumps(merged_evidence),
+                        merged_confidence,
+                        _now(),
+                        target_pref["id"],
+                    ),
+                )
+                await conn.execute(
+                    "DELETE FROM preferences WHERE id = ?",
+                    (pref["id"],),
+                )
+            await conn.commit()
+
+    @staticmethod
+    def _merge_evidence(
+        left: list[str] | None,
+        right: list[str] | None,
+    ) -> list[str]:
+        merged: list[str] = []
+        for value in [*(left or []), *(right or [])]:
+            if value not in merged:
+                merged.append(value)
+        return merged
+
+
+# ---------------------------------------------------------------------------
+# UserIdentityRepo
+# ---------------------------------------------------------------------------
+
+_IDENTITY_COLS = [
+    "id", "user_id", "platform", "platform_user_id", "created_at", "updated_at",
+]
+
+
+class UserIdentityRepo:
+    """Mappings from platform-specific accounts to canonical user ids."""
+
+    def __init__(self, db: Database) -> None:
+        self._db = db
+
+    async def get(
+        self,
+        platform: str,
+        platform_user_id: str,
+    ) -> dict[str, Any] | None:
+        async with self._db.get_connection() as conn:
+            cursor = await conn.execute(
+                f"""
+                SELECT {', '.join(_IDENTITY_COLS)} FROM user_identities
+                WHERE platform = ? AND platform_user_id = ?
+                """,
+                (platform, platform_user_id),
+            )
+            row = await cursor.fetchone()
+        if row is None:
+            return None
+        return _row_to_dict(row, _IDENTITY_COLS)
+
+    async def set(
+        self,
+        *,
+        user_id: str,
+        platform: str,
+        platform_user_id: str,
+    ) -> dict[str, Any]:
+        now = _now()
+        existing = await self.get(platform, platform_user_id)
+        async with self._db.get_connection() as conn:
+            if existing is None:
+                identity_id = _new_id()
+                await conn.execute(
+                    """
+                    INSERT INTO user_identities
+                        (id, user_id, platform, platform_user_id, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        identity_id,
+                        user_id,
+                        platform,
+                        platform_user_id,
+                        now,
+                        now,
+                    ),
+                )
+            else:
+                identity_id = existing["id"]
+                await conn.execute(
+                    """
+                    UPDATE user_identities
+                    SET user_id = ?, updated_at = ?
+                    WHERE id = ?
+                    """,
+                    (user_id, now, identity_id),
+                )
+            await conn.commit()
+        result = await self.get(platform, platform_user_id)
+        if result is None:
+            raise RuntimeError("Failed to persist user identity mapping.")
+        return result
+
+    async def list_all(
+        self,
+        *,
+        user_id: str | None = None,
+        platform: str | None = None,
+    ) -> list[dict[str, Any]]:
+        clauses: list[str] = []
+        params: list[Any] = []
+        if user_id is not None:
+            clauses.append("user_id = ?")
+            params.append(user_id)
+        if platform is not None:
+            clauses.append("platform = ?")
+            params.append(platform)
+        where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
+        async with self._db.get_connection() as conn:
+            cursor = await conn.execute(
+                f"""
+                SELECT {', '.join(_IDENTITY_COLS)} FROM user_identities
+                {where}
+                ORDER BY user_id ASC, platform ASC, platform_user_id ASC
+                """,
+                params,
+            )
+            rows = await cursor.fetchall()
+        return [_row_to_dict(row, _IDENTITY_COLS) for row in rows]
+
+    async def reassign_user(
+        self,
+        source_user_id: str,
+        target_user_id: str,
+    ) -> None:
+        """Move all identity rows from one canonical user to another."""
+        if not source_user_id or source_user_id == target_user_id:
+            return
+        async with self._db.get_connection() as conn:
+            await conn.execute(
+                """
+                UPDATE user_identities
+                SET user_id = ?, updated_at = ?
+                WHERE user_id = ?
+                """,
+                (target_user_id, _now(), source_user_id),
             )
             await conn.commit()
 
@@ -894,6 +1201,7 @@ class LogRepo:
         *,
         trace_id: str | None = None,
         interaction_id: str | None = None,
+        platform: str | None = None,
         surface: str | None = None,
         level: str | None = None,
         event: str | None = None,
@@ -912,6 +1220,9 @@ class LogRepo:
         if interaction_id:
             clauses.append("interaction_id = ?")
             params.append(interaction_id)
+        if platform:
+            clauses.append("platform = ?")
+            params.append(platform)
         if surface:
             clauses.append("surface = ?")
             params.append(surface)
@@ -948,6 +1259,7 @@ class LogRepo:
         self,
         *,
         since: str | None = None,
+        platform: str | None = None,
         surface: str | None = None,
         level: str | None = None,
     ) -> int:
@@ -957,6 +1269,9 @@ class LogRepo:
         if since:
             clauses.append("timestamp >= ?")
             params.append(since)
+        if platform:
+            clauses.append("platform = ?")
+            params.append(platform)
         if surface:
             clauses.append("surface = ?")
             params.append(surface)
@@ -985,6 +1300,7 @@ class Storage:
         self.messages = MessageRepo(db)
         self.knowledge = KnowledgeRepo(db)
         self.preferences = PreferenceRepo(db)
+        self.user_identities = UserIdentityRepo(db)
         self.metrics = MetricsRepo(db)
         self.schedules = ScheduleRepo(db)
         self.logs = LogRepo(db)

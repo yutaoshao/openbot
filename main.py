@@ -17,10 +17,12 @@ from src.agent.agent import Agent
 from src.agent.conversation import ConversationManager
 from src.agent.deep_research import DeepResearch
 from src.agent.scheduler import AgentScheduler
+from src.agent.serialization import UserExecutionCoordinator
 from src.agent.skill import LoadSkillTool, SkillRegistry
 from src.agent.sub_agent import SubAgent
 from src.api import create_api_app
 from src.channels.adapters.feishu import FeishuAdapter
+from src.channels.adapters.feishu_long_connection import FeishuLongConnectionAdapter
 from src.channels.adapters.telegram import TelegramAdapter
 from src.channels.adapters.web import WebAdapter
 from src.channels.hub import MsgHub
@@ -29,6 +31,7 @@ from src.core.config import load_config
 from src.core.logging import disable_db_logging, enable_db_logging, get_logger, setup_logging
 from src.core.monitor import MetricsCollector
 from src.core.trace import setup_tracing, trace_scope
+from src.identity.service import IdentityService
 from src.infrastructure.database import Database
 from src.infrastructure.embedding import EmbeddingService, NullEmbeddingService
 from src.infrastructure.event_bus import EventBus
@@ -43,10 +46,11 @@ from src.tools.builtin import (
     DeepResearchTool,
     FileManagerTool,
     ScheduleManagerTool,
+    ToolSearchTool,
     WebFetchTool,
     WebSearchTool,
 )
-from src.tools.registry import ToolRegistry
+from src.tools.registry import CORE_VISIBILITY, DEFERRED_VISIBILITY, ToolRegistry
 
 logger = get_logger(__name__)
 
@@ -73,6 +77,7 @@ class Application:
             embedding_dimensions=self.config.embedding.dimensions,
         )
         self.storage = Storage(self.database)
+        self.identity_service = IdentityService(self.storage)
 
         # Embedding service
         if self.config.embedding.enabled:
@@ -148,6 +153,7 @@ class Application:
         self.api_server: _UvicornServerNoSignals | None = None
         self.api_app: Any | None = None
         self.api_task: asyncio.Task[None] | None = None
+        self.execution_coordinator = UserExecutionCoordinator()
 
         self.msg_hub.register_adapter("web", self.web_adapter)
 
@@ -156,13 +162,45 @@ class Application:
 
     def _register_builtin_tools(self) -> None:
         """Register all built-in tools."""
-        self.tool_registry.register(WebSearchTool())
-        self.tool_registry.register(WebFetchTool())
-        self.tool_registry.register(CodeExecutorTool())
-        self.tool_registry.register(FileManagerTool(workspace=Path(self.config.storage.workspace_path)))
-        self.tool_registry.register(ScheduleManagerTool(lambda: self.scheduler))
-        self.tool_registry.register(DeepResearchTool(self.deep_research))
-        self.tool_registry.register(LoadSkillTool(self.skill_registry))
+        self.tool_registry.register(
+            ToolSearchTool(self.tool_registry),
+            visibility=CORE_VISIBILITY,
+        )
+        self.tool_registry.register(
+            WebSearchTool(),
+            visibility=CORE_VISIBILITY,
+            keywords=["search", "news", "最新", "查一下"],
+        )
+        self.tool_registry.register(
+            WebFetchTool(),
+            visibility=CORE_VISIBILITY,
+            keywords=["read url", "fetch page", "网页", "文档"],
+        )
+        self.tool_registry.register(
+            CodeExecutorTool(),
+            visibility=CORE_VISIBILITY,
+            keywords=["run code", "python", "calculate", "计算"],
+        )
+        self.tool_registry.register(
+            FileManagerTool(workspace=Path(self.config.storage.workspace_path)),
+            visibility=CORE_VISIBILITY,
+            keywords=["file", "workspace", "read file", "write file", "文件"],
+        )
+        self.tool_registry.register(
+            ScheduleManagerTool(lambda: self.scheduler),
+            visibility=CORE_VISIBILITY,
+            keywords=["schedule", "cron", "later", "提醒", "定时"],
+        )
+        self.tool_registry.register(
+            DeepResearchTool(self.deep_research),
+            visibility=DEFERRED_VISIBILITY,
+            keywords=["deep research", "investigate deeply", "调研", "深度研究"],
+        )
+        self.tool_registry.register(
+            LoadSkillTool(self.skill_registry),
+            visibility=DEFERRED_VISIBILITY,
+            keywords=["skill", "workflow", "规范", "技能"],
+        )
 
     async def _on_message_receive(self, data: dict[str, Any]) -> None:
         """Handle incoming message: run agent and publish response."""
@@ -171,6 +209,13 @@ class Application:
 
         if not input_text:
             return
+
+        message.user_id = await self.identity_service.resolve_user_id(
+            platform=message.platform,
+            platform_user_id=message.sender_id,
+            conversation_id=message.conversation_id,
+            user_id=message.user_id,
+        )
 
         with trace_scope(
             interaction_id=message.conversation_id,
@@ -186,15 +231,25 @@ class Application:
             adapter = self.msg_hub.get_adapter(message.platform)
 
             try:
-                use_streaming = isinstance(adapter, StreamingAdapter) and (
-                    message.platform != "telegram"
-                    or self.config.telegram.enable_streaming
-                )
+                async with self.execution_coordinator.serialize(
+                    message.user_id or message.conversation_id,
+                ) as queue_wait_ms:
+                    await self.event_bus.publish("harness.queue_wait", {
+                        "conversation_id": message.conversation_id,
+                        "platform": message.platform,
+                        "user_id": message.user_id or "",
+                        "queue_wait_ms": int(queue_wait_ms),
+                    })
 
-                if use_streaming:
-                    await self._handle_streaming(message, adapter)
-                else:
-                    await self._handle_non_streaming(message)
+                    use_streaming = isinstance(adapter, StreamingAdapter) and (
+                        message.platform != "telegram"
+                        or self.config.telegram.enable_streaming
+                    )
+
+                    if use_streaming:
+                        await self._handle_streaming(message, adapter)
+                    else:
+                        await self._handle_non_streaming(message)
 
             except Exception:
                 logger.exception(
@@ -222,6 +277,7 @@ class Application:
             input_text=message.content.text,
             conversation_id=message.conversation_id,
             platform=message.platform,
+            user_id=message.user_id or "",
         )
 
         await adapter.send_streaming(message.conversation_id, stream)
@@ -247,6 +303,7 @@ class Application:
             input_text=message.content.text,
             conversation_id=message.conversation_id,
             platform=message.platform,
+            user_id=message.user_id or "",
         )
 
         await self.event_bus.publish("agent.response", {
@@ -256,7 +313,6 @@ class Application:
             "latency_ms": result.latency_ms,
             "tokens_in": result.tokens_in,
             "tokens_out": result.tokens_out,
-            "cost": result.cost,
         })
 
         logger.info(
@@ -265,7 +321,6 @@ class Application:
             latency_ms=result.latency_ms,
             token_in=result.tokens_in,
             token_out=result.tokens_out,
-            cost=f"${result.cost:.4f}",
             mode="non_streaming",
         )
 
@@ -289,6 +344,7 @@ class Application:
                 web_adapter=self.web_adapter,
                 tool_registry=self.tool_registry,
                 monitor=self.monitor,
+                identity_service=self.identity_service,
             )
             uvicorn_config = uvicorn.Config(
                 app=self.api_app,
@@ -302,33 +358,61 @@ class Application:
             await self._wait_for_api_ready()
 
         # Start Telegram adapter
-        if self.config.telegram.bot_token:
-            try:
-                self.telegram = TelegramAdapter(self.config.telegram, self.msg_hub)
-                self.msg_hub.register_adapter("telegram", self.telegram)
-                await self.telegram.start()
-                # Inject into API state for webhook route
-                if self.api_app:
-                    self.api_app.state.telegram = self.telegram
-                logger.info("app.telegram_ready", mode=self.config.telegram.mode)
-            except Exception:
-                self.telegram = None
-                logger.exception("app.telegram_failed")
+        if not self.config.telegram.enabled:
+            logger.info("app.telegram_disabled")
         else:
-            logger.warning("app.telegram_skipped", reason="no bot token configured")
+            missing_envs = self.config.telegram.missing_required_env_vars()
+            if missing_envs:
+                logger.warning(
+                    "app.telegram_incomplete",
+                    missing_env_vars=missing_envs,
+                )
+            else:
+                try:
+                    self.telegram = TelegramAdapter(self.config.telegram, self.msg_hub)
+                    self.msg_hub.register_adapter("telegram", self.telegram)
+                    await self.telegram.start()
+                    # Inject into API state for webhook route
+                    if self.api_app:
+                        self.api_app.state.telegram = self.telegram
+                    logger.info("app.telegram_ready", mode=self.config.telegram.mode)
+                except Exception:
+                    self.telegram = None
+                    logger.exception("app.telegram_failed")
 
         # Start Feishu adapter
-        if self.config.feishu.enabled and self.config.feishu.app_id:
-            try:
-                self.feishu = FeishuAdapter(self.config.feishu, self.msg_hub)
-                self.msg_hub.register_adapter("feishu", self.feishu)
-                await self.feishu.start()
-                if self.api_app:
-                    self.api_app.state.feishu = self.feishu
-                logger.info("app.feishu_ready")
-            except Exception:
-                self.feishu = None
-                logger.exception("app.feishu_failed")
+        if not self.config.feishu.enabled:
+            logger.info("app.feishu_disabled")
+        else:
+            missing_envs = self.config.feishu.missing_required_env_vars()
+            if missing_envs:
+                logger.warning(
+                    "app.feishu_incomplete",
+                    missing_env_vars=missing_envs,
+                )
+            else:
+                try:
+                    if self.config.feishu.mode == "long_connection":
+                        self.feishu = FeishuLongConnectionAdapter(
+                            self.config.feishu,
+                            self.msg_hub,
+                        )
+                    else:
+                        self.feishu = FeishuAdapter(self.config.feishu, self.msg_hub)
+                    self.msg_hub.register_adapter("feishu", self.feishu)
+                    await self.feishu.start()
+                    if self.api_app and self.config.feishu.mode == "webhook":
+                        self.api_app.state.feishu = self.feishu
+                    logger.info(
+                        "app.feishu_ready",
+                        mode=self.config.feishu.mode,
+                        webhook_path="/webhook/feishu"
+                        if self.config.feishu.mode == "webhook"
+                        else None,
+                    )
+                except Exception:
+                    self.feishu = None
+                    logger.exception("app.feishu_failed")
 
         # Start scheduler
         self.scheduler = AgentScheduler(

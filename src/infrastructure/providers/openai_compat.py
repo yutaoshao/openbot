@@ -110,15 +110,10 @@ class OpenAICompatibleProvider:
         tokens_in = response.usage.prompt_tokens if response.usage else 0
         tokens_out = response.usage.completion_tokens if response.usage else 0
 
-        # Cost calculation: use pricing from config, fallback to 0
-        cost = (
-            tokens_in * self.config.pricing_input + tokens_out * self.config.pricing_output
-        ) / 1_000_000
-
         return ModelResponse(
             text=text,
             tool_calls=tool_calls,
-            usage=Usage(tokens_in=tokens_in, tokens_out=tokens_out, cost=cost),
+            usage=Usage(tokens_in=tokens_in, tokens_out=tokens_out),
             model=self.model,
             latency_ms=latency_ms,
         )
@@ -217,7 +212,7 @@ class OpenAICompatibleProvider:
                 tool_call=ToolCall(id=acc["id"], name=acc["name"], arguments=args),
             )
 
-        # Cost — estimate tokens if the API didn't report usage
+        # Estimate tokens if the API didn't report usage
         latency_ms = int((time.monotonic() - start) * 1000)
 
         if tokens_in == 0 and tokens_out == 0:
@@ -234,14 +229,9 @@ class OpenAICompatibleProvider:
                 tokens_out=tokens_out,
             )
 
-        cost = (
-            tokens_in * self.config.pricing_input
-            + tokens_out * self.config.pricing_output
-        ) / 1_000_000
-
         yield StreamChunk(
             type="done",
-            usage=Usage(tokens_in=tokens_in, tokens_out=tokens_out, cost=cost),
+            usage=Usage(tokens_in=tokens_in, tokens_out=tokens_out),
             model=self.model,
         )
 

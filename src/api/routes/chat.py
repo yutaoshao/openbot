@@ -45,5 +45,4 @@ async def post_chat(payload: ChatRequest, request: Request) -> ChatResponse:
         latency_ms=result.latency_ms,
         tokens_in=result.tokens_in,
         tokens_out=result.tokens_out,
-        cost=result.cost,
     )

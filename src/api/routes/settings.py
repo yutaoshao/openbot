@@ -7,6 +7,7 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
 
+from src.api.runtime_status import build_runtime_status
 from src.core.config import AppConfig
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
@@ -35,7 +36,9 @@ def _get_config(request: Request) -> AppConfig:
 @router.get("")
 async def get_settings(request: Request) -> dict[str, Any]:
     config = _get_config(request)
-    return config.model_dump()
+    settings = config.model_dump()
+    settings["runtime"] = build_runtime_status(request.app)
+    return settings
 
 
 @router.put("")

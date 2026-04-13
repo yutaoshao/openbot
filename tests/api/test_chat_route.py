@@ -14,7 +14,6 @@ class _FakeAgentResponse:
     latency_ms: int
     tokens_in: int
     tokens_out: int
-    cost: float
 
 
 class _FakeAgent:
@@ -34,7 +33,6 @@ class _FakeAgent:
             latency_ms=12,
             tokens_in=3,
             tokens_out=5,
-            cost=0.0008,
         )
 
 
@@ -44,7 +42,8 @@ def test_health_returns_ok() -> None:
     response = client.get("/health")
 
     assert response.status_code == 200
-    assert response.json() == {"status": "ok"}
+    assert response.json()["status"] == "ok"
+    assert response.json()["runtime"]["api"]["status"] == "ready"
 
 
 def test_chat_returns_503_when_agent_is_missing() -> None:
@@ -80,7 +79,6 @@ def test_chat_returns_agent_output() -> None:
         "latency_ms": 12,
         "tokens_in": 3,
         "tokens_out": 5,
-        "cost": 0.0008,
     }
     assert fake_agent.calls == [("hi", "conv-123", "web")]
 

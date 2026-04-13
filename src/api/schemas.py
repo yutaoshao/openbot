@@ -42,13 +42,32 @@ class ChatResponse(BaseModel):
     latency_ms: int
     tokens_in: int
     tokens_out: int
-    cost: float
 
 
 class HealthResponse(BaseModel):
     """Response payload for health checks."""
 
     status: str
+    runtime: dict[str, dict[str, str | bool | list[str] | None]] | None = None
+
+
+class IdentityBindRequest(BaseModel):
+    """Bind a platform account to a canonical internal user id."""
+
+    user_id: str = Field(min_length=1)
+    platform: str = Field(min_length=1)
+    platform_user_id: str = Field(min_length=1)
+
+
+class IdentityItem(BaseModel):
+    """Stored user identity mapping."""
+
+    id: str
+    user_id: str
+    platform: str
+    platform_user_id: str
+    created_at: str
+    updated_at: str
 
 
 class ConversationSummary(BaseModel):
@@ -73,7 +92,6 @@ class MessageItem(BaseModel):
     model: str | None = None
     tokens_in: int | None = None
     tokens_out: int | None = None
-    cost: float | None = None
     latency_ms: int | None = None
     tool_calls: list[dict] | None = None
     metadata: dict | None = None
@@ -132,6 +150,7 @@ class ToolStatusItem(BaseModel):
     name: str
     description: str
     category: str
+    visibility: str | None = None
     enabled: bool
     config: dict
     last_used: str | None = None

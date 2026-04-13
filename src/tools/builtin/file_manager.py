@@ -75,17 +75,14 @@ class FileManagerTool:
         return "filesystem"
 
     def _resolve_safe_path(self, relative: str) -> Path | None:
-        """Resolve path and verify it stays within workspace.
-
-        Returns None if path traversal is detected.
-        """
+        """Resolve path and verify it stays within workspace."""
+        workspace_root = self.workspace
         try:
-            target = (self.workspace / relative).resolve()
-            # Prevent path traversal outside workspace
-            if not str(target).startswith(str(self.workspace)):
+            target = (workspace_root / relative).resolve()
+            if not target.is_relative_to(workspace_root):
                 return None
             return target
-        except (ValueError, OSError):
+        except (OSError, RuntimeError):
             return None
 
     async def execute(self, args: dict[str, Any]) -> ToolResult:

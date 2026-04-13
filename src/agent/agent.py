@@ -18,9 +18,12 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
+from src.agent.prompt_fragments import build_prompt_fragments
+from src.agent.verification import verify_final_response
 from src.core.logging import get_logger
 from src.core.trace import TraceContext
 from src.infrastructure.model_gateway import StreamChunk, Usage
+from src.tools.hooks import ToolHookManager, ToolSearchActivationHook
 from src.tools.runtime import ToolExecutionContext, tool_execution_context
 
 if TYPE_CHECKING:
@@ -58,7 +61,6 @@ class AgentResponse:
     model: str = ""
     tokens_in: int = 0
     tokens_out: int = 0
-    cost: float = 0.0
     latency_ms: int = 0
     iterations: int = 0
     tool_calls_made: list[dict[str, Any]] = field(default_factory=list)
@@ -83,6 +85,7 @@ class Agent:
         self.tool_registry = tool_registry
         self.conversation_manager = conversation_manager
         self.skill_registry = skill_registry
+        self._tool_hooks = ToolHookManager([ToolSearchActivationHook()])
 
 
     async def run(
@@ -90,6 +93,7 @@ class Agent:
         input_text: str,
         conversation_id: str = "",
         platform: str = "unknown",
+        user_id: str = "",
     ) -> AgentResponse:
         """Execute the agent ReAct loop (non-streaming).
 
@@ -101,11 +105,15 @@ class Agent:
         model = ""
         total_tokens_in = 0
         total_tokens_out = 0
-        total_cost = 0.0
         tool_calls_made: list[dict[str, Any]] = []
         iterations = 0
 
-        async for chunk in self.run_stream(input_text, conversation_id, platform):
+        async for chunk in self.run_stream(
+            input_text,
+            conversation_id,
+            platform,
+            user_id,
+        ):
             if chunk.type == "text":
                 content += chunk.text
             elif chunk.type == "tool_status":
@@ -116,7 +124,6 @@ class Agent:
                 if chunk.usage:
                     total_tokens_in = chunk.usage.tokens_in
                     total_tokens_out = chunk.usage.tokens_out
-                    total_cost = chunk.usage.cost
 
         total_latency = int((time.monotonic() - start) * 1000)
 
@@ -125,7 +132,6 @@ class Agent:
             model=model,
             tokens_in=total_tokens_in,
             tokens_out=total_tokens_out,
-            cost=total_cost,
             latency_ms=total_latency,
             iterations=iterations,
             tool_calls_made=tool_calls_made,
@@ -136,6 +142,7 @@ class Agent:
         input_text: str,
         conversation_id: str = "",
         platform: str = "unknown",
+        user_id: str = "",
     ) -> AsyncIterator[StreamChunk]:
         """Execute the agent ReAct loop, yielding StreamChunks."""
         # Create trace context for this request
@@ -145,7 +152,11 @@ class Agent:
         )
         with ctx:
             async for chunk in self._run_stream_inner(
-                input_text, conversation_id, platform, ctx,
+                input_text,
+                conversation_id,
+                platform,
+                user_id,
+                ctx,
             ):
                 yield chunk
 
@@ -154,11 +165,15 @@ class Agent:
         input_text: str,
         conversation_id: str,
         platform: str,
+        user_id: str,
         ctx: TraceContext,
     ) -> AsyncIterator[StreamChunk]:
         """Inner streaming loop with trace context active."""
         messages, tools = await self._prepare(
-            input_text, conversation_id, platform,
+            input_text,
+            conversation_id,
+            platform,
+            user_id,
         )
 
         await self.event_bus.publish("agent.think.start", {
@@ -169,18 +184,26 @@ class Agent:
         iterations = 0
         total_tokens_in = 0
         total_tokens_out = 0
-        total_cost = 0.0
         all_tool_calls: list[dict[str, Any]] = []
         final_text = ""
         final_model = ""
         task_start = time.monotonic()
         task_timeout = self.config.task_timeout  # 0 = no limit
-        max_task_cost = self.config.max_task_cost  # 0 = no limit
         stuck_threshold = self.config.stuck_detection_threshold  # 0 = disable
         # Track recent tool call signatures for stuck detection
         _recent_tool_sigs: list[str] = []
 
         while iterations < self.max_iterations:
+            if self.conversation_manager and conversation_id:
+                current_task_state = self.conversation_manager.get_task_state(
+                    conversation_id,
+                )
+            else:
+                current_task_state = None
+            tools = self._resolve_tools(
+                input_text,
+                task_state=current_task_state,
+            )
             # Check task-level timeout
             if task_timeout > 0:
                 elapsed = time.monotonic() - task_start
@@ -197,22 +220,6 @@ class Agent:
                         iterations=iterations,
                     )
                     break
-
-            # Check cost cap
-            if max_task_cost > 0 and total_cost >= max_task_cost:
-                final_text = (
-                    f"Task exceeded cost limit (${max_task_cost:.2f}). "
-                    f"Spent ${total_cost:.4f} over {iterations} iterations."
-                )
-                logger.warning(
-                    "task_failed",
-                    surface="operational",
-                    reason="cost_limit",
-                    cost=total_cost,
-                    limit=max_task_cost,
-                    iterations=iterations,
-                )
-                break
 
             iterations += 1
             ctx.iteration = iterations
@@ -245,7 +252,6 @@ class Agent:
             if iter_usage:
                 total_tokens_in += iter_usage.tokens_in
                 total_tokens_out += iter_usage.tokens_out
-                total_cost += iter_usage.cost
 
             # Cognitive: decision — tools or final reply
             if not collected_tool_calls:
@@ -295,6 +301,7 @@ class Agent:
                     tc.arguments,
                     conversation_id=conversation_id,
                     platform=platform,
+                    task_state=current_task_state,
                     timeout_override=(
                         max(0.001, task_timeout - (time.monotonic() - task_start))
                         if task_timeout > 0
@@ -302,6 +309,24 @@ class Agent:
                     ),
                 )
                 tool_latency = int((time.monotonic() - tool_start) * 1000)
+                activated_tools = tool_result.metadata.get("activated_tools") or []
+                if self.conversation_manager:
+                    self.conversation_manager.record_tool_event(
+                        conversation_id,
+                        tc.name,
+                        self._summarize_tool_result(tool_result.content),
+                        is_error=tool_result.is_error,
+                        activated_tools=(
+                            activated_tools if isinstance(activated_tools, list) else None
+                        ),
+                    )
+                    skill_name = tool_result.metadata.get("skill_name")
+                    if isinstance(skill_name, str) and skill_name:
+                        self.conversation_manager.protect_context(
+                            conversation_id,
+                            f"skill:{skill_name}",
+                            tool_result.content[:4000],
+                        )
 
                 # Operational: tool_called + tool_returned
                 logger.info(
@@ -368,14 +393,31 @@ class Agent:
                 iterations=iterations,
             )
 
+        task_state = (
+            self.conversation_manager.get_task_state(conversation_id)
+            if self.conversation_manager and conversation_id
+            else None
+        )
+        final_text, verified = verify_final_response(
+            final_text,
+            tool_calls_made=all_tool_calls,
+            task_state=task_state,
+        )
+        if verified:
+            await self.event_bus.publish("harness.completion_verified", {
+                "conversation_id": conversation_id,
+                "platform": platform,
+                "iterations": iterations,
+            })
+
         # Post-loop: persist and compress
         await self._finalize(
             conversation_id=conversation_id,
+            user_id=user_id,
             content=final_text,
             model=final_model,
             tokens_in=total_tokens_in,
             tokens_out=total_tokens_out,
-            cost=total_cost,
             latency_ms=0,
             iterations=iterations,
             all_tool_calls=all_tool_calls,
@@ -387,19 +429,27 @@ class Agent:
             usage=Usage(
                 tokens_in=total_tokens_in,
                 tokens_out=total_tokens_out,
-                cost=total_cost,
             ),
             model=final_model,
             iterations=iterations,
         )
 
 
-    def _build_system_prompt(self) -> str:
+    def _build_system_prompt(
+        self,
+        *,
+        input_text: str = "",
+        task_state: Any = None,
+    ) -> str:
         """Build system prompt with current context and skill metadata."""
         template = self.config.system_prompt or DEFAULT_SYSTEM_PROMPT
         prompt = template.format(
             date=datetime.now(UTC).strftime("%Y-%m-%d"),
         )
+
+        fragments = build_prompt_fragments(input_text, task_state)
+        if fragments:
+            prompt += "\n\n" + "\n\n".join(fragments)
 
         # Inject skill metadata (Layer 1: progressive disclosure)
         if self.skill_registry:
@@ -414,38 +464,75 @@ class Agent:
         input_text: str,
         conversation_id: str,
         platform: str,
+        user_id: str,
     ) -> tuple[list[dict[str, Any]], list[dict[str, Any]] | None]:
         """Build messages and tools for the ReAct loop."""
+        resolved_user_id = user_id or (
+            conversation_id if platform == "web" else ""
+        )
         if self.conversation_manager and conversation_id:
             await self.conversation_manager.get_or_create_conversation(
-                conversation_id, platform, self.config.token_budget,
+                conversation_id,
+                platform,
+                resolved_user_id,
+                self.config.token_budget,
             )
             await self.conversation_manager.add_user_message(
                 conversation_id, input_text,
             )
+            task_state = self.conversation_manager.get_task_state(conversation_id)
             messages = await self.conversation_manager.build_messages(
                 conversation_id,
-                self._build_system_prompt(),
+                self._build_system_prompt(
+                    input_text=input_text,
+                    task_state=task_state,
+                ),
                 input_text,
+                resolved_user_id,
             )
         else:
+            task_state = None
             messages = [
-                {"role": "system", "content": self._build_system_prompt()},
+                {
+                    "role": "system",
+                    "content": self._build_system_prompt(
+                        input_text=input_text,
+                        task_state=task_state,
+                    ),
+                },
                 {"role": "user", "content": input_text},
             ]
 
-        tools = self.tool_registry.get_schemas() if self.tool_registry else None
+        tools = self._resolve_tools(
+            input_text,
+            task_state=task_state,
+        )
         return messages, tools
+
+    def _resolve_tools(
+        self,
+        input_text: str,
+        *,
+        task_state: Any = None,
+    ) -> list[dict[str, Any]] | None:
+        """Resolve core and activated deferred tools for the current turn."""
+        if not self.tool_registry:
+            return None
+        active_names = self.tool_registry.get_default_active_names()
+        active_names.update(self.tool_registry.match_deferred(input_text))
+        if task_state is not None:
+            active_names.update(task_state.activated_tools)
+        return self.tool_registry.get_schemas(active_names=active_names)
 
     async def _finalize(
         self,
         *,
         conversation_id: str,
+        user_id: str,
         content: str,
         model: str,
         tokens_in: int,
         tokens_out: int,
-        cost: float,
         latency_ms: int,
         iterations: int,
         all_tool_calls: list[dict[str, Any]],
@@ -457,7 +544,6 @@ class Agent:
             "latency_ms": latency_ms,
             "tokens_in": tokens_in,
             "tokens_out": tokens_out,
-            "cost": cost,
             "tool_calls": len(all_tool_calls),
         })
 
@@ -468,11 +554,20 @@ class Agent:
                 model=model,
                 tokens_in=tokens_in,
                 tokens_out=tokens_out,
-                cost=cost,
                 latency_ms=latency_ms,
                 tool_calls=all_tool_calls or None,
             )
             await self.conversation_manager.maybe_compress(conversation_id)
+            await self.conversation_manager.end_conversation(
+                conversation_id,
+                clear_working_memory=False,
+            )
+
+    @staticmethod
+    def _summarize_tool_result(content: str) -> str:
+        """Collapse verbose tool output into a compact task-state summary."""
+        cleaned = " ".join(content.strip().split())
+        return cleaned[:180] if cleaned else "(no output)"
 
     async def _execute_tool(
         self,
@@ -481,6 +576,7 @@ class Agent:
         *,
         conversation_id: str,
         platform: str,
+        task_state: Any = None,
         timeout_override: float | None = None,
     ) -> ToolResult:
         """Execute a single tool call by name."""
@@ -502,6 +598,12 @@ class Agent:
         effective_timeout = min(timeout_candidates) if timeout_candidates else None
 
         try:
+            pre_result = await self._tool_hooks.before_execute(
+                name,
+                arguments,
+                task_state,
+            )
+            effective_arguments = dict(pre_result.override_args or arguments)
             with tool_execution_context(
                 ToolExecutionContext(
                     conversation_id=conversation_id,
@@ -509,12 +611,31 @@ class Agent:
                 )
             ):
                 if effective_timeout is None:
-                    return await tool.execute(arguments)
-                return await asyncio.wait_for(
-                    tool.execute(arguments),
-                    timeout=effective_timeout,
-                )
-        except asyncio.TimeoutError:
+                    tool_result = await tool.execute(effective_arguments)
+                else:
+                    tool_result = await asyncio.wait_for(
+                        tool.execute(effective_arguments),
+                        timeout=effective_timeout,
+                    )
+            post_result = await self._tool_hooks.after_execute(
+                name,
+                effective_arguments,
+                tool_result,
+                task_state,
+            )
+            metadata = dict(tool_result.metadata)
+            combined_feedback = [*pre_result.feedback, *post_result.feedback]
+            if combined_feedback:
+                feedback_text = "\n".join(combined_feedback)
+                tool_result.content = (
+                    f"{tool_result.content}\n\nHarness feedback:\n{feedback_text}"
+                ).strip()
+                metadata["hook_feedback"] = combined_feedback
+            if post_result.activated_tools:
+                metadata["activated_tools"] = list(post_result.activated_tools)
+            tool_result.metadata = metadata
+            return tool_result
+        except TimeoutError:
             logger.warning(
                 "tool_timeout",
                 surface="operational",

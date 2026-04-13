@@ -12,6 +12,7 @@ import uuid
 from collections import OrderedDict
 from typing import TYPE_CHECKING, Any
 
+from src.agent.task_state import TaskState
 from src.core.logging import get_logger
 
 if TYPE_CHECKING:
@@ -55,6 +56,7 @@ class ConversationManager:
         self._working: OrderedDict[str, WorkingMemory] = OrderedDict()
         self._max_working: int = 100  # max concurrent working memories
         self._working_last_active: dict[str, float] = {}
+        self._task_states: dict[str, TaskState] = {}
 
     # ------------------------------------------------------------------
     # Conversation lifecycle
@@ -64,10 +66,11 @@ class ConversationManager:
         self,
         conversation_id: str,
         platform: str,
+        user_id: str,
         token_budget: int = 8000,
     ) -> WorkingMemory:
         """Get existing or create new working memory for a conversation."""
-        self._prune_stale_working_memories()
+        await self._prune_stale_working_memories()
         if conversation_id in self._working:
             # Move to end (most recently used)
             self._working.move_to_end(conversation_id)
@@ -80,11 +83,17 @@ class ConversationManager:
             await self._storage.conversations.create(
                 id=conversation_id,
                 platform=platform,
+                user_id=user_id,
             )
             logger.info(
                 "conversation.created",
                 conversation_id=conversation_id,
                 platform=platform,
+            )
+        elif user_id and existing.get("user_id") != user_id:
+            await self._storage.conversations.update(
+                conversation_id,
+                user_id=user_id,
             )
 
         from src.memory.working import WorkingMemory
@@ -103,6 +112,8 @@ class ConversationManager:
 
         self._working[conversation_id] = wm
         self._touch_working(conversation_id)
+        self._task_states.setdefault(conversation_id, TaskState())
+        self._set_protected_context(conversation_id, user_id, platform)
 
         # Evict oldest if over limit
         while len(self._working) > self._max_working:
@@ -117,6 +128,7 @@ class ConversationManager:
         conversation_id: str,
         system_prompt: str,
         user_input: str,
+        user_id: str,
     ) -> list[dict[str, Any]]:
         """Assemble the full message list for model invocation.
 
@@ -136,7 +148,9 @@ class ConversationManager:
 
         # Search-before-act: recall relevant knowledge and past conversations
         enriched_prompt = await self._enrich_system_prompt(
-            system_prompt, user_input,
+            system_prompt,
+            user_input,
+            user_id,
         )
 
         # Build messages
@@ -165,6 +179,9 @@ class ConversationManager:
         if wm:
             wm.add({"role": "user", "content": content})
             self._touch_working(conversation_id)
+            task_state = self._task_states.setdefault(conversation_id, TaskState())
+            task_state.note_user_input(content)
+            self._protect_task_state(conversation_id)
 
         # Persist to storage
         await self._storage.messages.add(
@@ -181,7 +198,6 @@ class ConversationManager:
         model: str = "",
         tokens_in: int = 0,
         tokens_out: int = 0,
-        cost: float = 0.0,
         latency_ms: int = 0,
         tool_calls: list[dict[str, Any]] | None = None,
     ) -> None:
@@ -193,6 +209,9 @@ class ConversationManager:
         if wm:
             wm.add({"role": "assistant", "content": content})
             self._touch_working(conversation_id)
+            task_state = self._task_states.setdefault(conversation_id, TaskState())
+            task_state.note_assistant_reply(content)
+            self._protect_task_state(conversation_id)
 
         # Persist to storage
         await self._storage.messages.add(
@@ -203,7 +222,6 @@ class ConversationManager:
             model=model,
             tokens_in=tokens_in,
             tokens_out=tokens_out,
-            cost=cost,
             latency_ms=latency_ms,
             tool_calls=tool_calls,
         )
@@ -233,6 +251,7 @@ class ConversationManager:
             extracted = await wm.extract_before_compression(self._gateway)
             for item in extracted:
                 await self._semantic.add_knowledge(
+                    user_id=await self._get_user_id(conversation_id),
                     category=item["category"],
                     content=item["content"],
                     priority="P1",
@@ -250,16 +269,19 @@ class ConversationManager:
     async def end_conversation(
         self,
         conversation_id: str,
+        *,
+        clear_working_memory: bool = True,
     ) -> None:
         """Trigger end-of-conversation memory extraction.
 
         Archives the conversation (episodic), extracts knowledge (semantic),
         and observes preferences (procedural).
         """
-        messages = await self._storage.messages.get_by_conversation(
-            conversation_id,
-        )
+        user_id = await self._get_user_id(conversation_id)
+        messages = await self._storage.messages.get_by_conversation(conversation_id)
         if not messages:
+            if clear_working_memory:
+                self._clear_working_memory(conversation_id)
             return
 
         llm_messages = [
@@ -270,7 +292,7 @@ class ConversationManager:
 
         # Parallel extraction (errors isolated per tier)
         try:
-            await self._episodic.on_conversation_end(conversation_id)
+            await self._episodic.on_conversation_end(conversation_id, user_id)
         except Exception:
             logger.warning(
                 "conversation.episodic_archive_failed",
@@ -280,7 +302,9 @@ class ConversationManager:
 
         try:
             await self._semantic.extract_knowledge(
-                llm_messages, conversation_id,
+                llm_messages,
+                conversation_id,
+                user_id,
             )
         except Exception:
             logger.warning(
@@ -290,7 +314,11 @@ class ConversationManager:
             )
 
         try:
-            await self._procedural.observe(llm_messages, conversation_id)
+            await self._procedural.observe(
+                llm_messages,
+                conversation_id,
+                user_id,
+            )
         except Exception:
             logger.warning(
                 "conversation.procedural_observe_failed",
@@ -298,13 +326,13 @@ class ConversationManager:
                 exc_info=True,
             )
 
-        # Clean up working memory
-        self._working.pop(conversation_id, None)
-        self._working_last_active.pop(conversation_id, None)
+        if clear_working_memory:
+            self._clear_working_memory(conversation_id)
 
         logger.info(
             "conversation.ended",
             conversation_id=conversation_id,
+            user_id=user_id,
             message_count=len(messages),
         )
 
@@ -316,13 +344,14 @@ class ConversationManager:
         self,
         base_prompt: str,
         user_input: str,
+        user_id: str,
     ) -> str:
         """Enrich system prompt with preferences and recalled knowledge."""
         sections: list[str] = [base_prompt]
 
         # Inject user preferences
         try:
-            pref_context = await self._procedural.get_system_prompt_context()
+            pref_context = await self._procedural.get_system_prompt_context(user_id)
             if pref_context:
                 sections.append(pref_context)
         except Exception:
@@ -334,7 +363,9 @@ class ConversationManager:
         # Search-before-act: recall relevant knowledge
         try:
             knowledge_items = await self._semantic.recall(
-                user_input, limit=3,
+                user_input,
+                user_id,
+                limit=3,
             )
             if knowledge_items:
                 knowledge_lines = ["Relevant Knowledge:"]
@@ -353,7 +384,7 @@ class ConversationManager:
 
         # Recall relevant past conversations
         try:
-            past = await self._episodic.recall(user_input, limit=2)
+            past = await self._episodic.recall(user_input, user_id, limit=2)
             if past:
                 past_lines = ["Related Past Conversations:"]
                 for conv in past:
@@ -374,7 +405,11 @@ class ConversationManager:
         """Refresh the last-access time for an in-memory conversation."""
         self._working_last_active[conversation_id] = time.monotonic()
 
-    def _prune_stale_working_memories(self, *, now: float | None = None) -> None:
+    async def _prune_stale_working_memories(
+        self,
+        *,
+        now: float | None = None,
+    ) -> None:
         """Drop idle working memories so abandoned chats do not linger forever."""
         current = time.monotonic() if now is None else now
         stale_ids = [
@@ -383,6 +418,82 @@ class ConversationManager:
             if current - last_active > _WORKING_MEMORY_IDLE_TTL_SECONDS
         ]
         for conversation_id in stale_ids:
-            self._working.pop(conversation_id, None)
-            self._working_last_active.pop(conversation_id, None)
+            await self.end_conversation(
+                conversation_id,
+                clear_working_memory=True,
+            )
             logger.debug("conversation.evicted_idle", conversation_id=conversation_id)
+
+    async def _get_user_id(self, conversation_id: str) -> str:
+        """Resolve the canonical user id for a conversation."""
+        conversation = await self._storage.conversations.get(conversation_id)
+        return str(conversation.get("user_id") or "") if conversation else ""
+
+    def _clear_working_memory(self, conversation_id: str) -> None:
+        """Drop in-memory state for a conversation."""
+        self._working.pop(conversation_id, None)
+        self._working_last_active.pop(conversation_id, None)
+        self._task_states.pop(conversation_id, None)
+
+    def get_task_state(self, conversation_id: str) -> TaskState | None:
+        """Return the in-memory task state for a conversation."""
+        return self._task_states.get(conversation_id)
+
+    def record_tool_event(
+        self,
+        conversation_id: str,
+        tool_name: str,
+        summary: str,
+        *,
+        is_error: bool,
+        activated_tools: list[str] | None = None,
+    ) -> None:
+        """Update task state after a tool execution."""
+        task_state = self._task_states.setdefault(conversation_id, TaskState())
+        task_state.record_tool_event(
+            tool_name,
+            summary,
+            is_error=is_error,
+            activated_tools=activated_tools,
+        )
+        self._protect_task_state(conversation_id)
+
+    def protect_context(
+        self,
+        conversation_id: str,
+        key: str,
+        content: str,
+    ) -> None:
+        """Pin additional protected context for a conversation."""
+        wm = self._working.get(conversation_id)
+        if wm is None:
+            return
+        wm.set_protected(key, content)
+
+    def _protect_task_state(self, conversation_id: str) -> None:
+        wm = self._working.get(conversation_id)
+        task_state = self._task_states.get(conversation_id)
+        if wm is None or task_state is None:
+            return
+        wm.set_protected("task_state", task_state.protected_context())
+
+    def _set_protected_context(
+        self,
+        conversation_id: str,
+        user_id: str,
+        platform: str,
+    ) -> None:
+        wm = self._working.get(conversation_id)
+        if wm is None:
+            return
+        if user_id:
+            wm.set_protected(
+                "user_scope",
+                (
+                    "This conversation belongs to a canonical user scope shared "
+                    f"across linked platforms. Current platform: {platform}. "
+                    f"Canonical user id: {user_id}."
+                ),
+            )
+        task_state = self._task_states.setdefault(conversation_id, TaskState())
+        wm.set_protected("task_state", task_state.protected_context())

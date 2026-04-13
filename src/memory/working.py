@@ -9,6 +9,7 @@ decisions so they can be persisted to semantic memory by the caller.
 from __future__ import annotations
 
 import json
+from collections import OrderedDict
 from typing import TYPE_CHECKING, Any
 
 from src.core.logging import get_logger
@@ -83,6 +84,7 @@ class WorkingMemory:
         self._token_budget = token_budget
         self._messages: list[dict[str, Any]] = []  # role/content dicts
         self._pinned: list[dict[str, Any]] = []  # never compressed
+        self._protected: OrderedDict[str, str] = OrderedDict()
         self._summary: str | None = None  # compressed summary
 
     # ------------------------------------------------------------------
@@ -108,11 +110,35 @@ class WorkingMemory:
             role=message.get("role"),
         )
 
+    def set_protected(self, key: str, content: str) -> None:
+        """Store protected context that must survive compression."""
+        if not key:
+            return
+        cleaned = content.strip()
+        if not cleaned:
+            self._protected.pop(key, None)
+            return
+        self._protected[key] = cleaned
+        self._protected.move_to_end(key)
+        logger.debug(
+            "working_memory.protected_set",
+            conversation_id=self._conversation_id,
+            key=key,
+            chars=len(cleaned),
+        )
+
     def get_messages(self) -> list[dict[str, Any]]:
         """Return assembled context: pinned + summary + recent messages."""
         result: list[dict[str, Any]] = []
 
         result.extend(self._pinned)
+        for key, content in self._protected.items():
+            result.append(
+                {
+                    "role": "system",
+                    "content": f"Protected Context ({key}):\n{content}",
+                }
+            )
 
         if self._summary is not None:
             result.append(
@@ -130,6 +156,8 @@ class WorkingMemory:
         total_chars = 0
         for msg in self._pinned:
             total_chars += len(msg.get("content", ""))
+        for content in self._protected.values():
+            total_chars += len(content)
         if self._summary is not None:
             total_chars += len(self._summary)
         for msg in self._messages:

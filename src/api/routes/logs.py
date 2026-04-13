@@ -19,6 +19,7 @@ async def list_logs(
     request: Request,
     trace_id: str | None = Query(default=None),
     interaction_id: str | None = Query(default=None),
+    platform: str | None = Query(default=None),
     surface: str | None = Query(default=None),
     level: str | None = Query(default=None),
     event: str | None = Query(default=None),
@@ -32,6 +33,7 @@ async def list_logs(
     return await storage.logs.query(
         trace_id=trace_id,
         interaction_id=interaction_id,
+        platform=platform,
         surface=surface,
         level=level,
         event=event,
@@ -46,15 +48,16 @@ async def list_logs(
 async def log_stats(
     request: Request,
     since: str | None = Query(default=None),
+    platform: str | None = Query(default=None),
 ) -> dict:
     """Get log count statistics by surface and level."""
     storage = _get_storage(request)
-    total = await storage.logs.count(since=since)
-    cognitive = await storage.logs.count(since=since, surface="cognitive")
-    operational = await storage.logs.count(since=since, surface="operational")
-    contextual = await storage.logs.count(since=since, surface="contextual")
-    errors = await storage.logs.count(since=since, level="error")
-    warnings = await storage.logs.count(since=since, level="warning")
+    total = await storage.logs.count(since=since, platform=platform)
+    cognitive = await storage.logs.count(since=since, platform=platform, surface="cognitive")
+    operational = await storage.logs.count(since=since, platform=platform, surface="operational")
+    contextual = await storage.logs.count(since=since, platform=platform, surface="contextual")
+    errors = await storage.logs.count(since=since, platform=platform, level="error")
+    warnings = await storage.logs.count(since=since, platform=platform, level="warning")
     return {
         "total": total,
         "by_surface": {

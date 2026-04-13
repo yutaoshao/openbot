@@ -38,7 +38,6 @@ class SubTaskResult:
     error: str = ""
     tokens_in: int = 0
     tokens_out: int = 0
-    cost: float = 0.0
     latency_ms: int = 0
 
 
@@ -49,7 +48,6 @@ class DelegationResult:
     subtask_results: list[SubTaskResult] = field(default_factory=list)
     total_tokens_in: int = 0
     total_tokens_out: int = 0
-    total_cost: float = 0.0
     total_latency_ms: int = 0
 
     @property
@@ -145,7 +143,6 @@ class SubAgent:
             delegation.subtask_results.append(sub_result)
             delegation.total_tokens_in += sub_result.tokens_in
             delegation.total_tokens_out += sub_result.tokens_out
-            delegation.total_cost += sub_result.cost
 
         succeeded = sum(1 for r in delegation.subtask_results if r.success)
         failed = len(delegation.subtask_results) - succeeded
@@ -156,7 +153,6 @@ class SubAgent:
             "failed": failed,
             "total_tokens_in": delegation.total_tokens_in,
             "total_tokens_out": delegation.total_tokens_out,
-            "total_cost": delegation.total_cost,
         })
 
         logger.info(
@@ -223,7 +219,6 @@ class SubAgent:
                     success=True,
                     tokens_in=response.usage.tokens_in,
                     tokens_out=response.usage.tokens_out,
-                    cost=response.usage.cost,
                     latency_ms=latency_ms,
                 )
 
@@ -292,7 +287,7 @@ class SubAgent:
             if tool_timeout is None:
                 return await tool.execute(arguments)
             return await asyncio.wait_for(tool.execute(arguments), timeout=tool_timeout)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             logger.warning(
                 "sub_agent.tool_timeout",
                 tool=name,

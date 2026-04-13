@@ -72,7 +72,6 @@ class ResearchReport:
     total_fetches: int = 0
     tokens_in: int = 0
     tokens_out: int = 0
-    cost: float = 0.0
     latency_ms: int = 0
     saturated: bool = False
 
@@ -221,7 +220,6 @@ class DeepResearch:
         start = time.monotonic()
         total_tokens_in = 0
         total_tokens_out = 0
-        total_cost = 0.0
         total_searches = 0
         total_fetches = 0
         all_findings: list[Finding] = []
@@ -233,7 +231,6 @@ class DeepResearch:
         angles, usage = await self._plan_angles(topic, angles_count)
         total_tokens_in += usage.get("tokens_in", 0)
         total_tokens_out += usage.get("tokens_out", 0)
-        total_cost += usage.get("cost", 0.0)
 
         logger.info(
             "research.angles_planned",
@@ -284,7 +281,6 @@ class DeepResearch:
             )
             total_tokens_in += usage.get("tokens_in", 0)
             total_tokens_out += usage.get("tokens_out", 0)
-            total_cost += usage.get("cost", 0.0)
 
             # Saturation detection
             if all_findings:
@@ -320,7 +316,6 @@ class DeepResearch:
         synthesis, usage = await self._synthesise(topic, all_findings)
         total_tokens_in += usage.get("tokens_in", 0)
         total_tokens_out += usage.get("tokens_out", 0)
-        total_cost += usage.get("cost", 0.0)
 
         latency_ms = int((time.monotonic() - start) * 1000)
 
@@ -338,7 +333,6 @@ class DeepResearch:
             total_fetches=total_fetches,
             tokens_in=total_tokens_in,
             tokens_out=total_tokens_out,
-            cost=total_cost,
             latency_ms=latency_ms,
             saturated=saturated,
         )
@@ -350,7 +344,6 @@ class DeepResearch:
             "sources": len(sources),
             "saturated": saturated,
             "latency_ms": latency_ms,
-            "cost": total_cost,
         })
 
         logger.info(
@@ -393,7 +386,6 @@ class DeepResearch:
         usage = {
             "tokens_in": response.usage.tokens_in,
             "tokens_out": response.usage.tokens_out,
-            "cost": response.usage.cost,
         }
         return angles, usage
 
@@ -461,7 +453,6 @@ class DeepResearch:
         usage = {
             "tokens_in": response.usage.tokens_in,
             "tokens_out": response.usage.tokens_out,
-            "cost": response.usage.cost,
         }
 
         findings = self._parse_findings(response.text, round_num)
@@ -472,7 +463,7 @@ class DeepResearch:
     ) -> tuple[str, dict[str, Any]]:
         """Use LLM to cross-validate findings and produce a structured report."""
         if not findings:
-            return "No findings to synthesise.", {"tokens_in": 0, "tokens_out": 0, "cost": 0.0}
+            return "No findings to synthesise.", {"tokens_in": 0, "tokens_out": 0}
 
         # Group findings by source for cross-validation
         findings_text = "\n".join(
@@ -504,7 +495,6 @@ class DeepResearch:
         usage = {
             "tokens_in": response.usage.tokens_in,
             "tokens_out": response.usage.tokens_out,
-            "cost": response.usage.cost,
         }
         return response.text, usage
 

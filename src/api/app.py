@@ -12,6 +12,7 @@ from fastapi.responses import FileResponse, JSONResponse
 
 from src.api.routes.chat import router as chat_router
 from src.api.routes.conversations import router as conversations_router
+from src.api.routes.identities import router as identities_router
 from src.api.routes.knowledge import router as knowledge_router
 from src.api.routes.logs import router as logs_router
 from src.api.routes.metrics import router as metrics_router
@@ -19,6 +20,7 @@ from src.api.routes.schedules import router as schedules_router
 from src.api.routes.settings import router as settings_router
 from src.api.routes.tools import router as tools_router
 from src.api.routes.webhook import router as webhook_router
+from src.api.runtime_status import build_runtime_status
 from src.api.schemas import HealthResponse
 from src.api.websocket import router as websocket_router
 from src.core.logging import get_logger
@@ -29,9 +31,17 @@ if TYPE_CHECKING:
     from src.channels.adapters.web import WebAdapter
     from src.channels.hub import MsgHub
     from src.core.config import AppConfig
+    from src.identity.service import IdentityService
     from src.infrastructure.storage import Storage
 
 logger = get_logger(__name__)
+
+_DEFAULT_CORS_ORIGINS = [
+    "http://127.0.0.1:8000",
+    "http://localhost:8000",
+    "http://127.0.0.1:5173",
+    "http://localhost:5173",
+]
 
 
 def create_api_app(
@@ -44,6 +54,7 @@ def create_api_app(
     web_adapter: WebAdapter | None = None,
     tool_registry: Any | None = None,
     monitor: Any | None = None,
+    identity_service: IdentityService | None = None,
 ) -> FastAPI:
     """Create a FastAPI app instance.
 
@@ -65,11 +76,12 @@ def create_api_app(
     app.state.web_adapter = web_adapter
     app.state.tool_registry = tool_registry
     app.state.monitor = monitor
+    app.state.identity_service = identity_service
     # Populated later by Application.start() for webhook routes
     app.state.telegram = None
     app.state.feishu = None
 
-    cors_origins = config.api.cors_origins if config else ["*"]
+    cors_origins = config.api.cors_origins if config else _DEFAULT_CORS_ORIGINS
     app.add_middleware(
         CORSMiddleware,
         allow_origins=cors_origins,
@@ -90,10 +102,11 @@ def create_api_app(
 
     @app.get("/health", response_model=HealthResponse, tags=["system"])
     async def health() -> HealthResponse:
-        return HealthResponse(status="ok")
+        return HealthResponse(status="ok", runtime=build_runtime_status(app))
 
     app.include_router(chat_router)
     app.include_router(conversations_router)
+    app.include_router(identities_router)
     app.include_router(knowledge_router)
     app.include_router(logs_router)
     app.include_router(tools_router)

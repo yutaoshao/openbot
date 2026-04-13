@@ -114,19 +114,12 @@ class ClaudeProvider:
                     ToolCall(id=block.id, name=block.name, arguments=block.input)
                 )
 
-        pricing = self.PRICING.get(self.model, {"input": 3.0, "output": 15.0})
-        cost = (
-            response.usage.input_tokens * pricing["input"]
-            + response.usage.output_tokens * pricing["output"]
-        ) / 1_000_000
-
         return ModelResponse(
             text="\n".join(text_parts),
             tool_calls=tool_calls,
             usage=Usage(
                 tokens_in=response.usage.input_tokens,
                 tokens_out=response.usage.output_tokens,
-                cost=cost,
             ),
             model=self.model,
             latency_ms=latency_ms,
@@ -244,14 +237,8 @@ class ClaudeProvider:
                 tool_call=ToolCall(id=acc["id"], name=acc["name"], arguments=args),
             )
 
-        # Cost
-        pricing = self.PRICING.get(self.model, {"input": 3.0, "output": 15.0})
-        cost = (
-            tokens_in * pricing["input"] + tokens_out * pricing["output"]
-        ) / 1_000_000
-
         yield StreamChunk(
             type="done",
-            usage=Usage(tokens_in=tokens_in, tokens_out=tokens_out, cost=cost),
+            usage=Usage(tokens_in=tokens_in, tokens_out=tokens_out),
             model=self.model,
         )

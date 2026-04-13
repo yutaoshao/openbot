@@ -34,9 +34,6 @@ class ModelProviderConfig(BaseModel):
     # Read timeout: max seconds to wait for first token from model
     # Set higher for slow-thinking models (DeepSeek R1, o1, etc.)
     read_timeout: float = 300.0
-    # Pricing per 1M tokens (for cost tracking)
-    pricing_input: float = 0.0
-    pricing_output: float = 0.0
 
     @property
     def api_key(self) -> str:
@@ -56,6 +53,7 @@ class ModelConfig(BaseModel):
 class TelegramConfig(BaseModel):
     """Telegram bot configuration."""
 
+    enabled: bool = True
     mode: Literal["polling", "webhook"] = "polling"
     bot_token_env: str = "TELEGRAM_BOT_TOKEN"
     webhook_url: str | None = None
@@ -69,11 +67,19 @@ class TelegramConfig(BaseModel):
         """Resolve bot token from environment variable."""
         return os.environ.get(self.bot_token_env, "")
 
+    def missing_required_env_vars(self) -> list[str]:
+        """Return required Telegram env vars that are not configured."""
+        if not self.enabled:
+            return []
+        required = ((self.bot_token_env, self.bot_token),)
+        return [env_name for env_name, value in required if not value]
+
 
 class FeishuConfig(BaseModel):
     """Feishu (Lark) bot configuration."""
 
     enabled: bool = False
+    mode: Literal["webhook", "long_connection"] = "webhook"
     app_id_env: str = "FEISHU_APP_ID"
     app_secret_env: str = "FEISHU_APP_SECRET"
     verification_token_env: str = "FEISHU_VERIFICATION_TOKEN"
@@ -94,6 +100,19 @@ class FeishuConfig(BaseModel):
     @property
     def encrypt_key(self) -> str:
         return os.environ.get(self.encrypt_key_env, "")
+
+    def missing_required_env_vars(self) -> list[str]:
+        """Return required Feishu env vars that are not configured."""
+        required = [
+            (self.app_id_env, self.app_id),
+            (self.app_secret_env, self.app_secret),
+        ]
+        if self.mode == "webhook":
+            required.extend([
+                (self.verification_token_env, self.verification_token),
+                (self.encrypt_key_env, self.encrypt_key),
+            ])
+        return [env_name for env_name, value in required if not value]
 
 
 class StorageConfig(BaseModel):
@@ -118,8 +137,13 @@ class ApiConfig(BaseModel):
     host: str = "127.0.0.1"
     port: int = 8000
     cors_origins: list[str] = Field(
-        default_factory=lambda: ["*"],
-        description="Allowed CORS origins. Use specific origins in production.",
+        default_factory=lambda: [
+            "http://127.0.0.1:8000",
+            "http://localhost:8000",
+            "http://127.0.0.1:5173",
+            "http://localhost:5173",
+        ],
+        description="Allowed CORS origins. Explicitly configure production origins.",
     )
     serve_frontend: bool = True
     frontend_dist: str = "frontend/dist"
@@ -152,8 +176,6 @@ class AgentConfig(BaseModel):
     task_timeout: int = 0
     # Max seconds for a single tool call (0 = no limit)
     tool_timeout: float = 120.0
-    # Max cost in dollars for a single agent run (0 = no limit)
-    max_task_cost: float = 0.0
     # Consecutive identical tool calls before declaring "stuck" (0 = disable)
     stuck_detection_threshold: int = 3
 

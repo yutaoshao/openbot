@@ -103,6 +103,7 @@ class SemanticMemory:
         self,
         messages: list[dict],
         conversation_id: str,
+        user_id: str,
     ) -> list[dict]:
         """Extract knowledge items from conversation messages via LLM.
 
@@ -136,7 +137,7 @@ class SemanticMemory:
             embedding = await self._embedding.embed(content)
 
             # Check for duplicates via vector similarity
-            duplicate = await self._find_duplicate(embedding, content)
+            duplicate = await self._find_duplicate(embedding, content, user_id)
             if duplicate is not None:
                 # Merge: update existing entry
                 merged = await self._merge_knowledge(
@@ -152,6 +153,7 @@ class SemanticMemory:
                 tags=tags,
                 priority=priority,
                 embedding=embedding,
+                user_id=user_id,
                 source_conversation_id=conversation_id,
             )
             results.append(entry)
@@ -167,6 +169,7 @@ class SemanticMemory:
     async def recall(
         self,
         query: str,
+        user_id: str,
         limit: int = 5,
     ) -> list[dict]:
         """Retrieve knowledge relevant to *query*.
@@ -180,11 +183,14 @@ class SemanticMemory:
         if embedding:
             # Over-fetch for reranking, then narrow down
             fetch_n = limit * 3 if self._reranker else limit
-            items = await self._vector_search(embedding, fetch_n)
+            items = await self._vector_search(embedding, fetch_n, user_id)
         else:
             # Fallback: text search
             items = await self._storage.knowledge.search(
-                query, limit=limit * 3 if self._reranker else limit,
+                query,
+                limit=limit * 3 if self._reranker else limit,
+                user_id=user_id,
+                include_legacy=True,
             )
 
         # Rerank if available
@@ -217,6 +223,7 @@ class SemanticMemory:
 
     async def add_knowledge(
         self,
+        user_id: str,
         category: str,
         content: str,
         tags: list[str] | None = None,
@@ -235,6 +242,7 @@ class SemanticMemory:
             tags=tags or [],
             priority=priority,
             embedding=embedding,
+            user_id=user_id,
         )
         logger.info(
             "semantic.add_knowledge",
@@ -346,6 +354,7 @@ class SemanticMemory:
         self,
         embedding: list[float],
         content: str,
+        user_id: str = "",
     ) -> dict[str, Any] | None:
         """Find an existing knowledge entry that is a near-duplicate.
 
@@ -389,6 +398,8 @@ class SemanticMemory:
         existing = await self._storage.knowledge.get(knowledge_id)
         if existing is None:
             return None
+        if existing.get("user_id", "") != user_id:
+            return None
 
         logger.debug(
             "semantic.duplicate_found",
@@ -402,6 +413,7 @@ class SemanticMemory:
         self,
         embedding: list[float],
         limit: int,
+        user_id: str = "",
     ) -> list[dict[str, Any]]:
         """Search knowledge_embeddings vec0 table for similar entries."""
         normalized_embedding = _normalize_embedding(embedding)
@@ -430,7 +442,7 @@ class SemanticMemory:
         for row in rows:
             knowledge_id = row[0]
             entry = await self._storage.knowledge.get(knowledge_id)
-            if entry is not None:
+            if entry is not None and self._belongs_to_user(entry, user_id):
                 entry["_distance"] = row[1]
                 results.append(entry)
 
@@ -528,6 +540,7 @@ class SemanticMemory:
         tags: list[str],
         priority: str,
         embedding: list[float],
+        user_id: str,
         source_conversation_id: str | None = None,
     ) -> dict[str, Any]:
         """Persist a new knowledge entry and its embedding."""
@@ -536,6 +549,7 @@ class SemanticMemory:
 
         await self._storage.knowledge.add(
             id=kid,
+            user_id=user_id,
             category=category,
             content=content,
             tags=tags,
@@ -548,6 +562,7 @@ class SemanticMemory:
 
         return {
             "id": kid,
+            "user_id": user_id,
             "category": category,
             "content": content,
             "tags": tags,
@@ -609,6 +624,7 @@ class SemanticMemory:
         )
         return {
             "id": kid,
+            "user_id": existing.get("user_id", ""),
             "category": existing.get("category", "fact"),
             "content": merged_content,
             "tags": merged_tags,
@@ -616,3 +632,9 @@ class SemanticMemory:
             "expires_at": expires_at,
             "merged": True,
         }
+
+    @staticmethod
+    def _belongs_to_user(entry: dict[str, Any], user_id: str) -> bool:
+        """Allow user-specific and legacy rows during recall."""
+        entry_user_id = entry.get("user_id", "")
+        return entry_user_id in {"", user_id}

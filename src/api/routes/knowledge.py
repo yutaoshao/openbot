@@ -68,6 +68,7 @@ async def create_knowledge(
 
     await storage.knowledge.add(
         id=knowledge_id,
+        user_id="",
         category=payload.category,
         content=payload.content,
         tags=payload.tags,

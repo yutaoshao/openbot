@@ -30,7 +30,7 @@ class FakeStreamingGateway:
         yield StreamChunk(type="text", text=" streaming")
         yield StreamChunk(
             type="done",
-            usage=Usage(tokens_in=12, tokens_out=8, cost=0.0123),
+            usage=Usage(tokens_in=12, tokens_out=8),
             model="fake-model",
         )
 
@@ -74,4 +74,3 @@ async def test_run_consumes_stream_and_returns_aggregated_response() -> None:
     assert result.model == "fake-model"
     assert result.tokens_in == 12
     assert result.tokens_out == 8
-    assert result.cost == 0.0123

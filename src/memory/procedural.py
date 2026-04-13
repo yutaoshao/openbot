@@ -74,6 +74,7 @@ class ProceduralMemory:
         self,
         messages: list[dict[str, Any]],
         conversation_id: str,
+        user_id: str,
     ) -> list[dict[str, Any]]:
         """Analyze *messages* for user preferences via LLM.
 
@@ -123,7 +124,9 @@ class ProceduralMemory:
 
             # Build evidence list: merge existing evidence with new id.
             existing = await self._storage.preferences.get(
-                category, key,
+                user_id,
+                category,
+                key,
             )
             evidence: list[str] = []
             if existing and existing.get("evidence"):
@@ -137,6 +140,7 @@ class ProceduralMemory:
 
             await self._storage.preferences.set(
                 id=pref_id,
+                user_id=user_id,
                 category=category,
                 key=key,
                 value=value,
@@ -168,26 +172,29 @@ class ProceduralMemory:
 
     async def get_preferences(
         self,
+        user_id: str,
         category: str | None = None,
     ) -> list[dict[str, Any]]:
         """Return preferences, optionally filtered by *category*."""
         if category is not None:
             return await self._storage.preferences.get_by_category(
+                user_id,
                 category,
             )
-        return await self._storage.preferences.get_all()
+        return await self._storage.preferences.get_all(user_id)
 
-    async def get_system_prompt_context(self) -> str:
+    async def get_system_prompt_context(self, user_id: str) -> str:
         """Assemble all preferences into a string for system prompt.
 
         Returns an empty string when no preferences exist.
         """
-        prefs = await self._storage.preferences.get_all()
+        prefs = await self._storage.preferences.get_all(user_id)
         if not prefs:
             return ""
 
+        deduped = self._dedupe_preferences(prefs)
         lines: list[str] = ["User Preferences:"]
-        for p in prefs:
+        for p in deduped:
             lines.append(
                 f"- [{p['category']}] {p['key']}: {p['value']}"
             )
@@ -199,12 +206,13 @@ class ProceduralMemory:
 
     async def update_preference(
         self,
+        user_id: str,
         category: str,
         key: str,
         value: str,
     ) -> None:
         """Manually set or update a preference (API / frontend)."""
-        existing = await self._storage.preferences.get(category, key)
+        existing = await self._storage.preferences.get(user_id, category, key)
         pref_id = existing["id"] if existing else uuid.uuid4().hex
 
         evidence: list[str] = []
@@ -213,6 +221,7 @@ class ProceduralMemory:
 
         await self._storage.preferences.set(
             id=pref_id,
+            user_id=user_id,
             category=category,
             key=key,
             value=value,
@@ -227,11 +236,12 @@ class ProceduralMemory:
 
     async def delete_preference(
         self,
+        user_id: str,
         category: str,
         key: str,
     ) -> None:
         """Remove a preference."""
-        await self._storage.preferences.delete(category, key)
+        await self._storage.preferences.delete(user_id, category, key)
         logger.info(
             "procedural.preference_deleted",
             category=category,
@@ -281,3 +291,16 @@ class ProceduralMemory:
             for item in parsed
             if isinstance(item, dict)
         ]
+
+    @staticmethod
+    def _dedupe_preferences(
+        prefs: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        """Keep one row per (category, key), preferring user-specific entries."""
+        deduped: dict[tuple[str, str], dict[str, Any]] = {}
+        for pref in prefs:
+            token = (pref["category"], pref["key"])
+            current = deduped.get(token)
+            if current is None or not current.get("user_id"):
+                deduped[token] = pref
+        return list(deduped.values())

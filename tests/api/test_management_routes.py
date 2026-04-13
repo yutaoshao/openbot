@@ -151,8 +151,51 @@ class _FakeMonitor:
     async def get_tools(self, period: str = "7d") -> dict:
         return {"period": period, "tools": [{"tool": "file_manager", "count": 2}]}
 
-    async def get_cost(self, period: str = "30d") -> dict:
-        return {"period": period, "total_cost": 0.0123}
+    async def get_harness(self, period: str = "7d") -> dict:
+        return {
+            "period": period,
+            "queue_wait_avg_ms": 5,
+            "queue_wait_p95_ms": 9,
+            "serialized_requests": 3,
+            "tool_activation_events": 1,
+            "completion_rewrites": 1,
+        }
+
+
+class _FakeIdentityService:
+    def __init__(self) -> None:
+        self.items: dict[tuple[str, str], dict[str, str]] = {}
+
+    async def list_identities(
+        self,
+        *,
+        user_id: str | None = None,
+        platform: str | None = None,
+    ) -> list[dict[str, str]]:
+        values = list(self.items.values())
+        if user_id is not None:
+            values = [item for item in values if item["user_id"] == user_id]
+        if platform is not None:
+            values = [item for item in values if item["platform"] == platform]
+        return values
+
+    async def bind_identity(
+        self,
+        *,
+        user_id: str,
+        platform: str,
+        platform_user_id: str,
+    ) -> dict[str, str]:
+        item = {
+            "id": f"{platform}-{platform_user_id}",
+            "user_id": user_id,
+            "platform": platform,
+            "platform_user_id": platform_user_id,
+            "created_at": "2026-03-19T00:00:00Z",
+            "updated_at": "2026-03-19T00:00:00Z",
+        }
+        self.items[(platform, platform_user_id)] = item
+        return item
 
 
 class _FakeRuntimeScheduler:
@@ -210,6 +253,7 @@ def _client(
     *,
     storage: _FakeStorage | None = None,
     scheduler: Any | None = None,
+    identity_service: _FakeIdentityService | None = None,
 ) -> TestClient:
     storage = storage or _FakeStorage()
     registry = ToolRegistry()
@@ -220,6 +264,7 @@ def _client(
         monitor=_FakeMonitor(),
         config=AppConfig(),
         scheduler=scheduler,
+        identity_service=identity_service,
     )
     return TestClient(app)
 
@@ -317,7 +362,8 @@ def test_metrics_endpoints() -> None:
     assert client.get("/api/metrics/latency?period=7d").status_code == 200
     assert client.get("/api/metrics/tokens?period=7d").status_code == 200
     assert client.get("/api/metrics/tools?period=7d").status_code == 200
-    assert client.get("/api/metrics/cost?period=30d").status_code == 200
+    assert client.get("/api/metrics/harness?period=7d").status_code == 200
+    assert client.get("/api/metrics/cost?period=30d").status_code == 404
 
 
 def test_settings_get_and_put() -> None:
@@ -325,8 +371,35 @@ def test_settings_get_and_put() -> None:
 
     current = client.get("/api/settings")
     assert current.status_code == 200
+    assert current.json()["telegram"]["enabled"] is True
     assert current.json()["telegram"]["mode"] == "polling"
+    assert current.json()["runtime"]["feishu"]["status"] == "disabled"
+    assert current.json()["runtime"]["telegram"]["status"] == "incomplete"
 
-    updated = client.put("/api/settings", json={"telegram": {"enable_streaming": True}})
+    updated = client.put(
+        "/api/settings",
+        json={"telegram": {"enabled": False, "enable_streaming": True}},
+    )
     assert updated.status_code == 200
+    assert updated.json()["settings"]["telegram"]["enabled"] is False
     assert updated.json()["settings"]["telegram"]["enable_streaming"] is True
+
+
+def test_identity_routes_bind_and_list() -> None:
+    identity_service = _FakeIdentityService()
+    client = _client(identity_service=identity_service)
+
+    bound = client.post(
+        "/api/identities/bind",
+        json={
+            "user_id": "user-1",
+            "platform": "telegram",
+            "platform_user_id": "12345",
+        },
+    )
+    assert bound.status_code == 200
+    assert bound.json()["user_id"] == "user-1"
+
+    listed = client.get("/api/identities?platform=telegram")
+    assert listed.status_code == 200
+    assert listed.json() == [bound.json()]

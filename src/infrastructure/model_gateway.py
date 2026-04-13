@@ -33,11 +33,10 @@ class ToolCall:
 
 @dataclass
 class Usage:
-    """Token usage and cost for a single request."""
+    """Token usage metadata for a single request."""
 
     tokens_in: int = 0
     tokens_out: int = 0
-    cost: float = 0.0
 
 
 @dataclass
@@ -165,7 +164,6 @@ class ModelGateway:
                         model=response.model,
                         token_in=response.usage.tokens_in,
                         token_out=response.usage.tokens_out,
-                        cost=response.usage.cost,
                         latency_ms=response.latency_ms,
                     )
 
@@ -174,7 +172,6 @@ class ModelGateway:
                         "model": response.model,
                         "tokens_in": response.usage.tokens_in,
                         "tokens_out": response.usage.tokens_out,
-                        "cost": response.usage.cost,
                         "latency_ms": response.latency_ms,
                     })
 
