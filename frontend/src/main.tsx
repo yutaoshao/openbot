@@ -5,7 +5,13 @@ import { BrowserRouter } from "react-router-dom";
 
 import App from "./App";
 import { LanguageProvider } from "./i18n";
-import "./styles.css";
+import "./styles/base.css";
+import "./styles/shell.css";
+import "./styles/ui.css";
+import "./styles/dashboard.css";
+import "./styles/settings.css";
+import "./styles/workspace-pages.css";
+import "./styles/chat.css";
 
 const client = new QueryClient();
 

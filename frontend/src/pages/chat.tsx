@@ -141,6 +141,7 @@ export function ChatPage(): JSX.Element {
     return (
       <div className="chat-container">
         <div className="chat-empty">
+          <p className="page-eyebrow">{t("nav.chat")}</p>
           <h2 className="chat-empty-title">OpenBot</h2>
           <p className="chat-empty-subtitle">{t("chat.askAnything")}</p>
           <form onSubmit={submit}>
@@ -200,7 +201,9 @@ export function ChatPage(): JSX.Element {
             {t("chat.send")}
           </button>
         </form>
-        {toolName ? <div className="chat-meta mono">{streamStatus}</div> : null}
+        <div className="chat-meta mono">
+          {toolName ? streamStatus : conversationId || t("chat.askAnything")}
+        </div>
       </div>
     </div>
   );

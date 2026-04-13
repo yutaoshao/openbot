@@ -1,82 +1,113 @@
 import { useEffect, useState } from "react";
-import { NavLink, Outlet, useLocation } from "react-router-dom";
+import { NavLink, Outlet } from "react-router-dom";
 
 import { useI18n } from "../i18n";
+import { Icon, type IconName } from "./Icon";
 
-const navItems = [
-  ["/", "nav.dashboard"],
-  ["/chat", "nav.chat"],
-  ["/conversations", "nav.conversations"],
-  ["/memory", "nav.memory"],
-  ["/tools", "nav.tools"],
-  ["/scheduler", "nav.scheduler"],
-  ["/monitoring", "nav.monitoring"],
-  ["/logs", "nav.logs"],
-  ["/settings", "nav.settings"],
-] as const;
+type NavItem = {
+  to: string;
+  label: string;
+  icon: IconName;
+};
+
+const navItems: NavItem[] = [
+  { to: "/", label: "nav.dashboard", icon: "dashboard" },
+  { to: "/chat", label: "nav.chat", icon: "chat" },
+  { to: "/conversations", label: "nav.conversations", icon: "conversations" },
+  { to: "/memory", label: "nav.memory", icon: "memory" },
+  { to: "/tools", label: "nav.tools", icon: "tools" },
+  { to: "/scheduler", label: "nav.scheduler", icon: "scheduler" },
+  { to: "/monitoring", label: "nav.monitoring", icon: "monitoring" },
+  { to: "/logs", label: "nav.logs", icon: "logs" },
+  { to: "/settings", label: "nav.settings", icon: "settings" },
+];
 
 function getInitialTheme(): "light" | "dark" {
   const stored = localStorage.getItem("openbot_theme");
-  if (stored === "dark" || stored === "light") return stored;
+  if (stored === "dark" || stored === "light") {
+    return stored;
+  }
   return "light";
 }
 
 export function Layout(): JSX.Element {
   const [theme, setTheme] = useState<"light" | "dark">(getInitialTheme);
   const { t } = useI18n();
-  const location = useLocation();
-  const isChatPage = location.pathname === "/chat";
 
   useEffect(() => {
     document.documentElement.setAttribute("data-theme", theme);
     localStorage.setItem("openbot_theme", theme);
   }, [theme]);
 
-  const toggleTheme = () => {
-    setTheme((prev) => (prev === "light" ? "dark" : "light"));
-  };
-
   return (
     <div className="app-shell">
       <aside className="sidebar">
-        <div className="brand">OpenBot</div>
-        <nav>
-          {navItems.map(([to, label]) => (
+        <div className="sidebar-brand">
+          <div className="sidebar-brand-mark">
+            <Icon name="spark" className="icon-sm" />
+          </div>
+          <div>
+            <div className="sidebar-brand-title">OpenBot</div>
+            <div className="sidebar-brand-subtitle">{t("layout.consoleLabel")}</div>
+          </div>
+        </div>
+
+        <nav className="sidebar-nav">
+          {navItems.map((item) => (
             <NavLink
-              key={to}
-              to={to}
+              key={item.to}
+              to={item.to}
               className={({ isActive }) => `nav-link${isActive ? " active" : ""}`}
-              end={to === "/"}
+              end={item.to === "/"}
             >
-              {t(label)}
+              <span className="nav-link-icon">
+                <Icon name={item.icon} className="icon-sm" />
+              </span>
+              <span>{t(item.label)}</span>
             </NavLink>
           ))}
         </nav>
+
         <div className="sidebar-footer">
-          <span className="sidebar-version">v0.1.0</span>
-          <button className="theme-toggle" type="button" onClick={toggleTheme}>
+          <div className="sidebar-footnote">v0.1.0</div>
+          <button
+            className="theme-toggle"
+            type="button"
+            onClick={() => setTheme((current) => (current === "light" ? "dark" : "light"))}
+          >
             {theme === "light" ? t("theme.dark") : t("theme.light")}
           </button>
         </div>
       </aside>
-      {isChatPage ? (
-        <main className="main-full">
-          <Outlet />
-        </main>
-      ) : (
-        <main className="main">
-          <header className="topbar">
-            <div>
-              <h1>{t("layout.consoleTitle")}</h1>
-            </div>
-            <div className="status-indicator">
-              <span className="status-dot" />
+
+      <main className="workspace">
+        <header className="topbar">
+          <div className="topbar-search">
+            <Icon name="search" className="icon-sm" />
+            <input
+              className="topbar-search-input"
+              type="text"
+              placeholder={t("layout.searchPlaceholder")}
+            />
+          </div>
+          <div className="topbar-meta">
+            <span className="topbar-pill">
+              <span className="topbar-pill-dot" />
               {t("layout.agentOnline")}
-            </div>
-          </header>
+            </span>
+            <button className="icon-button" type="button" aria-label={t("layout.notifications")}>
+              <Icon name="notifications" className="icon-sm" />
+            </button>
+            <button className="icon-button" type="button" aria-label={t("layout.help")}>
+              <Icon name="help" className="icon-sm" />
+            </button>
+          </div>
+        </header>
+
+        <div className="workspace-scroll">
           <Outlet />
-        </main>
-      )}
+        </div>
+      </main>
     </div>
   );
 }

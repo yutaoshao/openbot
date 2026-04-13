@@ -13,7 +13,7 @@ type Knowledge = {
 };
 
 export function MemoryPage(): JSX.Element {
-  const { t } = useI18n();
+  const { t, formatNumber } = useI18n();
   const qc = useQueryClient();
   const [category, setCategory] = useState("fact");
   const [priority, setPriority] = useState("P1");
@@ -81,16 +81,26 @@ export function MemoryPage(): JSX.Element {
   };
 
   return (
-    <div className="grid" style={{ gridTemplateColumns: "1fr 2fr" }}>
-      <section className="card">
-        <h3>{t("memory.addKnowledge")}</h3>
-        <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-3)" }}>
-          <select className="select" value={category} onChange={(e) => setCategory(e.target.value)}>
+    <div className="stack-layout">
+      <section className="page-header">
+        <div>
+          <p className="page-eyebrow">{t("nav.memory")}</p>
+          <h1 className="page-title">{t("memory.knowledgeBase")}</h1>
+          <p className="page-subtitle">{t("memory.subtitle", {
+            count: formatNumber(items.length),
+          })}</p>
+        </div>
+      </section>
+
+      <div className="split-layout">
+        <section className="surface-panel panel-stack">
+          <h2 className="surface-panel-title">{t("memory.addKnowledge")}</h2>
+          <select className="select" value={category} onChange={(event) => setCategory(event.target.value)}>
             <option value="fact">{categoryLabel("fact")}</option>
             <option value="concept">{categoryLabel("concept")}</option>
             <option value="procedure">{categoryLabel("procedure")}</option>
           </select>
-          <select className="select" value={priority} onChange={(e) => setPriority(e.target.value)}>
+          <select className="select" value={priority} onChange={(event) => setPriority(event.target.value)}>
             <option value="P1">P1</option>
             <option value="P2">P2</option>
             <option value="P3">P3</option>
@@ -98,131 +108,136 @@ export function MemoryPage(): JSX.Element {
           <textarea
             className="textarea"
             value={content}
-            onChange={(e) => setContent(e.target.value)}
+            onChange={(event) => setContent(event.target.value)}
             placeholder={t("memory.contentPlaceholder")}
           />
-          <button className="btn" onClick={() => create.mutate()} type="button" disabled={!content.trim()}>
+          <button
+            className="btn"
+            type="button"
+            disabled={!content.trim()}
+            onClick={() => create.mutate()}
+          >
             {t("memory.save")}
           </button>
-        </div>
-      </section>
-      <section className="card">
-        <h3>{t("memory.knowledgeBase")}</h3>
-        <input
-          className="input"
-          placeholder={t("memory.search")}
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-        />
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "var(--space-2)", marginTop: "var(--space-2)" }}>
-          <select className="select" value={filterCategory} onChange={(e) => setFilterCategory(e.target.value)}>
-            <option value="all">{t("memory.allCategories")}</option>
-            <option value="fact">{categoryLabel("fact")}</option>
-            <option value="concept">{categoryLabel("concept")}</option>
-            <option value="procedure">{categoryLabel("procedure")}</option>
-          </select>
-          <select className="select" value={filterPriority} onChange={(e) => setFilterPriority(e.target.value)}>
-            <option value="all">{t("memory.allPriorities")}</option>
-            <option value="P1">P1</option>
-            <option value="P2">P2</option>
-            <option value="P3">P3</option>
-          </select>
-        </div>
-        <table className="table" style={{ marginTop: "var(--space-3)" }}>
-          <thead>
-            <tr>
-              <th>{t("memory.table.category")}</th>
-              <th>{t("memory.table.priority")}</th>
-              <th>{t("memory.table.content")}</th>
-              <th style={{ width: 100 }} />
-            </tr>
-          </thead>
-          <tbody>
-            {items.map((item) => {
-              const editing = editingId === item.id;
-              return (
-                <tr key={item.id}>
-                  <td className="mono">{categoryLabel(item.category)}</td>
-                  <td>
-                    {editing ? (
-                      <select
-                        className="select"
-                        value={editingPriority}
-                        onChange={(e) => setEditingPriority(e.target.value)}
-                      >
-                        <option value="P1">P1</option>
-                        <option value="P2">P2</option>
-                        <option value="P3">P3</option>
-                      </select>
-                    ) : (
-                      <span className="mono">{item.priority}</span>
-                    )}
-                  </td>
-                  <td>
-                    {editing ? (
-                      <textarea
-                        className="textarea"
-                        value={editingContent}
-                        onChange={(e) => setEditingContent(e.target.value)}
-                      />
-                    ) : (
-                      item.content
-                    )}
-                  </td>
-                  <td>
-                    <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-1)" }}>
+        </section>
+
+        <section className="surface-panel panel-stack">
+          <div className="filter-row">
+            <input
+              className="input"
+              placeholder={t("memory.search")}
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+            />
+            <select className="select" value={filterCategory} onChange={(event) => setFilterCategory(event.target.value)}>
+              <option value="all">{t("memory.allCategories")}</option>
+              <option value="fact">{categoryLabel("fact")}</option>
+              <option value="concept">{categoryLabel("concept")}</option>
+              <option value="procedure">{categoryLabel("procedure")}</option>
+            </select>
+            <select className="select" value={filterPriority} onChange={(event) => setFilterPriority(event.target.value)}>
+              <option value="all">{t("memory.allPriorities")}</option>
+              <option value="P1">P1</option>
+              <option value="P2">P2</option>
+              <option value="P3">P3</option>
+            </select>
+          </div>
+
+          <table className="table">
+            <thead>
+              <tr>
+                <th>{t("memory.table.category")}</th>
+                <th>{t("memory.table.priority")}</th>
+                <th>{t("memory.table.content")}</th>
+                <th style={{ width: 120 }} />
+              </tr>
+            </thead>
+            <tbody>
+              {items.map((item) => {
+                const editing = editingId === item.id;
+                return (
+                  <tr key={item.id}>
+                    <td className="mono">{categoryLabel(item.category)}</td>
+                    <td>
                       {editing ? (
-                        <>
-                          <button className="btn secondary" type="button" onClick={() => update.mutate(item.id)}>
-                            {t("memory.save")}
-                          </button>
-                          <button
-                            className="btn secondary"
-                            type="button"
-                            onClick={() => {
-                              setEditingId("");
-                              setEditingContent("");
-                              setEditingPriority("P1");
-                            }}
-                          >
-                            {t("memory.cancel")}
-                          </button>
-                        </>
+                        <select
+                          className="select"
+                          value={editingPriority}
+                          onChange={(event) => setEditingPriority(event.target.value)}
+                        >
+                          <option value="P1">P1</option>
+                          <option value="P2">P2</option>
+                          <option value="P3">P3</option>
+                        </select>
                       ) : (
-                        <>
-                          <button
-                            className="btn secondary"
-                            type="button"
-                            onClick={() => {
-                              setEditingId(item.id);
-                              setEditingContent(item.content);
-                              setEditingPriority(item.priority);
-                            }}
-                          >
-                            {t("memory.edit")}
-                          </button>
-                          <button
-                            className="btn danger"
-                            onClick={() => {
-                              const ok = window.confirm(t("memory.confirmDelete"));
-                              if (ok) {
-                                remove.mutate(item.id);
-                              }
-                            }}
-                            type="button"
-                          >
-                            {t("memory.delete")}
-                          </button>
-                        </>
+                        <span className="mono">{item.priority}</span>
                       )}
-                    </div>
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </section>
+                    </td>
+                    <td>
+                      {editing ? (
+                        <textarea
+                          className="textarea"
+                          value={editingContent}
+                          onChange={(event) => setEditingContent(event.target.value)}
+                        />
+                      ) : (
+                        item.content
+                      )}
+                    </td>
+                    <td>
+                      <div className="panel-stack">
+                        {editing ? (
+                          <>
+                            <button className="btn secondary" type="button" onClick={() => update.mutate(item.id)}>
+                              {t("memory.save")}
+                            </button>
+                            <button
+                              className="btn ghost"
+                              type="button"
+                              onClick={() => {
+                                setEditingId("");
+                                setEditingContent("");
+                                setEditingPriority("P1");
+                              }}
+                            >
+                              {t("memory.cancel")}
+                            </button>
+                          </>
+                        ) : (
+                          <>
+                            <button
+                              className="btn secondary"
+                              type="button"
+                              onClick={() => {
+                                setEditingId(item.id);
+                                setEditingContent(item.content);
+                                setEditingPriority(item.priority);
+                              }}
+                            >
+                              {t("memory.edit")}
+                            </button>
+                            <button
+                              className="btn danger"
+                              type="button"
+                              onClick={() => {
+                                if (window.confirm(t("memory.confirmDelete"))) {
+                                  remove.mutate(item.id);
+                                }
+                              }}
+                            >
+                              {t("memory.delete")}
+                            </button>
+                          </>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </section>
+      </div>
     </div>
   );
 }

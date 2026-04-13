@@ -1,15 +1,39 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
+import { Icon } from "../components/Icon";
 import { useI18n, type Language } from "../i18n";
 import { api } from "../lib/api";
 
 type Settings = {
   telegram: {
+    enabled: boolean;
     enable_streaming: boolean;
     mode: string;
     bot_token_env: string;
+  };
+  feishu: {
+    enabled: boolean;
+    mode: string;
+    app_id_env: string;
+    app_secret_env: string;
+    verification_token_env: string;
+    encrypt_key_env: string;
+  };
+  runtime: {
+    telegram: {
+      enabled: boolean;
+      mode: string | null;
+      status: string;
+      missing_env_vars: string[];
+    };
+    feishu: {
+      enabled: boolean;
+      mode: string | null;
+      status: string;
+      missing_env_vars: string[];
+    };
   };
   model: {
     max_retries: number;
@@ -24,9 +48,29 @@ type Settings = {
   };
 };
 
+type SecretRow = {
+  label: string;
+  envName: string;
+};
+
+type DraftSetters = {
+  setEnabled: (value: boolean) => void;
+  setMode: (value: string) => void;
+  setStreaming: (value: boolean) => void;
+  setMaxRetries: (value: number) => void;
+};
+
+function syncDraft(settings: Settings, setters: DraftSetters): void {
+  setters.setEnabled(settings.telegram.enabled);
+  setters.setMode(settings.telegram.mode);
+  setters.setStreaming(settings.telegram.enable_streaming);
+  setters.setMaxRetries(settings.model.max_retries);
+}
+
 export function SettingsPage(): JSX.Element {
   const qc = useQueryClient();
   const { language, setLanguage, t } = useI18n();
+  const [enabled, setEnabled] = useState(true);
   const [streaming, setStreaming] = useState(false);
   const [mode, setMode] = useState("polling");
   const [maxRetries, setMaxRetries] = useState(3);
@@ -38,9 +82,12 @@ export function SettingsPage(): JSX.Element {
 
   useEffect(() => {
     if (settings.data) {
-      setStreaming(settings.data.telegram.enable_streaming);
-      setMode(settings.data.telegram.mode);
-      setMaxRetries(settings.data.model.max_retries);
+      syncDraft(settings.data, {
+        setEnabled,
+        setMode,
+        setStreaming,
+        setMaxRetries,
+      });
     }
   }, [settings.data]);
 
@@ -48,6 +95,7 @@ export function SettingsPage(): JSX.Element {
     mutationFn: () =>
       api.put("/api/settings", {
         telegram: {
+          enabled,
           enable_streaming: streaming,
           mode,
         },
@@ -60,76 +108,245 @@ export function SettingsPage(): JSX.Element {
     },
   });
 
-  const mask = "********";
+  const isDirty = settings.data
+    ? settings.data.telegram.enabled !== enabled
+      || settings.data.telegram.enable_streaming !== streaming
+      || settings.data.telegram.mode !== mode
+      || settings.data.model.max_retries !== maxRetries
+    : false;
+
+  const secrets = useMemo<SecretRow[]>(() => {
+    if (!settings.data) {
+      return [];
+    }
+    const rows: SecretRow[] = [
+      { label: t("settings.primary"), envName: settings.data.model.primary.api_key_env },
+      { label: t("settings.telegram"), envName: settings.data.telegram.bot_token_env },
+    ];
+    if (settings.data.model.fallback) {
+      rows.splice(1, 0, {
+        label: t("settings.fallback"),
+        envName: settings.data.model.fallback.api_key_env,
+      });
+    }
+    rows.push(
+      { label: "feishu_app_id", envName: settings.data.feishu.app_id_env },
+      { label: "feishu_app_secret", envName: settings.data.feishu.app_secret_env },
+      { label: "feishu_verification_token", envName: settings.data.feishu.verification_token_env },
+      { label: "feishu_encrypt_key", envName: settings.data.feishu.encrypt_key_env },
+    );
+    return rows;
+  }, [settings.data, t]);
 
   return (
-    <section className="card" style={{ maxWidth: 800 }}>
-      <h3>{t("settings.title")}</h3>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "var(--space-4)" }}>
+    <div className="settings-page">
+      <section className="page-header">
         <div>
-          <label style={{ display: "block", marginBottom: "var(--space-1)", fontSize: 13, color: "var(--text-muted)" }}>
-            {t("settings.language")}
-          </label>
-          <select
-            className="select"
-            value={language}
-            onChange={(e) => setLanguage(e.target.value as Language)}
+          <p className="page-eyebrow">{t("nav.settings")}</p>
+          <h1 className="page-title">{t("settings.title")}</h1>
+          <p className="page-subtitle">{t("settings.subtitle")}</p>
+        </div>
+      </section>
+
+      <div className="settings-shell">
+        <nav className="settings-nav surface-panel">
+          <a className="settings-nav-link active" href="#general">{t("settings.general")}</a>
+          <a className="settings-nav-link" href="#connectivity">{t("settings.connectivity")}</a>
+          <a className="settings-nav-link" href="#inference">{t("settings.inference")}</a>
+          <a className="settings-nav-link" href="#secrets">{t("settings.secrets")}</a>
+        </nav>
+
+        <div className="settings-content">
+          <section className="surface-panel settings-section" id="general">
+            <SectionHeader icon="spark" title={t("settings.general")} description={t("settings.generalHint")} />
+            <div className="settings-grid">
+              <div className="field-card">
+                <label className="field-label">{t("settings.language")}</label>
+                <select
+                  className="select"
+                  value={language}
+                  onChange={(event) => setLanguage(event.target.value as Language)}
+                >
+                  <option value="zh-CN">{t("settings.language.zh-CN")}</option>
+                  <option value="en-US">{t("settings.language.en-US")}</option>
+                </select>
+                <p className="field-help">{t("settings.languageLocalHint")}</p>
+              </div>
+            </div>
+          </section>
+
+          <section className="surface-panel settings-section" id="connectivity">
+            <SectionHeader icon="shield" title={t("settings.connectivity")} description={t("settings.connectivityHint")} />
+            <div className="settings-grid">
+              <div className="field-card">
+                <label className="field-label">{t("settings.telegramEnabled")}</label>
+                <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-2)" }}>
+                  <label className="toggle-card" htmlFor="telegram-enabled">
+                    <div>
+                      <span className="field-label">{t("settings.telegramEnabled")}</span>
+                      <p className="field-help">{t("settings.telegramEnabledHint")}</p>
+                    </div>
+                    <input
+                      id="telegram-enabled"
+                      checked={enabled}
+                      type="checkbox"
+                      onChange={(event) => setEnabled(event.target.checked)}
+                    />
+                  </label>
+                </div>
+              </div>
+              <div className="field-card">
+                <label className="field-label">{t("settings.telegramMode")}</label>
+                <select className="select" value={mode} onChange={(event) => setMode(event.target.value)}>
+                  <option value="polling">polling</option>
+                  <option value="webhook">webhook</option>
+                </select>
+              </div>
+              <label className="toggle-card" htmlFor="telegram-streaming">
+                <div>
+                  <span className="field-label">{t("settings.enableStreaming")}</span>
+                  <p className="field-help">{t("settings.streamingHint")}</p>
+                </div>
+                <input
+                  id="telegram-streaming"
+                  checked={streaming}
+                  type="checkbox"
+                  onChange={(event) => setStreaming(event.target.checked)}
+                />
+              </label>
+              <div className="field-card">
+                <label className="field-label">{t("settings.telegramStatus")}</label>
+                <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-2)" }}>
+                  <span
+                    className={`status-badge ${
+                      settings.data?.runtime.telegram.status === "ready" ? "stable" : "degraded"
+                    }`}
+                  >
+                    {settings.data?.runtime.telegram.status ?? "-"}
+                  </span>
+                  {settings.data?.runtime.telegram.missing_env_vars.length ? (
+                    <p className="field-help">
+                      {t("settings.telegramMissing", {
+                        envs: settings.data.runtime.telegram.missing_env_vars.join(", "),
+                      })}
+                    </p>
+                  ) : (
+                    <p className="field-help">{t("settings.telegramStatusHint")}</p>
+                  )}
+                </div>
+              </div>
+              <div className="field-card">
+                <label className="field-label">{t("settings.feishuMode")}</label>
+                <div className="settings-runtime-value">{settings.data?.feishu.mode ?? "-"}</div>
+                <p className="field-help">{t("settings.feishuModeHint")}</p>
+              </div>
+              <div className="field-card">
+                <label className="field-label">{t("settings.feishuStatus")}</label>
+                <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-2)" }}>
+                  <span
+                    className={`status-badge ${
+                      settings.data?.runtime.feishu.status === "ready" ? "stable" : "degraded"
+                    }`}
+                  >
+                    {settings.data?.runtime.feishu.status ?? "-"}
+                  </span>
+                  {settings.data?.runtime.feishu.missing_env_vars.length ? (
+                    <p className="field-help">
+                      {t("settings.feishuMissing", {
+                        envs: settings.data.runtime.feishu.missing_env_vars.join(", "),
+                      })}
+                    </p>
+                  ) : (
+                    <p className="field-help">{t("settings.feishuStatusHint")}</p>
+                  )}
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section className="surface-panel settings-section" id="inference">
+            <SectionHeader icon="rocket" title={t("settings.inference")} description={t("settings.inferenceHint")} />
+            <div className="settings-grid">
+              <div className="field-card">
+                <label className="field-label">{t("settings.modelMaxRetries")}</label>
+                <input
+                  className="input"
+                  type="number"
+                  min={0}
+                  max={10}
+                  value={maxRetries}
+                  onChange={(event) => setMaxRetries(Number(event.target.value))}
+                />
+                <p className="field-help">{t("settings.maxRetriesHint")}</p>
+              </div>
+            </div>
+          </section>
+
+          <section className="surface-panel settings-section" id="secrets">
+            <SectionHeader icon="settings" title={t("settings.secrets")} description={t("settings.secretsHint")} />
+            <div className="settings-secret-list">
+              {secrets.map((secret) => (
+                <div className="settings-secret-row" key={secret.label}>
+                  <div>
+                    <strong>{secret.label}</strong>
+                    <p>{t("settings.envManaged", { env: secret.envName })}</p>
+                  </div>
+                  <span className="status-badge stable">{t("settings.readOnlySecrets")}</span>
+                </div>
+              ))}
+            </div>
+          </section>
+        </div>
+      </div>
+
+      <footer className="settings-footer surface-panel">
+        <div className="settings-footer-status">
+          <Icon name="shield" className="icon-sm" />
+          <span>{isDirty ? t("settings.unsavedChanges") : t("settings.localDraftSaved")}</span>
+        </div>
+        <div className="settings-footer-actions">
+          <button
+            className="btn ghost"
+            type="button"
+            onClick={() => {
+              if (settings.data) {
+                syncDraft(settings.data, {
+                  setEnabled,
+                  setMode,
+                  setStreaming,
+                  setMaxRetries,
+                });
+              }
+            }}
           >
-            <option value="zh-CN">{t("settings.language.zh-CN")}</option>
-            <option value="en-US">{t("settings.language.en-US")}</option>
-          </select>
+            {t("settings.discard")}
+          </button>
+          <button
+            className="btn"
+            type="button"
+            disabled={!isDirty || update.isPending}
+            onClick={() => update.mutate()}
+          >
+            {t("settings.apply")}
+          </button>
         </div>
-        <div>
-          <label style={{ display: "block", marginBottom: "var(--space-1)", fontSize: 13, color: "var(--text-muted)" }}>
-            {t("settings.telegramMode")}
-          </label>
-          <select className="select" value={mode} onChange={(e) => setMode(e.target.value)}>
-            <option value="polling">polling</option>
-            <option value="webhook">webhook</option>
-          </select>
-        </div>
-        <div>
-          <label style={{ display: "block", marginBottom: "var(--space-1)", fontSize: 13, color: "var(--text-muted)" }}>
-            {t("settings.modelMaxRetries")}
-          </label>
-          <input
-            className="input"
-            type="number"
-            min={0}
-            max={10}
-            value={maxRetries}
-            onChange={(e) => setMaxRetries(Number(e.target.value))}
-          />
-        </div>
+      </footer>
+    </div>
+  );
+}
+
+function SectionHeader(
+  { icon, title, description }: { icon: "spark" | "shield" | "rocket" | "settings"; title: string; description: string },
+): JSX.Element {
+  return (
+    <div className="settings-section-header">
+      <div className="settings-section-icon">
+        <Icon name={icon} className="icon-sm" />
       </div>
-
-      <label style={{ display: "flex", alignItems: "center", gap: "var(--space-2)", marginTop: "var(--space-4)", cursor: "pointer", color: "var(--text-muted)" }}>
-        <input
-          type="checkbox"
-          checked={streaming}
-          onChange={(e) => setStreaming(e.target.checked)}
-        />
-        {t("settings.enableStreaming")}
-      </label>
-
-      <div style={{ marginTop: "var(--space-6)", borderTop: "1px solid var(--border)", paddingTop: "var(--space-4)" }}>
-        <h3>{t("settings.apiKeys")}</h3>
-        <div className="mono" style={{ color: "var(--text-dim)", display: "flex", flexDirection: "column", gap: "var(--space-1)" }}>
-          <span>{t("settings.primary")} ({settings.data?.model.primary.api_key_env}): {mask}</span>
-          {settings.data?.model.fallback ? (
-            <span>{t("settings.fallback")} ({settings.data.model.fallback.api_key_env}): {mask}</span>
-          ) : null}
-          <span>{t("settings.telegram")} ({settings.data?.telegram.bot_token_env}): {mask}</span>
-        </div>
+      <div>
+        <h2>{title}</h2>
+        <p>{description}</p>
       </div>
-
-      <button className="btn" type="button" onClick={() => update.mutate()} style={{ marginTop: "var(--space-4)" }}>
-        {t("settings.save")}
-      </button>
-
-      <pre className="code-block" style={{ marginTop: "var(--space-4)" }}>
-        {JSON.stringify(settings.data ?? {}, null, 2)}
-      </pre>
-    </section>
+    </div>
   );
 }

@@ -22,7 +22,7 @@ type SchedulePatch = {
 };
 
 export function SchedulerPage(): JSX.Element {
-  const { t, formatDateTime } = useI18n();
+  const { t, formatDateTime, formatNumber } = useI18n();
   const defaults = useMemo(
     () => ({
       name: t("scheduler.defaultName"),
@@ -77,134 +77,140 @@ export function SchedulerPage(): JSX.Element {
     },
   });
 
-  const statusLabel = (status: string) => {
-    if (status === "active" || status === "paused") {
-      return t(`scheduler.status.${status}`);
-    }
-    return status;
-  };
+  const schedules = list.data ?? [];
+  const statusLabel = (status: string) => (
+    status === "active" || status === "paused" ? t(`scheduler.status.${status}`) : status
+  );
 
   return (
-    <div className="grid" style={{ gridTemplateColumns: "1fr 2fr" }}>
-      <section className="card">
-        <h3>{t("scheduler.createTask")}</h3>
-        <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-3)" }}>
+    <div className="stack-layout">
+      <section className="page-header">
+        <div>
+          <p className="page-eyebrow">{t("nav.scheduler")}</p>
+          <h1 className="page-title">{t("scheduler.scheduledTasks")}</h1>
+          <p className="page-subtitle">{t("scheduler.subtitle", {
+            count: formatNumber(schedules.length),
+          })}</p>
+        </div>
+      </section>
+
+      <div className="split-layout">
+        <section className="surface-panel panel-stack">
+          <h2 className="surface-panel-title">{t("scheduler.createTask")}</h2>
           <div>
-            <label style={{ display: "block", marginBottom: "var(--space-1)", fontSize: 13, color: "var(--text-muted)" }}>{t("scheduler.name")}</label>
-            <input className="input" value={name} onChange={(e) => setName(e.target.value)} />
+            <label className="field-label">{t("scheduler.name")}</label>
+            <input className="input" value={name} onChange={(event) => setName(event.target.value)} />
           </div>
           <div>
-            <label style={{ display: "block", marginBottom: "var(--space-1)", fontSize: 13, color: "var(--text-muted)" }}>{t("scheduler.prompt")}</label>
-            <textarea className="textarea" value={prompt} onChange={(e) => setPrompt(e.target.value)} />
+            <label className="field-label">{t("scheduler.prompt")}</label>
+            <textarea className="textarea" value={prompt} onChange={(event) => setPrompt(event.target.value)} />
           </div>
           <div>
-            <label style={{ display: "block", marginBottom: "var(--space-1)", fontSize: 13, color: "var(--text-muted)" }}>{t("scheduler.cron")}</label>
-            <input className="input mono" value={cron} onChange={(e) => setCron(e.target.value)} />
+            <label className="field-label">{t("scheduler.cron")}</label>
+            <input className="input mono" value={cron} onChange={(event) => setCron(event.target.value)} />
           </div>
           <button className="btn" type="button" onClick={() => create.mutate()}>
             {t("scheduler.create")}
           </button>
-        </div>
-      </section>
-      <section className="card">
-        <h3>{t("scheduler.scheduledTasks")}</h3>
-        <table className="table">
-          <thead>
-            <tr>
-              <th>{t("scheduler.table.name")}</th>
-              <th>{t("scheduler.table.cron")}</th>
-              <th>{t("scheduler.table.status")}</th>
-              <th>{t("scheduler.table.nextRun")}</th>
-              <th style={{ width: 120 }} />
-            </tr>
-          </thead>
-          <tbody>
-            {(list.data ?? []).map((item) => {
-              const editing = editingId === item.id;
-              return (
-                <tr key={item.id}>
-                  <td>
-                    {editing ? (
-                      <input className="input" value={editName} onChange={(e) => setEditName(e.target.value)} />
-                    ) : (
-                      item.name
-                    )}
-                  </td>
-                  <td className="mono">
-                    {editing ? (
-                      <input className="input mono" value={editCron} onChange={(e) => setEditCron(e.target.value)} />
-                    ) : (
-                      item.cron
-                    )}
-                  </td>
-                  <td>
-                    <span style={{ color: item.status === "active" ? "var(--success)" : "var(--text-dim)" }}>
-                      {statusLabel(item.status)}
-                    </span>
-                  </td>
-                  <td className="mono" style={{ color: "var(--text-muted)" }}>
-                    {item.next_run_at ? formatDateTime(item.next_run_at, { dateStyle: "medium", timeStyle: "short" }) : "-"}
-                  </td>
-                  <td>
-                    <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-1)" }}>
+        </section>
+
+        <section className="surface-panel">
+          <table className="table">
+            <thead>
+              <tr>
+                <th>{t("scheduler.table.name")}</th>
+                <th>{t("scheduler.table.cron")}</th>
+                <th>{t("scheduler.table.status")}</th>
+                <th>{t("scheduler.table.nextRun")}</th>
+                <th style={{ width: 140 }} />
+              </tr>
+            </thead>
+            <tbody>
+              {schedules.map((item) => {
+                const editing = editingId === item.id;
+                return (
+                  <tr key={item.id}>
+                    <td>
                       {editing ? (
-                        <>
-                          <textarea
-                            className="textarea"
-                            value={editPrompt}
-                            onChange={(e) => setEditPrompt(e.target.value)}
-                            style={{ minHeight: 60 }}
-                          />
-                          <button
-                            className="btn secondary"
-                            onClick={() => update.mutate({ id: item.id, body: { name: editName, prompt: editPrompt, cron: editCron } })}
-                            type="button"
-                          >
-                            {t("scheduler.save")}
-                          </button>
-                          <button className="btn secondary" onClick={() => setEditingId("")} type="button">
-                            {t("scheduler.cancel")}
-                          </button>
-                        </>
-                      ) : (
-                        <>
-                          <button
-                            className="btn secondary"
-                            onClick={() =>
-                              update.mutate({
+                        <input className="input" value={editName} onChange={(event) => setEditName(event.target.value)} />
+                      ) : item.name}
+                    </td>
+                    <td className="mono">
+                      {editing ? (
+                        <input className="input mono" value={editCron} onChange={(event) => setEditCron(event.target.value)} />
+                      ) : item.cron}
+                    </td>
+                    <td>
+                      <span className={`status-badge ${item.status === "active" ? "stable" : "degraded"}`}>
+                        {statusLabel(item.status)}
+                      </span>
+                    </td>
+                    <td className="mono">
+                      {item.next_run_at
+                        ? formatDateTime(item.next_run_at, { dateStyle: "medium", timeStyle: "short" })
+                        : "-"}
+                    </td>
+                    <td>
+                      <div className="panel-stack">
+                        {editing ? (
+                          <>
+                            <textarea
+                              className="textarea"
+                              value={editPrompt}
+                              onChange={(event) => setEditPrompt(event.target.value)}
+                            />
+                            <button
+                              className="btn secondary"
+                              type="button"
+                              onClick={() => update.mutate({
+                                id: item.id,
+                                body: { name: editName, prompt: editPrompt, cron: editCron },
+                              })}
+                            >
+                              {t("scheduler.save")}
+                            </button>
+                            <button className="btn ghost" type="button" onClick={() => setEditingId("")}>
+                              {t("scheduler.cancel")}
+                            </button>
+                          </>
+                        ) : (
+                          <>
+                            <button
+                              className="btn secondary"
+                              type="button"
+                              onClick={() => update.mutate({
                                 id: item.id,
                                 body: { status: item.status === "active" ? "paused" : "active" },
-                              })
-                            }
-                            type="button"
-                          >
-                            {item.status === "active" ? t("scheduler.pause") : t("scheduler.activate")}
-                          </button>
-                          <button
-                            className="btn secondary"
-                            onClick={() => {
-                              setEditingId(item.id);
-                              setEditName(item.name);
-                              setEditPrompt(item.prompt);
-                              setEditCron(item.cron);
-                            }}
-                            type="button"
-                          >
-                            {t("scheduler.edit")}
-                          </button>
-                          <button className="btn danger" onClick={() => remove.mutate(item.id)} type="button">
-                            {t("scheduler.delete")}
-                          </button>
-                        </>
-                      )}
-                    </div>
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </section>
+                              })}
+                            >
+                              {item.status === "active" ? t("scheduler.pause") : t("scheduler.activate")}
+                            </button>
+                            <button
+                              className="btn ghost"
+                              type="button"
+                              onClick={() => {
+                                setEditingId(item.id);
+                                setEditName(item.name);
+                                setEditPrompt(item.prompt);
+                                setEditCron(item.cron);
+                              }}
+                            >
+                              {t("scheduler.edit")}
+                            </button>
+                            <button className="btn danger" type="button" onClick={() => remove.mutate(item.id)}>
+                              {t("scheduler.delete")}
+                            </button>
+                          </>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </section>
+      </div>
     </div>
   );
 }
