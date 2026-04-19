@@ -3,69 +3,11 @@ import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { Icon } from "../components/Icon";
+import { SettingsSectionHeader } from "../components/SettingsSectionHeader";
 import { useI18n, type Language } from "../i18n";
 import { api } from "../lib/api";
-
-type Settings = {
-  telegram: {
-    enabled: boolean;
-    enable_streaming: boolean;
-    mode: string;
-    bot_token_env: string;
-  };
-  feishu: {
-    enabled: boolean;
-    mode: string;
-    app_id_env: string;
-    app_secret_env: string;
-    verification_token_env: string;
-    encrypt_key_env: string;
-  };
-  runtime: {
-    telegram: {
-      enabled: boolean;
-      mode: string | null;
-      status: string;
-      missing_env_vars: string[];
-    };
-    feishu: {
-      enabled: boolean;
-      mode: string | null;
-      status: string;
-      missing_env_vars: string[];
-    };
-  };
-  model: {
-    max_retries: number;
-    primary: {
-      model: string;
-      api_key_env: string;
-    };
-    fallback: {
-      model: string;
-      api_key_env: string;
-    } | null;
-  };
-};
-
-type SecretRow = {
-  label: string;
-  envName: string;
-};
-
-type DraftSetters = {
-  setEnabled: (value: boolean) => void;
-  setMode: (value: string) => void;
-  setStreaming: (value: boolean) => void;
-  setMaxRetries: (value: number) => void;
-};
-
-function syncDraft(settings: Settings, setters: DraftSetters): void {
-  setters.setEnabled(settings.telegram.enabled);
-  setters.setMode(settings.telegram.mode);
-  setters.setStreaming(settings.telegram.enable_streaming);
-  setters.setMaxRetries(settings.model.max_retries);
-}
+import { operatorQueryDefaults } from "../lib/query-defaults";
+import { buildSecrets, syncDraft, type SecretRow, type Settings } from "../lib/settings-view";
 
 export function SettingsPage(): JSX.Element {
   const qc = useQueryClient();
@@ -76,6 +18,7 @@ export function SettingsPage(): JSX.Element {
   const [maxRetries, setMaxRetries] = useState(3);
 
   const settings = useQuery({
+    ...operatorQueryDefaults,
     queryKey: ["settings"],
     queryFn: () => api.get<Settings>("/api/settings"),
   });
@@ -115,28 +58,9 @@ export function SettingsPage(): JSX.Element {
       || settings.data.model.max_retries !== maxRetries
     : false;
 
-  const secrets = useMemo<SecretRow[]>(() => {
-    if (!settings.data) {
-      return [];
-    }
-    const rows: SecretRow[] = [
-      { label: t("settings.primary"), envName: settings.data.model.primary.api_key_env },
-      { label: t("settings.telegram"), envName: settings.data.telegram.bot_token_env },
-    ];
-    if (settings.data.model.fallback) {
-      rows.splice(1, 0, {
-        label: t("settings.fallback"),
-        envName: settings.data.model.fallback.api_key_env,
-      });
-    }
-    rows.push(
-      { label: "feishu_app_id", envName: settings.data.feishu.app_id_env },
-      { label: "feishu_app_secret", envName: settings.data.feishu.app_secret_env },
-      { label: "feishu_verification_token", envName: settings.data.feishu.verification_token_env },
-      { label: "feishu_encrypt_key", envName: settings.data.feishu.encrypt_key_env },
-    );
-    return rows;
-  }, [settings.data, t]);
+  const secrets = useMemo<SecretRow[]>(() => (
+    settings.data ? buildSecrets(settings.data, t) : []
+  ), [settings.data, t]);
 
   return (
     <div className="settings-page">
@@ -158,7 +82,7 @@ export function SettingsPage(): JSX.Element {
 
         <div className="settings-content">
           <section className="surface-panel settings-section" id="general">
-            <SectionHeader icon="spark" title={t("settings.general")} description={t("settings.generalHint")} />
+            <SettingsSectionHeader icon="spark" title={t("settings.general")} description={t("settings.generalHint")} />
             <div className="settings-grid">
               <div className="field-card">
                 <label className="field-label">{t("settings.language")}</label>
@@ -176,7 +100,7 @@ export function SettingsPage(): JSX.Element {
           </section>
 
           <section className="surface-panel settings-section" id="connectivity">
-            <SectionHeader icon="shield" title={t("settings.connectivity")} description={t("settings.connectivityHint")} />
+            <SettingsSectionHeader icon="shield" title={t("settings.connectivity")} description={t("settings.connectivityHint")} />
             <div className="settings-grid">
               <div className="field-card">
                 <label className="field-label">{t("settings.telegramEnabled")}</label>
@@ -265,7 +189,7 @@ export function SettingsPage(): JSX.Element {
           </section>
 
           <section className="surface-panel settings-section" id="inference">
-            <SectionHeader icon="rocket" title={t("settings.inference")} description={t("settings.inferenceHint")} />
+            <SettingsSectionHeader icon="rocket" title={t("settings.inference")} description={t("settings.inferenceHint")} />
             <div className="settings-grid">
               <div className="field-card">
                 <label className="field-label">{t("settings.modelMaxRetries")}</label>
@@ -283,7 +207,7 @@ export function SettingsPage(): JSX.Element {
           </section>
 
           <section className="surface-panel settings-section" id="secrets">
-            <SectionHeader icon="settings" title={t("settings.secrets")} description={t("settings.secretsHint")} />
+            <SettingsSectionHeader icon="settings" title={t("settings.secrets")} description={t("settings.secretsHint")} />
             <div className="settings-secret-list">
               {secrets.map((secret) => (
                 <div className="settings-secret-row" key={secret.label}>
@@ -331,22 +255,6 @@ export function SettingsPage(): JSX.Element {
           </button>
         </div>
       </footer>
-    </div>
-  );
-}
-
-function SectionHeader(
-  { icon, title, description }: { icon: "spark" | "shield" | "rocket" | "settings"; title: string; description: string },
-): JSX.Element {
-  return (
-    <div className="settings-section-header">
-      <div className="settings-section-icon">
-        <Icon name={icon} className="icon-sm" />
-      </div>
-      <div>
-        <h2>{title}</h2>
-        <p>{description}</p>
-      </div>
     </div>
   );
 }

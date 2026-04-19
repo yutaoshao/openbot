@@ -42,7 +42,7 @@
 .surface-panel,
 .metric-card {
   background: var(--surface);
-  border: 1px solid rgba(217, 225, 232, 0.75);
+  border: 1px solid var(--border);
   border-radius: var(--radius);
   box-shadow: var(--shadow-card);
 }
@@ -123,8 +123,8 @@
 .select:focus,
 .textarea:focus {
   outline: none;
-  border-color: rgba(27, 79, 227, 0.24);
-  box-shadow: 0 0 0 4px rgba(27, 79, 227, 0.08);
+  border-color: color-mix(in oklab, var(--accent) 28%, var(--border));
+  box-shadow: 0 0 0 4px color-mix(in oklab, var(--accent) 14%, transparent);
   background: var(--surface);
 }
 
@@ -158,12 +158,12 @@
   padding: 12px 18px;
   border: 0;
   border-radius: var(--radius-full);
-  background: linear-gradient(135deg, var(--accent), var(--accent-strong));
-  color: #fff;
+  background: linear-gradient(135deg, var(--accent), color-mix(in oklab, var(--accent-strong) 68%, var(--accent-2)));
+  color: var(--solid-contrast);
   font-weight: 700;
   cursor: pointer;
   transition: transform 180ms ease, opacity 180ms ease, box-shadow 180ms ease;
-  box-shadow: 0 14px 28px rgba(27, 79, 227, 0.2);
+  box-shadow: 0 14px 28px color-mix(in oklab, var(--accent-ink) 16%, transparent);
 }
 
 .btn:hover {
@@ -218,11 +218,11 @@
 
 .table td {
   padding: 18px 0;
-  border-bottom: 1px solid rgba(217, 225, 232, 0.65);
+  border-bottom: 1px solid var(--border);
 }
 
 .table tbody tr:hover {
-  background: rgba(27, 79, 227, 0.02);
+  background: color-mix(in oklab, var(--accent-soft) 48%, var(--surface));
 }
 
 .table-title-cell {
@@ -258,7 +258,7 @@ pre.code-block {
   white-space: pre-wrap;
   color: var(--text-muted);
   background: var(--surface-muted);
-  border: 1px solid rgba(217, 225, 232, 0.75);
+  border: 1px solid var(--border);
   border-radius: 18px;
   font-family: var(--font-mono);
   font-size: 0.82rem;

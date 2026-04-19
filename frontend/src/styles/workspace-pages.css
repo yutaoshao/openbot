@@ -35,8 +35,12 @@
 }
 
 .entity-list-item {
+  appearance: none;
+  width: 100%;
   padding: 16px 18px;
-  border: 1px solid rgba(217, 225, 232, 0.65);
+  font: inherit;
+  text-align: left;
+  border: 1px solid var(--border);
   border-radius: 18px;
   background: var(--surface-muted);
   cursor: pointer;
@@ -50,8 +54,24 @@
 }
 
 .entity-list-item.active {
-  border-color: rgba(27, 79, 227, 0.28);
+  border-color: color-mix(in oklab, var(--accent) 28%, var(--border));
   background: var(--accent-soft);
+}
+
+.trace-filter-button {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.trace-filter-button:focus-visible,
+.entity-list-item:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
 .entity-list-title {
@@ -128,6 +148,13 @@
   font-size: 0.88rem;
 }
 
+.help-list {
+  margin: 0;
+  padding-left: 1.2rem;
+  color: var(--text-muted);
+  line-height: 1.8;
+}
+
 .stats-row {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
@@ -142,6 +169,10 @@
   min-height: 360px;
 }
 
+.monitoring-grid {
+  grid-template-columns: 1fr 1fr;
+}
+
 .empty-state {
   padding: var(--space-8);
   text-align: center;
@@ -151,5 +182,16 @@
 @media (max-width: 980px) {
   .split-layout {
     grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 720px) {
+  .monitoring-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .chart-panel,
+  .chart-panel-tall {
+    min-height: 280px;
   }
 }

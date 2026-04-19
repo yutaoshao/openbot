@@ -148,6 +148,7 @@ export function ChatPage(): JSX.Element {
             <input
               className="input"
               placeholder={t("chat.inputPlaceholder")}
+              aria-label={t("chat.inputPlaceholder")}
               value={message}
               onChange={(e) => setMessage(e.target.value)}
               autoFocus
@@ -192,6 +193,7 @@ export function ChatPage(): JSX.Element {
           <input
             className="input"
             placeholder={t("chat.inputPlaceholder")}
+            aria-label={t("chat.inputPlaceholder")}
             value={message}
             onChange={(e) => setMessage(e.target.value)}
             disabled={streaming}

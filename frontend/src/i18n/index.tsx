@@ -83,9 +83,33 @@ export function LanguageProvider({ children }: { children: ReactNode }): JSX.Ele
   }, [language]);
 
   const value = useMemo<I18nContextValue>(() => {
+    const dateTimeFormatters = new Map<string, Intl.DateTimeFormat>();
+    const numberFormatters = new Map<string, Intl.NumberFormat>();
     const translate = (key: string, vars?: MessageVars): string => {
       const template = messages[language][key] ?? messages[DEFAULT_LANGUAGE][key] ?? key;
       return interpolate(template, vars);
+    };
+    const getDateTimeFormatter = (options?: Intl.DateTimeFormatOptions): Intl.DateTimeFormat => {
+      const key = JSON.stringify(options ?? {});
+      const cached = dateTimeFormatters.get(key);
+      if (cached) {
+        return cached;
+      }
+
+      const formatter = new Intl.DateTimeFormat(language, options);
+      dateTimeFormatters.set(key, formatter);
+      return formatter;
+    };
+    const getNumberFormatter = (options?: Intl.NumberFormatOptions): Intl.NumberFormat => {
+      const key = JSON.stringify(options ?? {});
+      const cached = numberFormatters.get(key);
+      if (cached) {
+        return cached;
+      }
+
+      const formatter = new Intl.NumberFormat(language, options);
+      numberFormatters.set(key, formatter);
+      return formatter;
     };
 
     return {
@@ -102,9 +126,9 @@ export function LanguageProvider({ children }: { children: ReactNode }): JSX.Ele
           return String(input);
         }
 
-        return new Intl.DateTimeFormat(language, options).format(date);
+        return getDateTimeFormatter(options).format(date);
       },
-      formatNumber: (input, options) => new Intl.NumberFormat(language, options).format(input),
+      formatNumber: (input, options) => getNumberFormatter(options).format(input),
     };
   }, [language]);
 

@@ -48,9 +48,9 @@
   width: min(760px, 100%);
   margin: 0 auto var(--space-5);
   padding: var(--space-5);
-  border: 1px solid rgba(217, 225, 232, 0.65);
+  border: 1px solid var(--border);
   border-radius: 24px;
-  background: rgba(255, 255, 255, 0.88);
+  background: color-mix(in oklab, var(--surface) 88%, transparent);
   box-shadow: var(--shadow-card);
 }
 
@@ -78,7 +78,7 @@
   position: sticky;
   bottom: 0;
   padding: var(--space-4) 0 0;
-  background: linear-gradient(180deg, rgba(248, 249, 251, 0), var(--bg) 28%);
+  background: linear-gradient(180deg, transparent, color-mix(in oklab, var(--bg) 88%, transparent) 32%);
 }
 
 .chat-meta {
@@ -122,7 +122,7 @@ pre.code-block {
   overflow-x: auto;
   border-radius: 20px;
   background: var(--surface-muted);
-  border: 1px solid rgba(217, 225, 232, 0.75);
+  border: 1px solid var(--border);
 }
 
 .chat-bubble-content code,
@@ -144,9 +144,24 @@ pre.code-block {
 
 .chat-bubble-content blockquote {
   margin: var(--space-3) 0;
-  padding-left: var(--space-4);
-  border-left: 3px solid var(--accent-soft);
+  position: relative;
+  padding: var(--space-4) var(--space-4) var(--space-4) calc(var(--space-5) + 8px);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  background: color-mix(in oklab, var(--accent-soft) 58%, var(--surface));
   color: var(--text-muted);
+}
+
+.chat-bubble-content blockquote::before {
+  content: "";
+  position: absolute;
+  top: var(--space-4);
+  left: var(--space-4);
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--accent);
+  box-shadow: 0 0 0 5px color-mix(in oklab, var(--accent-soft) 90%, transparent);
 }
 
 .chat-bubble-content .md-table {
@@ -157,7 +172,7 @@ pre.code-block {
 .chat-bubble-content .md-table th,
 .chat-bubble-content .md-table td {
   padding: 10px 12px;
-  border-bottom: 1px solid rgba(217, 225, 232, 0.75);
+  border-bottom: 1px solid var(--border);
   text-align: left;
 }
 

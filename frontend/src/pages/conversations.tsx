@@ -85,11 +85,13 @@ export function ConversationsPage(): JSX.Element {
             <input
               className="input"
               placeholder={t("conversations.search")}
+              aria-label={t("conversations.search")}
               value={query}
               onChange={(event) => setQuery(event.target.value)}
             />
             <select
               className="select"
+              aria-label={t("conversations.filterPlatform")}
               value={platformFilter}
               onChange={(event) => setPlatformFilter(event.target.value)}
             >
@@ -103,17 +105,11 @@ export function ConversationsPage(): JSX.Element {
 
           <div className="entity-list">
             {conversations.map((item) => (
-              <div
+              <button
                 key={item.id}
-                role="button"
-                tabIndex={0}
+                type="button"
                 className={`entity-list-item${selectedId === item.id ? " active" : ""}`}
                 onClick={() => setSelectedId(item.id)}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter") {
-                    setSelectedId(item.id);
-                  }
-                }}
               >
                 <p className="entity-list-title">{item.title || item.id.slice(0, 12)}</p>
                 <p className="entity-list-meta">
@@ -124,7 +120,7 @@ export function ConversationsPage(): JSX.Element {
                 <p className="entity-list-meta">
                   {formatDateTime(item.updated_at, { dateStyle: "medium", timeStyle: "short" })}
                 </p>
-              </div>
+              </button>
             ))}
           </div>
         </section>

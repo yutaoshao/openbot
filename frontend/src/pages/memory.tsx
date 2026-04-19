@@ -95,18 +95,19 @@ export function MemoryPage(): JSX.Element {
       <div className="split-layout">
         <section className="surface-panel panel-stack">
           <h2 className="surface-panel-title">{t("memory.addKnowledge")}</h2>
-          <select className="select" value={category} onChange={(event) => setCategory(event.target.value)}>
+          <select className="select" aria-label={t("memory.field.category")} value={category} onChange={(event) => setCategory(event.target.value)}>
             <option value="fact">{categoryLabel("fact")}</option>
             <option value="concept">{categoryLabel("concept")}</option>
             <option value="procedure">{categoryLabel("procedure")}</option>
           </select>
-          <select className="select" value={priority} onChange={(event) => setPriority(event.target.value)}>
+          <select className="select" aria-label={t("memory.field.priority")} value={priority} onChange={(event) => setPriority(event.target.value)}>
             <option value="P1">P1</option>
             <option value="P2">P2</option>
             <option value="P3">P3</option>
           </select>
           <textarea
             className="textarea"
+            aria-label={t("memory.contentPlaceholder")}
             value={content}
             onChange={(event) => setContent(event.target.value)}
             placeholder={t("memory.contentPlaceholder")}
@@ -126,16 +127,17 @@ export function MemoryPage(): JSX.Element {
             <input
               className="input"
               placeholder={t("memory.search")}
+              aria-label={t("memory.search")}
               value={search}
               onChange={(event) => setSearch(event.target.value)}
             />
-            <select className="select" value={filterCategory} onChange={(event) => setFilterCategory(event.target.value)}>
+            <select className="select" aria-label={t("memory.filterCategory")} value={filterCategory} onChange={(event) => setFilterCategory(event.target.value)}>
               <option value="all">{t("memory.allCategories")}</option>
               <option value="fact">{categoryLabel("fact")}</option>
               <option value="concept">{categoryLabel("concept")}</option>
               <option value="procedure">{categoryLabel("procedure")}</option>
             </select>
-            <select className="select" value={filterPriority} onChange={(event) => setFilterPriority(event.target.value)}>
+            <select className="select" aria-label={t("memory.filterPriority")} value={filterPriority} onChange={(event) => setFilterPriority(event.target.value)}>
               <option value="all">{t("memory.allPriorities")}</option>
               <option value="P1">P1</option>
               <option value="P2">P2</option>
@@ -162,6 +164,7 @@ export function MemoryPage(): JSX.Element {
                       {editing ? (
                         <select
                           className="select"
+                          aria-label={t("memory.table.priority")}
                           value={editingPriority}
                           onChange={(event) => setEditingPriority(event.target.value)}
                         >
@@ -177,6 +180,7 @@ export function MemoryPage(): JSX.Element {
                       {editing ? (
                         <textarea
                           className="textarea"
+                          aria-label={t("memory.table.content")}
                           value={editingContent}
                           onChange={(event) => setEditingContent(event.target.value)}
                         />

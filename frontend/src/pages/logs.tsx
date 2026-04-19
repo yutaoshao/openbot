@@ -4,6 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 
 import { useI18n } from "../i18n";
 import { api } from "../lib/api";
+import { liveLogsQueryDefaults } from "../lib/query-defaults";
 
 type LogEntry = {
   id: number;
@@ -59,12 +60,14 @@ export function LogsPage(): JSX.Element {
   }, [level, platform, surface, traceFilter]);
 
   const logs = useQuery({
+    ...liveLogsQueryDefaults,
     queryKey: ["logs", params],
     queryFn: () => api.get<LogEntry[]>(`/api/logs?${params}`),
     refetchInterval: 5000,
   });
 
   const stats = useQuery({
+    ...liveLogsQueryDefaults,
     queryKey: ["logs", "stats"],
     queryFn: () => api.get<LogStats>(`/api/logs/stats${platform !== "all" ? `?platform=${platform}` : ""}`),
     refetchInterval: 10000,
@@ -101,17 +104,17 @@ export function LogsPage(): JSX.Element {
 
       <section className="surface-panel">
         <div className="filter-row">
-          <select className="select" value={platform} onChange={(event) => setPlatform(event.target.value)}>
+          <select className="select" aria-label={t("logs.filter.platform")} value={platform} onChange={(event) => setPlatform(event.target.value)}>
             {PLATFORMS.map((item) => (
               <option key={item} value={item}>{platformLabel(item)}</option>
             ))}
           </select>
-          <select className="select" value={surface} onChange={(event) => setSurface(event.target.value)}>
+          <select className="select" aria-label={t("logs.filter.surface")} value={surface} onChange={(event) => setSurface(event.target.value)}>
             {SURFACES.map((item) => (
               <option key={item} value={item}>{surfaceLabel(item)}</option>
             ))}
           </select>
-          <select className="select" value={level} onChange={(event) => setLevel(event.target.value)}>
+          <select className="select" aria-label={t("logs.filter.level")} value={level} onChange={(event) => setLevel(event.target.value)}>
             {LEVELS.map((item) => (
               <option key={item} value={item}>{levelLabel(item)}</option>
             ))}
@@ -119,6 +122,7 @@ export function LogsPage(): JSX.Element {
           <input
             className="input"
             placeholder={t("logs.filter.traceOrInteraction")}
+            aria-label={t("logs.filter.traceOrInteraction")}
             value={traceFilter}
             onChange={(event) => setTraceFilter(event.target.value)}
           />
@@ -157,19 +161,14 @@ export function LogsPage(): JSX.Element {
                 <td className="table-title-cell">{entry.event}</td>
                 <td className="mono">
                   {entry.trace_id ? (
-                    <span
-                      role="button"
-                      tabIndex={0}
-                      style={{ cursor: "pointer", textDecoration: "underline" }}
+                    <button
+                      className="trace-filter-button"
+                      type="button"
+                      aria-label={t("logs.filterTrace")}
                       onClick={() => setTraceFilter(entry.trace_id ?? "")}
-                      onKeyDown={(event) => {
-                        if (event.key === "Enter") {
-                          setTraceFilter(entry.trace_id ?? "");
-                        }
-                      }}
                     >
                       {entry.trace_id.slice(0, 8)}
-                    </span>
+                    </button>
                   ) : "-"}
                 </td>
                 <td className="mono">{entry.data ? formatData(entry.data) : ""}</td>

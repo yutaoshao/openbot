@@ -3,6 +3,8 @@ import { Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "rec
 
 import { useI18n } from "../i18n";
 import { api, cssVar } from "../lib/api";
+import { formatMetricValue } from "../lib/metric-values";
+import { metricsQueryDefaults } from "../lib/query-defaults";
 
 type Latency = {
   daily: Array<{ date: string; avg: number; p50: number; p95: number }>;
@@ -38,10 +40,12 @@ function useChartTheme() {
 export function MonitoringPage(): JSX.Element {
   const { t, formatDateTime, formatNumber } = useI18n();
   const latency = useQuery({
+    ...metricsQueryDefaults,
     queryKey: ["metrics", "latency", "30d"],
     queryFn: () => api.get<Latency>("/api/metrics/latency?period=30d"),
   });
   const tokens = useQuery({
+    ...metricsQueryDefaults,
     queryKey: ["metrics", "tokens", "30d"],
     queryFn: () => api.get<Tokens>("/api/metrics/tokens?period=30d"),
   });
@@ -65,6 +69,8 @@ export function MonitoringPage(): JSX.Element {
     total_tokens: item.tokens_in + item.tokens_out,
     label: formatDateTime(item.date, { month: "numeric", day: "numeric" }),
   }));
+  const metricsLoading = latency.isPending || tokens.isPending;
+  const metricsError = latency.isError || tokens.isError;
 
   return (
     <div className="stack-layout">
@@ -79,19 +85,19 @@ export function MonitoringPage(): JSX.Element {
       <div className="stats-row">
         <section className="metric-card">
           <span>{t("monitoring.avg")}</span>
-          <strong>{formatNumber(latestLatencyRow?.avg ?? 0)}ms</strong>
+          <strong>{formatMetricValue(latestLatencyRow?.avg, formatNumber, undefined, "ms")}</strong>
         </section>
         <section className="metric-card">
           <span>{t("monitoring.p95")}</span>
-          <strong>{formatNumber(latestLatencyRow?.p95 ?? 0)}ms</strong>
+          <strong>{formatMetricValue(latestLatencyRow?.p95, formatNumber, undefined, "ms")}</strong>
         </section>
         <section className="metric-card">
           <span>{t("monitoring.totalTokens")}</span>
-          <strong>{formatNumber(last7Tokens)}</strong>
+          <strong>{tokens.data ? formatNumber(last7Tokens) : "—"}</strong>
         </section>
       </div>
 
-      <div className="grid" style={{ gridTemplateColumns: "1fr 1fr" }}>
+      <div className="grid monitoring-grid">
         <section className="surface-panel chart-panel chart-panel-tall">
           <div className="surface-panel-header">
             <div>
@@ -99,15 +105,23 @@ export function MonitoringPage(): JSX.Element {
               <h3 className="surface-panel-title">{t("monitoring.avg")} / {t("monitoring.p95")}</h3>
             </div>
           </div>
-          <ResponsiveContainer width="100%" height="88%">
-            <LineChart data={latencyRows}>
-              <XAxis dataKey="label" {...chartTheme.axisProps} />
-              <YAxis {...chartTheme.axisProps} />
-              <Tooltip {...chartTheme.tooltipProps} />
-              <Line type="monotone" dataKey="avg" name={t("monitoring.avg")} stroke={chartTheme.line1} strokeWidth={2} dot={false} />
-              <Line type="monotone" dataKey="p95" name={t("monitoring.p95")} stroke={chartTheme.line2} strokeWidth={2} dot={false} />
-            </LineChart>
-          </ResponsiveContainer>
+          {latency.isError ? (
+            <div className="empty-state">{t("common.dataUnavailable")}</div>
+          ) : latency.isPending ? (
+            <p className="surface-panel-note">{t("common.dataLoading")}</p>
+          ) : latencyRows.length === 0 ? (
+            <div className="empty-state">{t("common.noData")}</div>
+          ) : (
+            <ResponsiveContainer width="100%" height="88%">
+              <LineChart data={latencyRows}>
+                <XAxis dataKey="label" {...chartTheme.axisProps} />
+                <YAxis {...chartTheme.axisProps} />
+                <Tooltip {...chartTheme.tooltipProps} />
+                <Line type="monotone" dataKey="avg" name={t("monitoring.avg")} stroke={chartTheme.line1} strokeWidth={2} dot={false} />
+                <Line type="monotone" dataKey="p95" name={t("monitoring.p95")} stroke={chartTheme.line2} strokeWidth={2} dot={false} />
+              </LineChart>
+            </ResponsiveContainer>
+          )}
         </section>
 
         <section className="surface-panel chart-panel">
@@ -117,15 +131,23 @@ export function MonitoringPage(): JSX.Element {
               <h3 className="surface-panel-title">{t("monitoring.tokensIn")} / {t("monitoring.tokensOut")}</h3>
             </div>
           </div>
-          <ResponsiveContainer width="100%" height="88%">
-            <LineChart data={tokenRows}>
-              <XAxis dataKey="label" {...chartTheme.axisProps} />
-              <YAxis {...chartTheme.axisProps} />
-              <Tooltip {...chartTheme.tooltipProps} />
-              <Line type="monotone" dataKey="tokens_in" name={t("monitoring.tokensIn")} stroke={chartTheme.line1} strokeWidth={2} dot={false} />
-              <Line type="monotone" dataKey="tokens_out" name={t("monitoring.tokensOut")} stroke={chartTheme.line2} strokeWidth={2} dot={false} />
-            </LineChart>
-          </ResponsiveContainer>
+          {tokens.isError ? (
+            <div className="empty-state">{t("common.dataUnavailable")}</div>
+          ) : tokens.isPending ? (
+            <p className="surface-panel-note">{t("common.dataLoading")}</p>
+          ) : tokenRows.length === 0 ? (
+            <div className="empty-state">{t("common.noData")}</div>
+          ) : (
+            <ResponsiveContainer width="100%" height="88%">
+              <LineChart data={tokenRows}>
+                <XAxis dataKey="label" {...chartTheme.axisProps} />
+                <YAxis {...chartTheme.axisProps} />
+                <Tooltip {...chartTheme.tooltipProps} />
+                <Line type="monotone" dataKey="tokens_in" name={t("monitoring.tokensIn")} stroke={chartTheme.line1} strokeWidth={2} dot={false} />
+                <Line type="monotone" dataKey="tokens_out" name={t("monitoring.tokensOut")} stroke={chartTheme.line2} strokeWidth={2} dot={false} />
+              </LineChart>
+            </ResponsiveContainer>
+          )}
         </section>
 
         <section className="surface-panel chart-panel">
@@ -135,14 +157,22 @@ export function MonitoringPage(): JSX.Element {
               <h3 className="surface-panel-title">{t("monitoring.totalTokens")}</h3>
             </div>
           </div>
-          <ResponsiveContainer width="100%" height="88%">
-            <LineChart data={tokenRows}>
-              <XAxis dataKey="label" {...chartTheme.axisProps} />
-              <YAxis {...chartTheme.axisProps} />
-              <Tooltip {...chartTheme.tooltipProps} />
-              <Line type="monotone" dataKey="total_tokens" name={t("monitoring.totalTokens")} stroke={chartTheme.line1} strokeWidth={2} dot={false} />
-            </LineChart>
-          </ResponsiveContainer>
+          {tokens.isError ? (
+            <div className="empty-state">{t("common.dataUnavailable")}</div>
+          ) : tokens.isPending ? (
+            <p className="surface-panel-note">{t("common.dataLoading")}</p>
+          ) : tokenRows.length === 0 ? (
+            <div className="empty-state">{t("common.noData")}</div>
+          ) : (
+            <ResponsiveContainer width="100%" height="88%">
+              <LineChart data={tokenRows}>
+                <XAxis dataKey="label" {...chartTheme.axisProps} />
+                <YAxis {...chartTheme.axisProps} />
+                <Tooltip {...chartTheme.tooltipProps} />
+                <Line type="monotone" dataKey="total_tokens" name={t("monitoring.totalTokens")} stroke={chartTheme.line1} strokeWidth={2} dot={false} />
+              </LineChart>
+            </ResponsiveContainer>
+          )}
         </section>
 
         <section className="surface-panel">
@@ -152,18 +182,28 @@ export function MonitoringPage(): JSX.Element {
               <h3 className="surface-panel-title">{t("monitoring.delta")}</h3>
             </div>
           </div>
-          <p className="surface-panel-note">
-            {t("monitoring.last7d")}: {formatNumber(last7Tokens)}
-          </p>
-          <p className="surface-panel-note">
-            {t("monitoring.prev7d")}: {formatNumber(prev7Tokens)}
-          </p>
-          <p className="surface-panel-note">
-            {t("monitoring.delta")}:{" "}
-            <span style={{ color: tokenDeltaPct > 0 ? "var(--danger)" : "var(--success)" }}>
-              {tokenDeltaPct >= 0 ? "+" : ""}{formatNumber(tokenDeltaPct, { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%
-            </span>
-          </p>
+          {metricsError ? (
+            <div className="empty-state">{t("common.dataUnavailable")}</div>
+          ) : metricsLoading ? (
+            <p className="surface-panel-note">{t("common.dataLoading")}</p>
+          ) : tokenRows.length === 0 ? (
+            <div className="empty-state">{t("common.noData")}</div>
+          ) : (
+            <>
+              <p className="surface-panel-note">
+                {t("monitoring.last7d")}: {formatNumber(last7Tokens)}
+              </p>
+              <p className="surface-panel-note">
+                {t("monitoring.prev7d")}: {formatNumber(prev7Tokens)}
+              </p>
+              <p className="surface-panel-note">
+                {t("monitoring.delta")}:{" "}
+                <span style={{ color: tokenDeltaPct > 0 ? "var(--danger)" : "var(--success)" }}>
+                  {tokenDeltaPct >= 0 ? "+" : ""}{formatNumber(tokenDeltaPct, { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%
+                </span>
+              </p>
+            </>
+          )}
         </section>
       </div>
     </div>

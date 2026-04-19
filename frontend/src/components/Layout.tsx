@@ -1,14 +1,18 @@
-import { useEffect, useState } from "react";
-import { NavLink, Outlet } from "react-router-dom";
+import { Suspense, useEffect, useState } from "react";
+import { NavLink, Outlet, useLocation } from "react-router-dom";
 
 import { useI18n } from "../i18n";
+import { preloadAllRoutes, preloadRoute } from "../lib/route-loaders";
 import { Icon, type IconName } from "./Icon";
+import { TopbarQuickSearch } from "./TopbarQuickSearch";
 
 type NavItem = {
   to: string;
   label: string;
   icon: IconName;
 };
+
+type Translate = (key: string) => string;
 
 const navItems: NavItem[] = [
   { to: "/", label: "nav.dashboard", icon: "dashboard" },
@@ -33,40 +37,23 @@ function getInitialTheme(): "light" | "dark" {
 export function Layout(): JSX.Element {
   const [theme, setTheme] = useState<"light" | "dark">(getInitialTheme);
   const { t } = useI18n();
+  const location = useLocation();
 
   useEffect(() => {
     document.documentElement.setAttribute("data-theme", theme);
     localStorage.setItem("openbot_theme", theme);
   }, [theme]);
 
+  useEffect(() => {
+    const timer = window.setTimeout(() => preloadAllRoutes(), 250);
+    return () => window.clearTimeout(timer);
+  }, []);
+
   return (
     <div className="app-shell">
       <aside className="sidebar">
-        <div className="sidebar-brand">
-          <div className="sidebar-brand-mark">
-            <Icon name="spark" className="icon-sm" />
-          </div>
-          <div>
-            <div className="sidebar-brand-title">OpenBot</div>
-            <div className="sidebar-brand-subtitle">{t("layout.consoleLabel")}</div>
-          </div>
-        </div>
-
-        <nav className="sidebar-nav">
-          {navItems.map((item) => (
-            <NavLink
-              key={item.to}
-              to={item.to}
-              className={({ isActive }) => `nav-link${isActive ? " active" : ""}`}
-              end={item.to === "/"}
-            >
-              <span className="nav-link-icon">
-                <Icon name={item.icon} className="icon-sm" />
-              </span>
-              <span>{t(item.label)}</span>
-            </NavLink>
-          ))}
-        </nav>
+        <SidebarBrand t={t} />
+        <SidebarNavigation t={t} />
 
         <div className="sidebar-footer">
           <div className="sidebar-footnote">v0.1.0</div>
@@ -82,32 +69,101 @@ export function Layout(): JSX.Element {
 
       <main className="workspace">
         <header className="topbar">
-          <div className="topbar-search">
-            <Icon name="search" className="icon-sm" />
-            <input
-              className="topbar-search-input"
-              type="text"
-              placeholder={t("layout.searchPlaceholder")}
-            />
-          </div>
-          <div className="topbar-meta">
-            <span className="topbar-pill">
-              <span className="topbar-pill-dot" />
-              {t("layout.agentOnline")}
-            </span>
-            <button className="icon-button" type="button" aria-label={t("layout.notifications")}>
-              <Icon name="notifications" className="icon-sm" />
-            </button>
-            <button className="icon-button" type="button" aria-label={t("layout.help")}>
-              <Icon name="help" className="icon-sm" />
-            </button>
-          </div>
+          <TopbarQuickSearch />
+          <TopbarActions t={t} />
         </header>
 
         <div className="workspace-scroll">
-          <Outlet />
+          <Suspense fallback={<WorkspaceFallback title={t("common.loading")} />}>
+            <div className="route-stage" key={location.pathname}>
+              <Outlet />
+            </div>
+          </Suspense>
         </div>
       </main>
+    </div>
+  );
+}
+
+function SidebarBrand({ t }: { t: Translate }): JSX.Element {
+  return (
+    <div className="sidebar-brand">
+      <div className="sidebar-brand-mark">
+        <Icon name="spark" className="icon-sm" />
+      </div>
+      <div>
+        <div className="sidebar-brand-title">OpenBot</div>
+        <div className="sidebar-brand-subtitle">{t("layout.consoleLabel")}</div>
+      </div>
+    </div>
+  );
+}
+
+function SidebarNavigation({ t }: { t: Translate }): JSX.Element {
+  return (
+    <nav className="sidebar-nav">
+      {navItems.map((item) => (
+        <NavLink
+          key={item.to}
+          to={item.to}
+          viewTransition
+          className={({ isActive, isTransitioning }) =>
+            `nav-link${isActive ? " active" : ""}${isTransitioning ? " transitioning" : ""}`
+          }
+          end={item.to === "/"}
+          onMouseEnter={() => {
+            void preloadRoute(item.to);
+          }}
+          onFocus={() => {
+            void preloadRoute(item.to);
+          }}
+        >
+          <span className="nav-link-icon">
+            <Icon name={item.icon} className="icon-sm" />
+          </span>
+          <span>{t(item.label)}</span>
+        </NavLink>
+      ))}
+    </nav>
+  );
+}
+
+function TopbarActions({ t }: { t: Translate }): JSX.Element {
+  return (
+    <div className="topbar-meta">
+      <span className="topbar-pill">
+        <span className="topbar-pill-dot" />
+        {t("layout.agentOnline")}
+      </span>
+      <NavLink
+        className={({ isTransitioning }) => `icon-button${isTransitioning ? " transitioning" : ""}`}
+        to="/logs"
+        viewTransition
+        aria-label={t("layout.openLogs")}
+        title={t("layout.openLogs")}
+      >
+        <Icon name="notifications" className="icon-sm" />
+      </NavLink>
+      <NavLink
+        className={({ isTransitioning }) => `icon-button${isTransitioning ? " transitioning" : ""}`}
+        to="/help"
+        viewTransition
+        aria-label={t("layout.openHelp")}
+        title={t("layout.openHelp")}
+      >
+        <Icon name="help" className="icon-sm" />
+      </NavLink>
+    </div>
+  );
+}
+
+function WorkspaceFallback({ title }: { title: string }): JSX.Element {
+  return (
+    <div className="workspace-fallback">
+      <div className="surface-panel">
+        <p className="surface-panel-label">{title}</p>
+        <h2 className="surface-panel-title">Preparing workspace…</h2>
+      </div>
     </div>
   );
 }
