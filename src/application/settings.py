@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from io import StringIO
 from pathlib import Path
@@ -25,6 +26,15 @@ class SettingsUpdateResult:
     restart_reasons: list[str]
 
 
+@dataclass(frozen=True)
+class SecretValue:
+    """One local environment-backed secret exposed to the local dashboard."""
+
+    env_name: str
+    value: str
+    is_set: bool
+
+
 class SettingsService:
     """Validate and persist editable runtime settings to ``config.yaml``."""
 
@@ -37,6 +47,29 @@ class SettingsService:
     def snapshot(self, config: AppConfig) -> dict[str, Any]:
         """Return a JSON-serializable snapshot of the saved config."""
         return config.model_dump()
+
+    def read_secret_values(self, config: AppConfig) -> list[SecretValue]:
+        """Return current environment-backed secret values for local display."""
+        env_names = [
+            config.model.primary.api_key_env,
+            config.telegram.bot_token_env,
+            *([config.model.fallback.api_key_env] if config.model.fallback else []),
+            config.feishu.app_id_env,
+            config.feishu.app_secret_env,
+            config.feishu.verification_token_env,
+            config.feishu.encrypt_key_env,
+            config.embedding.api_key_env,
+            config.reranker.api_key_env,
+        ]
+        ordered_unique = list(dict.fromkeys(name for name in env_names if name))
+        return [
+            SecretValue(
+                env_name=env_name,
+                value=os.environ.get(env_name, ""),
+                is_set=bool(os.environ.get(env_name, "")),
+            )
+            for env_name in ordered_unique
+        ]
 
     def update_config(
         self,

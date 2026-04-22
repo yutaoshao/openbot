@@ -29,6 +29,7 @@ from src.core.logging import get_logger
 if TYPE_CHECKING:
     from src.agent.agent import Agent
     from src.agent.scheduling import AgentScheduler
+    from src.application.container import Application
     from src.application.settings import SettingsService
     from src.channels.adapters.web import WebAdapter
     from src.channels.hub import MsgHub
@@ -58,6 +59,7 @@ def create_api_app(
     monitor: Any | None = None,
     identity_service: IdentityService | None = None,
     settings_service: SettingsService | None = None,
+    application: Application | None = None,
 ) -> FastAPI:
     """Create a FastAPI app instance.
 
@@ -83,6 +85,7 @@ def create_api_app(
     app.state.monitor = monitor
     app.state.identity_service = identity_service
     app.state.settings_service = settings_service
+    app.state.application = application
     app.state.restart_required = False
     app.state.restart_reasons = []
     # Populated later by Application.start() for webhook routes

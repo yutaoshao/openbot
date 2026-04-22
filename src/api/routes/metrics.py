@@ -49,6 +49,14 @@ async def tools(
     return await _get_monitor(request).get_tools(period=period)
 
 
+@router.get("/cost")
+async def cost(
+    request: Request,
+    period: str = Query(default="30d", pattern="^(today|7d|30d)$"),
+) -> dict:
+    return await _get_monitor(request).get_cost(period=period)
+
+
 @router.get("/harness")
 async def harness(
     request: Request,

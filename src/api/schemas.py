@@ -231,3 +231,25 @@ class SettingsUpdateRequest(BaseModel):
 
     telegram: TelegramSettingsPatch | None = None
     model: ModelSettingsPatch | None = None
+
+
+class SettingsSecretItem(BaseModel):
+    """One env-backed secret value surfaced to the local dashboard."""
+
+    env_name: str
+    value: str
+    is_set: bool
+
+
+class SettingsSecretsResponse(BaseModel):
+    """Secret values returned for explicit local reveal actions."""
+
+    secrets: list[SettingsSecretItem]
+
+
+class SettingsApplyResponse(BaseModel):
+    """Response payload for applying saved settings via local restart."""
+
+    status: Literal["restarting"]
+    restart_required: bool
+    restart_reasons: list[str]

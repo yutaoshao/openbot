@@ -156,6 +156,9 @@ class _FakeMonitor:
     async def get_tokens(self, period: str = "7d") -> dict:
         return {"period": period, "tokens_in": 10, "tokens_out": 20}
 
+    async def get_cost(self, period: str = "30d") -> dict:
+        return {"period": period, "total_cost_usd": 1.23, "daily": []}
+
     async def get_tools(self, period: str = "7d") -> dict:
         return {"period": period, "tools": [{"tool": "file_manager", "count": 2}]}
 
@@ -246,6 +249,14 @@ class _FakeRuntimeScheduler:
         await self.storage.schedules.delete(schedule_id)
 
 
+class _FakeApplication:
+    def __init__(self) -> None:
+        self.restart_calls = 0
+
+    async def request_restart(self, delay: float = 0.2) -> None:
+        self.restart_calls += 1
+
+
 @dataclass
 class _DummyTool:
     name: str = "dummy"
@@ -269,6 +280,7 @@ def _client(
     config: AppConfig | None = None,
     settings_service: SettingsService | None = None,
     client_host: str = "127.0.0.1",
+    application: Any | None = None,
 ) -> TestClient:
     storage = storage or _FakeStorage()
     registry = ToolRegistry()
@@ -282,6 +294,7 @@ def _client(
         scheduler=scheduler,
         identity_service=identity_service,
         settings_service=settings_service,
+        application=application,
     )
     return TestClient(app, client=(client_host, 50000))
 
@@ -403,8 +416,8 @@ def test_metrics_endpoints() -> None:
     assert client.get("/api/metrics/latency?period=7d").status_code == 200
     assert client.get("/api/metrics/tokens?period=7d").status_code == 200
     assert client.get("/api/metrics/tools?period=7d").status_code == 200
+    assert client.get("/api/metrics/cost?period=30d").status_code == 200
     assert client.get("/api/metrics/harness?period=7d").status_code == 200
-    assert client.get("/api/metrics/cost?period=30d").status_code == 404
 
 
 def test_settings_get_and_put(monkeypatch: Any, tmp_path: Path) -> None:
@@ -480,6 +493,52 @@ def test_settings_put_rejects_invalid_patch_without_mutating_file(tmp_path: Path
 
     assert response.status_code == 400
     assert config_path.read_text(encoding="utf-8") == original
+
+
+def test_settings_secrets_return_current_env_values(monkeypatch: Any, tmp_path: Path) -> None:
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-secret-primary")
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "123:telegram-token")
+    config_path = tmp_path / "config.yaml"
+    _write_config_file(config_path)
+    config = load_config(str(config_path))
+    client = _client(
+        config=config,
+        settings_service=SettingsService(str(config_path)),
+    )
+
+    response = client.get("/api/settings/secrets")
+
+    assert response.status_code == 200
+    secrets = {item["env_name"]: item for item in response.json()["secrets"]}
+    assert secrets["ANTHROPIC_API_KEY"]["value"] == "sk-secret-primary"
+    assert secrets["ANTHROPIC_API_KEY"]["is_set"] is True
+    assert secrets["TELEGRAM_BOT_TOKEN"]["value"] == "123:telegram-token"
+
+
+def test_settings_apply_requests_local_restart(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yaml"
+    _write_config_file(config_path)
+    config = load_config(str(config_path))
+    application = _FakeApplication()
+    client = _client(
+        config=config,
+        settings_service=SettingsService(str(config_path)),
+        application=application,
+    )
+
+    client.put(
+        "/api/settings",
+        json={
+            "telegram": {"enabled": False},
+        },
+    )
+    response = client.post("/api/settings/apply", json={})
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "restarting"
+    assert response.json()["restart_required"] is True
+    assert response.json()["restart_reasons"] == ["telegram"]
+    assert application.restart_calls == 1
 
 
 def test_settings_reports_wechat_login_required_when_enabled_without_state(tmp_path) -> None:

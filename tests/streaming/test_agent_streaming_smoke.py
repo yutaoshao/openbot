@@ -5,7 +5,7 @@ from typing import Any
 
 from src.agent.agent import Agent
 from src.core.config import AgentConfig
-from src.infrastructure.model_gateway import StreamChunk, Usage
+from src.infrastructure.model_gateway import StreamChunk, ToolCall, Usage
 
 
 class FakeEventBus:
@@ -163,3 +163,37 @@ async def test_run_returns_before_background_memory_finalize_completes() -> None
     await asyncio.wait_for(background_task, timeout=0.5)
 
     assert conversation_manager.end_calls == [("conv-1", False)]
+
+
+class FakeCostLimitedGateway:
+    async def chat_stream(
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None = None,
+        **_: Any,
+    ):
+        yield StreamChunk(
+            type="tool_call",
+            tool_call=ToolCall(id="tc-1", name="web_search", arguments={"query": "hello"}),
+        )
+        yield StreamChunk(
+            type="done",
+            usage=Usage(tokens_in=12, tokens_out=8, cost_usd=0.25),
+            model="fake-model",
+        )
+
+
+async def test_run_stops_before_tool_execution_when_cost_limit_is_reached() -> None:
+    gateway = FakeCostLimitedGateway()
+    bus = FakeEventBus()
+    agent = Agent(
+        model_gateway=gateway,
+        event_bus=bus,
+        config=AgentConfig(max_iterations=3, max_task_cost=0.20),
+        tool_registry=None,
+        conversation_manager=None,
+    )
+
+    result = await agent.run("hello world")
+
+    assert "Task exceeded cost limit" in result.content

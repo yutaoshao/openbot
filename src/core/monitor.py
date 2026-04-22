@@ -223,6 +223,29 @@ class MetricsCollector:
             ],
         }
 
+    async def get_cost(self, period: str = "30d") -> dict[str, Any]:
+        events = await self._query_period(period=period, event_name="model.request")
+        total_cost = 0.0
+        daily: dict[str, float] = defaultdict(float)
+
+        for item in events:
+            data = item.get("data") or {}
+            cost_usd = float(data.get("cost_usd") or 0.0)
+            total_cost += cost_usd
+            ts = _parse_iso(item.get("timestamp"))
+            day = ts.date().isoformat() if ts else "unknown"
+            daily[day] += cost_usd
+
+        return {
+            "period": period,
+            "total_cost_usd": round(total_cost, 6),
+            "avg_cost_usd_per_request": (total_cost / len(events)) if events else 0.0,
+            "daily": [
+                {"date": date, "cost_usd": round(value, 6)}
+                for date, value in sorted(daily.items(), key=lambda x: x[0])
+            ],
+        }
+
     async def get_tools(self, period: str = "7d") -> dict[str, Any]:
         events = await self._query_period(period=period, event_name="agent.tool.executed")
         grouped: dict[str, dict[str, Any]] = defaultdict(

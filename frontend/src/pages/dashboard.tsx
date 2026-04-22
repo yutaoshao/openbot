@@ -15,6 +15,7 @@ type LatencySummary = { avg_response_time: number; p50: number; p95: number; p99
 type LatencyTrend = { daily: Array<{ date: string; avg: number; p50: number; p95: number }> };
 type ToolStats = { tools: Array<{ tool: string; count: number; error_rate: number }> };
 type Tokens = { daily: Array<{ date: string; tokens_in: number; tokens_out: number }> };
+type Cost = { total_cost_usd: number };
 
 export function DashboardPage(): JSX.Element {
   const { t, formatDateTime, formatNumber } = useI18n();
@@ -42,6 +43,11 @@ export function DashboardPage(): JSX.Element {
     ...metricsQueryDefaults,
     queryKey: ["metrics", "tokens", "30d"],
     queryFn: () => api.get<Tokens>("/api/metrics/tokens?period=30d"),
+  });
+  const cost = useQuery({
+    ...metricsQueryDefaults,
+    queryKey: ["metrics", "cost", "30d"],
+    queryFn: () => api.get<Cost>("/api/metrics/cost?period=30d"),
   });
 
   const primaryLoading = overview.isPending || latency.isPending;
@@ -190,6 +196,15 @@ export function DashboardPage(): JSX.Element {
                 {t("dashboard.tokensIn")} {formatNumber(totalTokensIn)}
                 {" / "}
                 {t("dashboard.tokensOut")} {formatNumber(totalTokensOut)}
+              </p>
+              <p className="surface-panel-note">
+                {t("monitoring.totalCost")}{" "}
+                {cost.data
+                  ? formatNumber(cost.data.total_cost_usd, {
+                      style: "currency",
+                      currency: "USD",
+                    })
+                  : "—"}
               </p>
             </>
           )}

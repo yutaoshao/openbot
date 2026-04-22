@@ -14,6 +14,12 @@ type Tokens = {
   daily: Array<{ date: string; tokens_in: number; tokens_out: number }>;
 };
 
+type Cost = {
+  daily: Array<{ date: string; cost_usd: number }>;
+  total_cost_usd: number;
+  avg_cost_usd_per_request: number;
+};
+
 function useChartTheme() {
   return {
     axisProps: {
@@ -49,6 +55,11 @@ export function MonitoringPage(): JSX.Element {
     queryKey: ["metrics", "tokens", "30d"],
     queryFn: () => api.get<Tokens>("/api/metrics/tokens?period=30d"),
   });
+  const cost = useQuery({
+    ...metricsQueryDefaults,
+    queryKey: ["metrics", "cost", "30d"],
+    queryFn: () => api.get<Cost>("/api/metrics/cost?period=30d"),
+  });
 
   const tokenDaily = tokens.data?.daily ?? [];
   const last7Tokens = tokenDaily
@@ -69,8 +80,13 @@ export function MonitoringPage(): JSX.Element {
     total_tokens: item.tokens_in + item.tokens_out,
     label: formatDateTime(item.date, { month: "numeric", day: "numeric" }),
   }));
-  const metricsLoading = latency.isPending || tokens.isPending;
-  const metricsError = latency.isError || tokens.isError;
+  const costRows = (cost.data?.daily ?? []).map((item) => ({
+    ...item,
+    label: formatDateTime(item.date, { month: "numeric", day: "numeric" }),
+  }));
+  const metricsLoading = latency.isPending || tokens.isPending || cost.isPending;
+  const metricsError = latency.isError || tokens.isError || cost.isError;
+  const last7Cost = costRows.slice(-7).reduce((acc, item) => acc + item.cost_usd, 0);
 
   return (
     <div className="stack-layout">
@@ -94,6 +110,10 @@ export function MonitoringPage(): JSX.Element {
         <section className="metric-card">
           <span>{t("monitoring.totalTokens")}</span>
           <strong>{tokens.data ? formatNumber(last7Tokens) : "—"}</strong>
+        </section>
+        <section className="metric-card">
+          <span>{t("monitoring.totalCost")}</span>
+          <strong>{cost.data ? formatNumber(last7Cost, { style: "currency", currency: "USD" }) : "—"}</strong>
         </section>
       </div>
 
@@ -153,6 +173,31 @@ export function MonitoringPage(): JSX.Element {
         <section className="surface-panel chart-panel">
           <div className="surface-panel-header">
             <div>
+              <p className="surface-panel-label">{t("monitoring.costTrend30d")}</p>
+              <h3 className="surface-panel-title">{t("monitoring.costUsd")}</h3>
+            </div>
+          </div>
+          {cost.isError ? (
+            <div className="empty-state">{t("common.dataUnavailable")}</div>
+          ) : cost.isPending ? (
+            <p className="surface-panel-note">{t("common.dataLoading")}</p>
+          ) : costRows.length === 0 ? (
+            <div className="empty-state">{t("common.noData")}</div>
+          ) : (
+            <ResponsiveContainer width="100%" height="88%">
+              <LineChart data={costRows}>
+                <XAxis dataKey="label" {...chartTheme.axisProps} />
+                <YAxis {...chartTheme.axisProps} />
+                <Tooltip {...chartTheme.tooltipProps} />
+                <Line type="monotone" dataKey="cost_usd" name={t("monitoring.costUsd")} stroke={chartTheme.line1} strokeWidth={2} dot={false} />
+              </LineChart>
+            </ResponsiveContainer>
+          )}
+        </section>
+
+        <section className="surface-panel chart-panel">
+          <div className="surface-panel-header">
+            <div>
               <p className="surface-panel-label">{t("monitoring.tokenVolumeTrend30d")}</p>
               <h3 className="surface-panel-title">{t("monitoring.totalTokens")}</h3>
             </div>
@@ -201,6 +246,9 @@ export function MonitoringPage(): JSX.Element {
                 <span style={{ color: tokenDeltaPct > 0 ? "var(--danger)" : "var(--success)" }}>
                   {tokenDeltaPct >= 0 ? "+" : ""}{formatNumber(tokenDeltaPct, { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%
                 </span>
+              </p>
+              <p className="surface-panel-note">
+                {t("monitoring.avgCost")}: {cost.data ? formatNumber(cost.data.avg_cost_usd_per_request, { style: "currency", currency: "USD" }) : "—"}
               </p>
             </>
           )}

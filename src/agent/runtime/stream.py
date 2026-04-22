@@ -46,11 +46,14 @@ async def run_stream_inner(
     iterations = 0
     total_tokens_in = 0
     total_tokens_out = 0
+    total_cost_usd = 0.0
     all_tool_calls: list[dict[str, Any]] = []
     final_text = ""
     final_model = ""
     task_start = time.monotonic()
     recent_tool_sigs: list[str] = []
+    emit_final_text = False
+    streamed_any_text = False
 
     while iterations < agent.max_iterations:
         current_task_state = _task_state(agent, conversation_id)
@@ -58,6 +61,7 @@ async def run_stream_inner(
         timeout_text = _timeout_text(agent, task_start, iterations)
         if timeout_text:
             final_text = timeout_text
+            emit_final_text = True
             break
 
         iterations += 1
@@ -72,14 +76,17 @@ async def run_stream_inner(
         round_result = None
         async for event in stream_model_round(agent, messages, current_tools):
             if isinstance(event, StreamChunk):
+                if event.type == "text" and event.text:
+                    streamed_any_text = True
                 yield event
             else:
                 round_result = event
         assert isinstance(round_result, ModelRoundResult)
         final_model = round_result.model or final_model
-        total_tokens_in, total_tokens_out = _accumulate_usage(
+        total_tokens_in, total_tokens_out, total_cost_usd = _accumulate_usage(
             total_tokens_in,
             total_tokens_out,
+            total_cost_usd,
             round_result.usage,
         )
 
@@ -91,6 +98,12 @@ async def run_stream_inner(
                 iteration=iterations,
             )
             final_text = round_result.accumulated_text
+            break
+
+        cost_limit_text = _cost_limit_text(agent, total_cost_usd, iterations)
+        if cost_limit_text:
+            final_text = cost_limit_text
+            emit_final_text = True
             break
 
         logger.info(
@@ -131,6 +144,7 @@ async def run_stream_inner(
                 "Agent appears stuck — repeating the same tool calls. "
                 "Stopping to avoid wasting resources."
             )
+            emit_final_text = True
             logger.warning(
                 "task_failed",
                 surface="operational",
@@ -141,6 +155,7 @@ async def run_stream_inner(
             break
     else:
         final_text = "Task exceeded maximum iterations."
+        emit_final_text = True
         logger.warning(
             "task_failed",
             surface="operational",
@@ -156,6 +171,8 @@ async def run_stream_inner(
         iterations=iterations,
         all_tool_calls=all_tool_calls,
     )
+    if final_text and (emit_final_text or not streamed_any_text):
+        yield StreamChunk(type="text", text=final_text)
     await finalize_agent_run(
         agent,
         conversation_id=conversation_id,
@@ -170,7 +187,11 @@ async def run_stream_inner(
     )
     yield StreamChunk(
         type="done",
-        usage=Usage(tokens_in=total_tokens_in, tokens_out=total_tokens_out),
+        usage=Usage(
+            tokens_in=total_tokens_in,
+            tokens_out=total_tokens_out,
+            cost_usd=total_cost_usd,
+        ),
         model=final_model,
         iterations=iterations,
     )
@@ -199,10 +220,34 @@ def _timeout_text(agent: Any, task_start: float, iterations: int) -> str:
     return f"Task exceeded time limit ({task_timeout}s). Completed {iterations} iterations."
 
 
-def _accumulate_usage(tokens_in: int, tokens_out: int, usage: Usage | None) -> tuple[int, int]:
+def _accumulate_usage(
+    tokens_in: int,
+    tokens_out: int,
+    cost_usd: float,
+    usage: Usage | None,
+) -> tuple[int, int, float]:
     if usage is None:
-        return tokens_in, tokens_out
-    return tokens_in + usage.tokens_in, tokens_out + usage.tokens_out
+        return tokens_in, tokens_out, cost_usd
+    return (
+        tokens_in + usage.tokens_in,
+        tokens_out + usage.tokens_out,
+        cost_usd + usage.cost_usd,
+    )
+
+
+def _cost_limit_text(agent: Any, total_cost_usd: float, iterations: int) -> str:
+    max_task_cost = agent.config.max_task_cost
+    if max_task_cost <= 0 or total_cost_usd < max_task_cost:
+        return ""
+    logger.warning(
+        "task_failed",
+        surface="operational",
+        reason="task_cost_limit",
+        total_cost_usd=round(total_cost_usd, 6),
+        max_task_cost=max_task_cost,
+        iterations=iterations,
+    )
+    return f"Task exceeded cost limit (${max_task_cost:.2f}). Current spend: ${total_cost_usd:.4f}."
 
 
 def _append_assistant_tool_calls(

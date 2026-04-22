@@ -3,6 +3,8 @@ type Settings = {
   telegram: { enabled: boolean; enable_streaming: boolean; mode: string; bot_token_env: string };
   feishu: { enabled: boolean; mode: string; app_id_env: string; app_secret_env: string; verification_token_env: string; encrypt_key_env: string };
   wechat: { enabled: boolean; mode: string; state_path: string; api_base_url: string; poll_interval: number; max_backoff: number };
+  embedding: { api_key_env: string };
+  reranker: { api_key_env: string };
   runtime: {
     telegram: { enabled: boolean; mode: string | null; status: string; missing_env_vars: string[] };
     feishu: { enabled: boolean; mode: string | null; status: string; missing_env_vars: string[] };
@@ -20,6 +22,12 @@ type Settings = {
 type SecretRow = {
   label: string;
   envName: string;
+};
+
+type SecretValue = {
+  env_name: string;
+  value: string;
+  is_set: boolean;
 };
 
 type DraftSetters = {
@@ -49,6 +57,8 @@ export function buildSecrets(settings: Settings, t: (key: string) => string): Se
     { label: "feishu_app_secret", envName: settings.feishu.app_secret_env },
     { label: "feishu_verification_token", envName: settings.feishu.verification_token_env },
     { label: "feishu_encrypt_key", envName: settings.feishu.encrypt_key_env },
+    { label: t("settings.embedding"), envName: settings.embedding.api_key_env },
+    { label: t("settings.reranker"), envName: settings.reranker.api_key_env },
   );
   return rows;
 }
@@ -60,4 +70,8 @@ export function formatRestartReasons(
   return settings.restart_reasons.map((reason) => t(`settings.restartReason.${reason}`));
 }
 
-export type { Settings, SecretRow };
+export function secretValueMap(secrets: SecretValue[]): Record<string, SecretValue> {
+  return Object.fromEntries(secrets.map((item) => [item.env_name, item]));
+}
+
+export type { Settings, SecretRow, SecretValue };

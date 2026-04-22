@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal, Protocol, runtime_checkable
 
@@ -37,6 +38,7 @@ class Usage:
 
     tokens_in: int = 0
     tokens_out: int = 0
+    cost_usd: float = 0.0
 
 
 @dataclass
@@ -123,6 +125,27 @@ class ModelGateway:
             fallback=config.fallback.model if config.fallback else None,
         )
 
+    def calculate_usage_cost(self, provider_key: str, usage: Usage) -> float:
+        """Compute request cost from configured per-million-token pricing."""
+        provider_config = self._provider_config(provider_key)
+        if provider_config is None:
+            return 0.0
+        pricing_input = provider_config.pricing_input
+        pricing_output = provider_config.pricing_output
+        if pricing_input is None or pricing_output is None:
+            return 0.0
+        total_cost = (
+            usage.tokens_in * pricing_input + usage.tokens_out * pricing_output
+        ) / 1_000_000
+        return round(total_cost, 8)
+
+    def _provider_config(self, provider_key: str) -> ModelProviderConfig | None:
+        if provider_key == "primary":
+            return self.config.primary
+        if provider_key == "fallback":
+            return self.config.fallback
+        return None
+
     @staticmethod
     def _create_provider(config: ModelProviderConfig) -> ModelProvider:
         """Factory: create provider by config.provider field."""
@@ -155,6 +178,9 @@ class ModelGateway:
             for attempt in range(self.config.max_retries):
                 try:
                     response = await provider.chat(messages, tools, **kwargs)
+                    response.usage.cost_usd = self.calculate_usage_cost(
+                        provider_key, response.usage
+                    )
 
                     logger.info(
                         "llm_completed",
@@ -163,6 +189,7 @@ class ModelGateway:
                         model=response.model,
                         token_in=response.usage.tokens_in,
                         token_out=response.usage.tokens_out,
+                        cost_usd=response.usage.cost_usd,
                         latency_ms=response.latency_ms,
                     )
 
@@ -173,6 +200,7 @@ class ModelGateway:
                             "model": response.model,
                             "tokens_in": response.usage.tokens_in,
                             "tokens_out": response.usage.tokens_out,
+                            "cost_usd": response.usage.cost_usd,
                             "latency_ms": response.latency_ms,
                         },
                     )
@@ -227,6 +255,7 @@ class ModelGateway:
                 try:
                     stream = provider.chat_stream(messages, tools, **kwargs)
                     first = True
+                    stream_start = time.monotonic()
                     async for chunk in stream:
                         if first:
                             first = False
@@ -235,6 +264,33 @@ class ModelGateway:
                                 surface="operational",
                                 status="streaming",
                                 provider=provider_key,
+                            )
+                        if chunk.type == "done" and chunk.usage is not None:
+                            latency_ms = int((time.monotonic() - stream_start) * 1000)
+                            chunk.usage.cost_usd = self.calculate_usage_cost(
+                                provider_key,
+                                chunk.usage,
+                            )
+                            await self.event_bus.publish(
+                                "model.request",
+                                {
+                                    "provider": provider_key,
+                                    "model": chunk.model,
+                                    "tokens_in": chunk.usage.tokens_in,
+                                    "tokens_out": chunk.usage.tokens_out,
+                                    "cost_usd": chunk.usage.cost_usd,
+                                    "latency_ms": latency_ms,
+                                },
+                            )
+                            logger.info(
+                                "llm_completed",
+                                surface="operational",
+                                provider=provider_key,
+                                model=chunk.model,
+                                token_in=chunk.usage.tokens_in,
+                                token_out=chunk.usage.tokens_out,
+                                cost_usd=chunk.usage.cost_usd,
+                                latency_ms=latency_ms,
                             )
                         yield chunk
                     return  # noqa: B012 — stream consumed, done

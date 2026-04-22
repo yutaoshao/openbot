@@ -8,10 +8,16 @@ from fastapi import APIRouter, Body, HTTPException, Request
 from pydantic import ValidationError
 
 from src.api.runtime_status import build_runtime_status
-from src.api.schemas import SettingsUpdateRequest
+from src.api.schemas import (
+    SettingsApplyResponse,
+    SettingsSecretItem,
+    SettingsSecretsResponse,
+    SettingsUpdateRequest,
+)
 from src.core.logging import get_logger
 
 if TYPE_CHECKING:
+    from src.application.container import Application
     from src.application.settings import SettingsService
     from src.core.config import AppConfig
 
@@ -37,6 +43,16 @@ def _get_settings_service(request: Request) -> SettingsService:
             detail="Settings persistence is not initialized for API requests.",
         )
     return service
+
+
+def _get_application(request: Request) -> Application:
+    application = getattr(request.app.state, "application", None)
+    if application is None:
+        raise HTTPException(
+            status_code=503,
+            detail="Application restart control is not initialized for API requests.",
+        )
+    return application
 
 
 def _current_restart_notice(request: Request) -> tuple[bool, list[str]]:
@@ -80,6 +96,21 @@ async def get_settings(request: Request) -> dict[str, Any]:
     return _config_snapshot(request, config)
 
 
+@router.get("/secrets", response_model=SettingsSecretsResponse)
+async def get_secret_values(request: Request) -> SettingsSecretsResponse:
+    config = _get_config(request)
+    service = _get_settings_service(request)
+    secrets = [
+        SettingsSecretItem(
+            env_name=item.env_name,
+            value=item.value,
+            is_set=item.is_set,
+        )
+        for item in service.read_secret_values(config)
+    ]
+    return SettingsSecretsResponse(secrets=secrets)
+
+
 @router.put("")
 async def update_settings(
     request: Request,
@@ -111,3 +142,15 @@ async def update_settings(
         "restart_required": snapshot["restart_required"],
         "restart_reasons": snapshot["restart_reasons"],
     }
+
+
+@router.post("/apply", response_model=SettingsApplyResponse)
+async def apply_saved_settings(request: Request) -> SettingsApplyResponse:
+    application = _get_application(request)
+    restart_required, restart_reasons = _current_restart_notice(request)
+    await application.request_restart()
+    return SettingsApplyResponse(
+        status="restarting",
+        restart_required=restart_required,
+        restart_reasons=restart_reasons,
+    )

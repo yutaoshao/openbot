@@ -10,14 +10,26 @@ import { operatorQueryDefaults } from "../lib/query-defaults";
 import {
   buildSecrets,
   formatRestartReasons,
+  secretValueMap,
   syncDraft,
   type SecretRow,
+  type SecretValue,
   type Settings,
 } from "../lib/settings-view";
 
 type SettingsUpdateResponse = {
   settings: Omit<Settings, "runtime" | "restart_required" | "restart_reasons">;
   runtime: Settings["runtime"];
+  restart_required: boolean;
+  restart_reasons: string[];
+};
+
+type SettingsSecretsResponse = {
+  secrets: SecretValue[];
+};
+
+type SettingsApplyResponse = {
+  status: "restarting";
   restart_required: boolean;
   restart_reasons: string[];
 };
@@ -29,6 +41,9 @@ export function SettingsPage(): JSX.Element {
   const [streaming, setStreaming] = useState(false);
   const [mode, setMode] = useState("polling");
   const [maxRetries, setMaxRetries] = useState(3);
+  const [showSecretValues, setShowSecretValues] = useState(false);
+  const [revealedSecrets, setRevealedSecrets] = useState<SecretValue[]>([]);
+  const [restartPending, setRestartPending] = useState(false);
 
   const settings = useQuery({
     ...operatorQueryDefaults,
@@ -69,6 +84,22 @@ export function SettingsPage(): JSX.Element {
       void qc.invalidateQueries({ queryKey: ["settings"] });
     },
   });
+  const revealSecrets = useMutation({
+    mutationFn: () => api.get<SettingsSecretsResponse>("/api/settings/secrets"),
+    onSuccess: (response) => {
+      setRevealedSecrets(response.secrets);
+      setShowSecretValues(true);
+    },
+  });
+  const applySavedSettings = useMutation({
+    mutationFn: () => api.post<SettingsApplyResponse>("/api/settings/apply", {}),
+    onSuccess: () => {
+      setRestartPending(true);
+      window.setTimeout(() => {
+        window.location.reload();
+      }, 1500);
+    },
+  });
 
   const isDirty = settings.data
     ? settings.data.telegram.enabled !== enabled
@@ -84,11 +115,18 @@ export function SettingsPage(): JSX.Element {
     settings.data ? formatRestartReasons(settings.data, t) : []
   ), [settings.data, t]);
   const saveError = update.error instanceof Error ? update.error.message : "";
-  const statusText = settings.data?.restart_required
-    ? t("settings.restartRequiredFooter")
-    : isDirty
-      ? t("settings.unsavedChanges")
-      : t("settings.savedToConfig");
+  const applyError = applySavedSettings.error instanceof Error ? applySavedSettings.error.message : "";
+  const secretValues = useMemo(
+    () => secretValueMap(revealedSecrets),
+    [revealedSecrets],
+  );
+  const statusText = restartPending
+    ? t("settings.restartingFooter")
+    : settings.data?.restart_required
+      ? t("settings.restartRequiredFooter")
+      : isDirty
+        ? t("settings.unsavedChanges")
+        : t("settings.savedToConfig");
 
   return (
     <div className="settings-page">
@@ -275,20 +313,47 @@ export function SettingsPage(): JSX.Element {
 
           <section className="surface-panel settings-section" id="secrets">
             <SettingsSectionHeader icon="settings" title={t("settings.secrets")} description={t("settings.secretsHint")} />
+            <div className="settings-footer-actions" style={{ marginBottom: "var(--space-4)" }}>
+              <button
+                className="btn secondary"
+                type="button"
+                disabled={revealSecrets.isPending}
+                onClick={() => {
+                  if (showSecretValues) {
+                    setShowSecretValues(false);
+                    setRevealedSecrets([]);
+                    return;
+                  }
+                  revealSecrets.mutate();
+                }}
+              >
+                {showSecretValues ? t("settings.hideSecrets") : t("settings.showSecrets")}
+              </button>
+            </div>
             <div className="settings-secret-list">
               {secrets.map((secret) => (
                 <div className="settings-secret-row" key={secret.label}>
                   <div>
                     <strong>{secret.label}</strong>
-                    <p>{t("settings.envManaged", { env: secret.envName })}</p>
+                    <p>
+                      {showSecretValues
+                        ? (secretValues[secret.envName]?.value || t("settings.secretMissing"))
+                        : t("settings.envManaged", { env: secret.envName })}
+                    </p>
                   </div>
-                  <span className="status-badge stable">{t("settings.readOnlySecrets")}</span>
+                  <span className={`status-badge ${secretValues[secret.envName]?.is_set ? "stable" : "degraded"}`}>
+                    {showSecretValues
+                      ? secretValues[secret.envName]?.is_set
+                        ? t("settings.secretVisible")
+                        : t("settings.secretMissingBadge")
+                      : t("settings.readOnlySecrets")}
+                  </span>
                 </div>
               ))}
             </div>
           </section>
 
-          {(settings.data?.restart_required || saveError) ? (
+          {(settings.data?.restart_required || saveError || applyError || restartPending) ? (
             <section className="surface-panel settings-section" id="restart">
               <SettingsSectionHeader
                 icon="shield"
@@ -299,10 +364,22 @@ export function SettingsPage(): JSX.Element {
                 {settings.data?.restart_required ? (
                   <div className="field-card">
                     <label className="field-label">{t("settings.restartRequiredLabel")}</label>
-                    <div className="settings-runtime-value">{t("settings.restartRequiredValue")}</div>
+                    <div className="settings-runtime-value">
+                      {restartPending ? t("settings.restartingValue") : t("settings.restartRequiredValue")}
+                    </div>
                     <p className="field-help">
                       {restartReasons.length > 0 ? restartReasons.join(" / ") : t("settings.restartDefaultReason")}
                     </p>
+                    <button
+                      className="btn"
+                      type="button"
+                      disabled={applySavedSettings.isPending || restartPending}
+                      onClick={() => applySavedSettings.mutate()}
+                    >
+                      {applySavedSettings.isPending || restartPending
+                        ? t("settings.restartingButton")
+                        : t("settings.applySavedNow")}
+                    </button>
                   </div>
                 ) : null}
                 {saveError ? (
@@ -310,6 +387,13 @@ export function SettingsPage(): JSX.Element {
                     <label className="field-label">{t("settings.saveErrorTitle")}</label>
                     <div className="settings-runtime-value">{t("settings.saveErrorValue")}</div>
                     <p className="field-help">{saveError}</p>
+                  </div>
+                ) : null}
+                {applyError ? (
+                  <div className="field-card">
+                    <label className="field-label">{t("settings.applyErrorTitle")}</label>
+                    <div className="settings-runtime-value">{t("settings.applyErrorValue")}</div>
+                    <p className="field-help">{applyError}</p>
                   </div>
                 ) : null}
               </div>

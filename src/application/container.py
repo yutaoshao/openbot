@@ -33,6 +33,8 @@ class Application:
         self.config_path = "config.yaml"
         self.config = load_config(self.config_path)
         self._shutdown_event = asyncio.Event()
+        self._restart_requested = False
+        self._restart_task: asyncio.Task[None] | None = None
         self.event_bus = EventBus()
         self.model_gateway = ModelGateway(self.config.model, self.event_bus)
         self.database = Database(
@@ -103,3 +105,27 @@ class Application:
         logger.info("app.running", message="Press Ctrl+C to stop")
         await self._shutdown_event.wait()
         await self.stop()
+
+    @property
+    def restart_requested(self) -> bool:
+        """Return ``True`` when a local restart has been requested."""
+        return self._restart_requested
+
+    async def request_restart(self, delay: float = 0.2) -> None:
+        """Schedule a graceful local process restart."""
+        import asyncio
+
+        if self._restart_requested:
+            return
+        self._restart_requested = True
+        self._restart_task = asyncio.create_task(
+            self._trigger_restart(delay),
+            name="openbot-restart",
+        )
+        logger.info("app.restart_requested", delay_s=delay)
+
+    async def _trigger_restart(self, delay: float) -> None:
+        import asyncio
+
+        await asyncio.sleep(max(0.0, delay))
+        self._shutdown_event.set()
