@@ -65,6 +65,14 @@ feishu:
   app_secret_env: FEISHU_APP_SECRET
   verification_token_env: FEISHU_VERIFICATION_TOKEN
   encrypt_key_env: FEISHU_ENCRYPT_KEY
+
+wechat:
+  enabled: false
+  mode: ilink_polling
+  state_path: data/wechat/ilink_state.json
+  api_base_url: https://ilinkai.weixin.qq.com
+  poll_interval: 2.0
+  max_backoff: 30.0
 ```
 
 ### 运行
@@ -115,6 +123,39 @@ uv run python main.py
 - 请求一条 markdown 较重的回复，确认飞书侧收到 interactive card
 - 故意配置错误的 token 或 encrypt key，确认 webhook 会被拒绝
 
+### 微信个人号（iLink）配置
+
+内置微信适配器当前面向个人号 iLink 路线，首版范围固定为：
+
+- 单账号
+- 私聊文本
+- 轮询模式，不需要公网 webhook
+- 不支持独立主动推送
+
+1. 在 `config.yaml` 中开启 `wechat.enabled`。
+2. 在本机运行登录命令：
+
+```bash
+uv run python -m src.channels.adapters.wechat_login
+```
+
+3. 扫描生成的二维码，并在微信里确认登录。
+4. 确认 `data/wechat/ilink_state.json` 已生成，日志中出现 `app.wechat_ready`。
+
+当前 v1 限制：
+
+- 入站仅支持私聊文本
+- 出站仅支持基于活跃会话上下文的回复
+- 图片/语音/文件等非文本消息会收到固定提示
+- `target_platform="wechat"` 的定时任务或其他后台主动推送会显式失败
+
+手工验证清单：
+
+- 运行登录命令后确认 `data/wechat/login.png` 已生成
+- 从微信发送一条文本消息，确认 OpenBot 能收到并回复
+- 发送一条非文本消息，确认微信侧收到“仅支持文本消息”的提示
+- 创建一个投递到微信的 schedule，确认系统明确提示不支持主动推送
+
 ## 项目结构
 
 ```
@@ -122,10 +163,15 @@ openbot/
 ├── main.py                          # 应用入口
 ├── config.yaml                      # 非敏感配置
 ├── src/
+│   ├── application/                 # 组合根与运行时编排
+│   │   ├── container.py             # Application 对象图
+│   │   ├── bootstrap.py             # 运行时服务与工具注册
+│   │   ├── message_dispatch.py      # 入站消息分发
+│   │   └── lifecycle.py             # API / 适配器 / scheduler 启停
 │   ├── infrastructure/              # Event Bus、Database、Model Gateway
 │   │   ├── event_bus.py             # 支持通配符的异步 pub/sub
 │   │   ├── database.py              # SQLite schema 与 migration
-│   │   ├── storage.py               # Repository 层（conversations、knowledge 等）
+│   │   ├── storage/                 # Repository 分包
 │   │   ├── model_gateway.py         # 多模型供应商网关（retry / fallback / streaming）
 │   │   ├── embedding.py             # Embedding 服务（OpenAI-compatible + DashScope）
 │   │   ├── reranker.py              # Reranker 服务（SiliconFlow / Jina / Cohere）
@@ -145,15 +191,57 @@ openbot/
 │   │       └── file_manager.py      # Workspace 文件操作
 │   ├── agent/                       # Agent Core
 │   │   ├── agent.py                 # ReAct 推理主循环（streaming + non-streaming）
-│   │   ├── conversation.py          # 会话管理（上下文组装）
-│   │   ├── sub_agent.py             # 带 scoped tools 的并行子任务委派
-│   │   ├── scheduler.py             # 基于 APScheduler 的定时任务执行
-│   │   └── deep_research.py         # 多轮检索与饱和判断研究引擎
+│   │   ├── conversation/            # 会话编排分包
+│   │   │   ├── __init__.py          # 会话包导出
+│   │   │   ├── manager.py           # 会话管理（上下文组装）
+│   │   │   ├── prompt_builder.py    # 结合记忆的 prompt 组装
+│   │   │   ├── shared_timeline.py   # 跨平台最近消息时间线
+│   │   │   └── task_state_store.py  # 单会话受保护状态
+│   │   ├── runtime/                 # Agent 执行期辅助模块
+│   │   │   ├── __init__.py          # Runtime 包导出
+│   │   │   ├── stream.py            # 主 streamed ReAct 循环
+│   │   │   ├── finalize.py          # 回复后持久化与收尾
+│   │   │   └── tool_executor.py     # 工具调用与 hook 集成
+│   │   ├── delegation/              # 子代理委派域
+│   │   │   ├── __init__.py          # Delegation 导出
+│   │   │   └── manager.py           # 带 scoped tools 的并行子任务委派
+│   │   ├── research/                # 研究域
+│   │   │   ├── __init__.py          # Research 导出
+│   │   │   └── engine.py            # 多轮检索与饱和判断研究引擎
+│   │   ├── skills/                  # 技能发现/加载域
+│   │   │   ├── __init__.py          # Skills 导出
+│   │   │   └── registry.py          # Skill registry 与 load_skill 工具
+│   │   ├── scheduling/              # 定时执行域
+│   │   │   ├── __init__.py          # Scheduler 导出
+│   │   │   └── scheduler.py         # 基于 APScheduler 的定时任务执行
+│   │   ├── prompts/                 # Prompt 片段域
+│   │   │   ├── __init__.py          # Prompt 导出
+│   │   │   └── fragments.py         # Harness prompt 片段
+│   │   ├── coordination/            # 跨请求执行协调域
+│   │   │   ├── __init__.py          # Coordination 导出
+│   │   │   └── execution.py         # 按用户串行执行协调
+│   │   ├── state/                   # Agent 任务状态域
+│   │   │   ├── __init__.py          # State 导出
+│   │   │   └── task_state.py        # 结构化任务状态对象
+│   │   └── verification/            # 最终回复校验域
+│   │       ├── __init__.py          # Verification 导出
+│   │       └── responses.py         # 模糊回复重写辅助
 │   ├── memory/                      # 四层记忆系统
 │   │   ├── working.py               # 工作记忆与压缩
-│   │   ├── episodic.py              # 对话归档与摘要
-│   │   ├── semantic.py              # 知识提取与向量检索
-│   │   └── procedural.py            # 用户偏好与行为模式
+│   │   ├── episodic/                # 对话归档与摘要
+│   │   │   ├── __init__.py          # Episodic facade 导出
+│   │   │   ├── service.py           # Episodic 记忆服务
+│   │   │   └── helpers.py           # Episodic 辅助工具
+│   │   ├── semantic/                # 知识提取与向量检索
+│   │   │   ├── __init__.py          # Semantic facade 导出
+│   │   │   ├── service.py           # Semantic 记忆服务
+│   │   │   ├── queries.py           # Semantic 查询/抽取 mixin
+│   │   │   ├── mutations.py         # Semantic 写入/合并 mixin
+│   │   │   └── helpers.py           # Semantic 辅助工具
+│   │   └── procedural/              # 用户偏好与行为模式
+│   │       ├── __init__.py          # Procedural facade 导出
+│   │       ├── service.py           # Procedural 记忆服务
+│   │       └── helpers.py           # Procedural 辅助工具
 │   ├── channels/                    # 消息平台适配层
 │   │   ├── hub.py                   # 消息路由中心
 │   │   ├── types.py                 # UnifiedMessage、MessageContent、StreamingAdapter
@@ -176,12 +264,16 @@ openbot/
 │           └── webhook.py           # POST /webhook/telegram, /webhook/feishu
 └── frontend/                        # React 管理面板
     └── src/
-        ├── App.tsx                  # 路由定义
+        ├── app/
+        │   ├── App.tsx              # 路由定义
+        │   ├── Layout.tsx           # 应用壳（侧边栏 + 主题切换）
+        │   └── route-loaders.ts     # 懒加载路由与预加载钩子
         ├── lib/
         │   ├── api.ts               # API 客户端与 WebSocket 辅助
         │   └── markdown.ts          # Chat Markdown 渲染
         ├── components/
-        │   └── Layout.tsx           # 应用壳（侧边栏 + 主题切换）
+        │   ├── Icon.tsx             # 共享图标系统
+        │   └── TopbarQuickSearch.tsx # 全局工作区搜索
         └── pages/
             ├── dashboard.tsx        # 指标总览与图表
             ├── chat.tsx             # Chat 界面（DeepSeek 风格）
@@ -227,6 +319,7 @@ openbot/
 |------|------|------|
 | Telegram | Polling / Webhook | Streaming draft、Markdown-to-HTML、访问控制 |
 | Feishu | Webhook | 加密回调校验、interactive card、自动刷新 token |
+| WeChat | iLink 轮询 | 二维码登录、长轮询文本会话、基于 context token 回复 |
 | Web | WebSocket | 流式聊天、REST fallback |
 
 ### Dashboard

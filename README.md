@@ -65,6 +65,14 @@ feishu:
   app_secret_env: FEISHU_APP_SECRET
   verification_token_env: FEISHU_VERIFICATION_TOKEN
   encrypt_key_env: FEISHU_ENCRYPT_KEY
+
+wechat:
+  enabled: false
+  mode: ilink_polling
+  state_path: data/wechat/ilink_state.json
+  api_base_url: https://ilinkai.weixin.qq.com
+  poll_interval: 2.0
+  max_backoff: 30.0
 ```
 
 ### Run
@@ -115,6 +123,39 @@ Manual validation checklist:
 - Ask for a markdown-heavy answer and verify Feishu receives an interactive card
 - Deliberately misconfigure the token or encrypt key and verify the webhook is rejected
 
+### WeChat Personal Account (iLink) Setup
+
+The built-in WeChat adapter currently targets the personal-account iLink route:
+
+- Single account only
+- Direct-message text chats only
+- Polling mode only, no public webhook required
+- No standalone proactive sends
+
+1. Enable `wechat.enabled` in `config.yaml`.
+2. Run the local login command:
+
+```bash
+uv run python -m src.channels.adapters.wechat_login
+```
+
+3. Scan the generated QR code and confirm login in WeChat.
+4. Confirm `data/wechat/ilink_state.json` exists and logs contain `app.wechat_ready`.
+
+Current v1 limitations:
+
+- Inbound: direct-message text only
+- Outbound: replies inside active conversations only
+- Unsupported media types receive a fixed text notice
+- Scheduler and other background proactive sends to `target_platform="wechat"` fail explicitly
+
+Manual validation checklist:
+
+- Run the login command and confirm `data/wechat/login.png` is generated
+- Send a text message from WeChat and verify OpenBot replies
+- Send a non-text message and verify WeChat receives the text-only warning
+- Create a schedule targeting WeChat and verify proactive send is reported as unsupported
+
 ## Project Structure
 
 ```
@@ -122,10 +163,15 @@ openbot/
 ├── main.py                          # Application entrypoint
 ├── config.yaml                      # Non-secret configuration
 ├── src/
+│   ├── application/                 # Composition root + runtime orchestration
+│   │   ├── container.py             # Application object graph
+│   │   ├── bootstrap.py             # Runtime service + tool registration
+│   │   ├── message_dispatch.py      # Incoming message dispatch
+│   │   └── lifecycle.py             # API/adapters/scheduler startup
 │   ├── infrastructure/              # Event Bus, Database, Model Gateway
 │   │   ├── event_bus.py             # Async pub/sub with wildcard matching
 │   │   ├── database.py              # SQLite schema and migrations
-│   │   ├── storage.py               # Repository layer (conversations, knowledge, etc.)
+│   │   ├── storage/                 # Repository layer packages
 │   │   ├── model_gateway.py         # Multi-provider LLM gateway (retry/fallback/streaming)
 │   │   ├── embedding.py             # Embedding service (OpenAI-compat + DashScope)
 │   │   ├── reranker.py              # Reranker service (SiliconFlow/Jina/Cohere)
@@ -145,15 +191,57 @@ openbot/
 │   │       └── file_manager.py      # Workspace file operations
 │   ├── agent/                       # Agent Core
 │   │   ├── agent.py                 # ReAct reasoning loop (streaming + non-streaming)
-│   │   ├── conversation.py          # Conversation manager (context assembly)
-│   │   ├── sub_agent.py             # Parallel subtask delegation with scoped tools
-│   │   ├── scheduler.py             # APScheduler-based cron task execution
-│   │   └── deep_research.py         # Multi-round research engine with saturation detection
+│   │   ├── conversation/            # Conversation assembly package
+│   │   │   ├── __init__.py          # Conversation package exports
+│   │   │   ├── manager.py           # Conversation manager (context assembly)
+│   │   │   ├── prompt_builder.py    # Memory-enriched prompt assembly
+│   │   │   ├── shared_timeline.py   # Cross-platform recent timeline
+│   │   │   └── task_state_store.py  # Per-conversation protected state
+│   │   ├── runtime/                 # Agent turn execution helpers
+│   │   │   ├── __init__.py          # Runtime package exports
+│   │   │   ├── stream.py            # Main streamed ReAct loop
+│   │   │   ├── finalize.py          # Post-response persistence/finalization
+│   │   │   └── tool_executor.py     # Tool invocation + hook integration
+│   │   ├── delegation/              # Sub-agent delegation domain
+│   │   │   ├── __init__.py          # Delegation exports
+│   │   │   └── manager.py           # Parallel subtask delegation with scoped tools
+│   │   ├── research/                # Research domain
+│   │   │   ├── __init__.py          # Research exports
+│   │   │   └── engine.py            # Multi-round research engine with saturation detection
+│   │   ├── skills/                  # Skill discovery/loading domain
+│   │   │   ├── __init__.py          # Skill exports
+│   │   │   └── registry.py          # Skill registry + load_skill tool
+│   │   ├── scheduling/              # Scheduled execution domain
+│   │   │   ├── __init__.py          # Scheduler exports
+│   │   │   └── scheduler.py         # APScheduler-based cron task execution
+│   │   ├── prompts/                 # Prompt assembly fragments
+│   │   │   ├── __init__.py          # Prompt exports
+│   │   │   └── fragments.py         # Harness prompt fragments
+│   │   ├── coordination/            # Cross-request execution coordination
+│   │   │   ├── __init__.py          # Coordination exports
+│   │   │   └── execution.py         # Per-user execution serialization
+│   │   ├── state/                   # Agent task state domain
+│   │   │   ├── __init__.py          # State exports
+│   │   │   └── task_state.py        # Structured task state objects
+│   │   └── verification/            # Final-response verification
+│   │       ├── __init__.py          # Verification exports
+│   │       └── responses.py         # Vague-response rewriting helpers
 │   ├── memory/                      # 4-Tier Memory System
 │   │   ├── working.py               # Working memory + compression
-│   │   ├── episodic.py              # Conversation archival + summaries
-│   │   ├── semantic.py              # Knowledge extraction + vector search
-│   │   └── procedural.py            # User preferences + behavior patterns
+│   │   ├── episodic/                # Conversation archival + summaries
+│   │   │   ├── __init__.py          # Episodic facade exports
+│   │   │   ├── service.py           # Episodic memory service
+│   │   │   └── helpers.py           # Episodic helper utilities
+│   │   ├── semantic/                # Knowledge extraction + vector search
+│   │   │   ├── __init__.py          # Semantic facade exports
+│   │   │   ├── service.py           # Semantic memory service
+│   │   │   ├── queries.py           # Semantic recall/extraction mixins
+│   │   │   ├── mutations.py         # Semantic mutation/storage mixins
+│   │   │   └── helpers.py           # Semantic helper utilities
+│   │   └── procedural/              # User preferences + behavior patterns
+│   │       ├── __init__.py          # Procedural facade exports
+│   │       ├── service.py           # Procedural memory service
+│   │       └── helpers.py           # Procedural helper utilities
 │   ├── channels/                    # Messaging Adapters
 │   │   ├── hub.py                   # Message routing hub
 │   │   ├── types.py                 # UnifiedMessage, MessageContent, StreamingAdapter
@@ -176,12 +264,16 @@ openbot/
 │           └── webhook.py           # POST /webhook/telegram, /webhook/feishu
 └── frontend/                        # React Dashboard
     └── src/
-        ├── App.tsx                  # Route definitions
+        ├── app/
+        │   ├── App.tsx              # Route definitions
+        │   ├── Layout.tsx           # App shell (sidebar + theme toggle)
+        │   └── route-loaders.ts     # Lazy route loaders + preload hooks
         ├── lib/
         │   ├── api.ts               # API client + WebSocket helper
         │   └── markdown.ts          # Markdown renderer for chat
         ├── components/
-        │   └── Layout.tsx           # App shell (sidebar + theme toggle)
+        │   ├── Icon.tsx             # Shared icon system
+        │   └── TopbarQuickSearch.tsx # Global workspace search
         └── pages/
             ├── dashboard.tsx        # Metrics overview + charts
             ├── chat.tsx             # Chat interface (DeepSeek-style)
@@ -227,6 +319,7 @@ openbot/
 |----------|------|----------|
 | Telegram | Polling / Webhook | Streaming draft, Markdown-to-HTML, access control |
 | Feishu | Webhook | Encrypted callback validation, interactive card messages, auto token refresh |
+| WeChat | iLink polling | QR login, long-poll text chats, context-token replies |
 | Web | WebSocket | Streaming chat, REST fallback |
 
 ### Dashboard
