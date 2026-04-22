@@ -27,7 +27,7 @@ type LogStats = {
 
 const SURFACES = ["all", "cognitive", "operational", "contextual"] as const;
 const LEVELS = ["all", "info", "warning", "error"] as const;
-const PLATFORMS = ["all", "web", "telegram", "feishu", "scheduler"] as const;
+const PLATFORMS = ["all", "web", "telegram", "feishu", "wechat", "scheduler"] as const;
 
 function levelTone(level: string): string {
   if (level === "error") return "degraded";

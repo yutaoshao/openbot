@@ -2,9 +2,9 @@ import { Suspense, useEffect, useState } from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
 
 import { useI18n } from "../i18n";
-import { preloadAllRoutes, preloadRoute } from "../lib/route-loaders";
-import { Icon, type IconName } from "./Icon";
-import { TopbarQuickSearch } from "./TopbarQuickSearch";
+import { Icon, type IconName } from "../components/Icon";
+import { TopbarQuickSearch } from "../components/TopbarQuickSearch";
+import { preloadAllRoutes, preloadRoute } from "./route-loaders";
 
 type NavItem = {
   to: string;

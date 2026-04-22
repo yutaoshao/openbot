@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 
 import { useI18n } from "../i18n";
-import { preloadRoute } from "../lib/route-loaders";
+import { preloadRoute } from "../app/route-loaders";
 import { Icon } from "./Icon";
 
 type SearchItem = {

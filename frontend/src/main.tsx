@@ -3,7 +3,7 @@ import ReactDOM from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter } from "react-router-dom";
 
-import App from "./App";
+import App from "./app/App";
 import { LanguageProvider } from "./i18n";
 import { operatorQueryDefaults } from "./lib/query-defaults";
 import "./styles/base.css";

@@ -1,9 +1,11 @@
 type Settings = {
   telegram: { enabled: boolean; enable_streaming: boolean; mode: string; bot_token_env: string };
   feishu: { enabled: boolean; mode: string; app_id_env: string; app_secret_env: string; verification_token_env: string; encrypt_key_env: string };
+  wechat: { enabled: boolean; mode: string; state_path: string; api_base_url: string; poll_interval: number; max_backoff: number };
   runtime: {
     telegram: { enabled: boolean; mode: string | null; status: string; missing_env_vars: string[] };
     feishu: { enabled: boolean; mode: string | null; status: string; missing_env_vars: string[] };
+    wechat: { enabled: boolean; mode: string | null; status: string; missing_env_vars: string[] };
   };
   model: {
     max_retries: number;

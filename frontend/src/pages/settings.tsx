@@ -185,6 +185,34 @@ export function SettingsPage(): JSX.Element {
                   )}
                 </div>
               </div>
+              <div className="field-card">
+                <label className="field-label">{t("settings.wechatMode")}</label>
+                <div className="settings-runtime-value">{settings.data?.wechat.mode ?? "-"}</div>
+                <p className="field-help">{t("settings.wechatModeHint")}</p>
+              </div>
+              <div className="field-card">
+                <label className="field-label">{t("settings.wechatStatus")}</label>
+                <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-2)" }}>
+                  <span
+                    className={`status-badge ${
+                      settings.data?.runtime.wechat.status === "ready" ? "stable" : "degraded"
+                    }`}
+                  >
+                    {settings.data?.runtime.wechat.status ?? "-"}
+                  </span>
+                  <p className="field-help">{t("settings.wechatStatusHint")}</p>
+                </div>
+              </div>
+              <div className="field-card">
+                <label className="field-label">{t("settings.wechatStatePath")}</label>
+                <div className="settings-runtime-value">{settings.data?.wechat.state_path ?? "-"}</div>
+                <p className="field-help">{t("settings.wechatStatePathHint")}</p>
+              </div>
+              <div className="field-card">
+                <label className="field-label">{t("settings.wechatLoginCommand")}</label>
+                <div className="settings-runtime-value">python -m src.channels.adapters.wechat_login</div>
+                <p className="field-help">{t("settings.wechatLoginHint")}</p>
+              </div>
             </div>
           </section>
 

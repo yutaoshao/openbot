@@ -1,6 +1,6 @@
 import { Route, Routes } from "react-router-dom";
 
-import { Layout } from "./components/Layout";
+import { Layout } from "./Layout";
 import {
   ChatPage,
   ConversationsPage,
@@ -12,7 +12,7 @@ import {
   SchedulerPage,
   SettingsPage,
   ToolsPage,
-} from "./lib/route-loaders";
+} from "./route-loaders";
 
 export default function App(): JSX.Element {
   return (
