@@ -82,7 +82,7 @@ def parse_extraction_response(text: str) -> list[dict[str, Any]]:
     if cleaned.startswith("```"):
         first_newline = cleaned.find("\n")
         if first_newline != -1:
-            cleaned = cleaned[first_newline + 1:]
+            cleaned = cleaned[first_newline + 1 :]
         if cleaned.endswith("```"):
             cleaned = cleaned[:-3].rstrip()
 

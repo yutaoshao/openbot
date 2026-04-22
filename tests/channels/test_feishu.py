@@ -82,21 +82,23 @@ async def test_process_event_routes_text_message_to_msg_hub(monkeypatch: Any) ->
     hub = _FakeMsgHub()
     adapter = FeishuAdapter(FeishuConfig(enabled=True), hub)  # type: ignore[arg-type]
 
-    await adapter.process_event({
-        "header": {
-            "event_type": "im.message.receive_v1",
-            "token": "verify_test",
-        },
-        "event": {
-            "sender": {"sender_id": {"open_id": "ou_test"}},
-            "message": {
-                "message_id": "om_123",
-                "chat_id": "oc_456",
-                "message_type": "text",
-                "content": json.dumps({"text": "@_user_1 hello"}),
+    await adapter.process_event(
+        {
+            "header": {
+                "event_type": "im.message.receive_v1",
+                "token": "verify_test",
             },
-        },
-    })
+            "event": {
+                "sender": {"sender_id": {"open_id": "ou_test"}},
+                "message": {
+                    "message_id": "om_123",
+                    "chat_id": "oc_456",
+                    "message_type": "text",
+                    "content": json.dumps({"text": "@_user_1 hello"}),
+                },
+            },
+        }
+    )
 
     assert len(hub.messages) == 1
     message = hub.messages[0]
@@ -111,18 +113,20 @@ async def test_process_event_ignores_non_text_messages(monkeypatch: Any) -> None
     hub = _FakeMsgHub()
     adapter = FeishuAdapter(FeishuConfig(enabled=True), hub)  # type: ignore[arg-type]
 
-    await adapter.process_event({
-        "header": {"event_type": "im.message.receive_v1", "token": "verify_test"},
-        "event": {
-            "sender": {"sender_id": {"open_id": "ou_test"}},
-            "message": {
-                "message_id": "om_123",
-                "chat_id": "oc_456",
-                "message_type": "image",
-                "content": "{}",
+    await adapter.process_event(
+        {
+            "header": {"event_type": "im.message.receive_v1", "token": "verify_test"},
+            "event": {
+                "sender": {"sender_id": {"open_id": "ou_test"}},
+                "message": {
+                    "message_id": "om_123",
+                    "chat_id": "oc_456",
+                    "message_type": "image",
+                    "content": "{}",
+                },
             },
-        },
-    })
+        }
+    )
 
     assert hub.messages == []
 
@@ -178,10 +182,13 @@ async def test_msg_hub_routes_agent_response_back_to_feishu(monkeypatch: Any) ->
     adapter.send_message = MethodType(fake_send_message, adapter)
     hub.register_adapter("feishu", adapter)
 
-    await event_bus.publish("agent.response", {
-        "platform": "feishu",
-        "target_id": "oc_1",
-        "content": MessageContent(text="reply"),
-    })
+    await event_bus.publish(
+        "agent.response",
+        {
+            "platform": "feishu",
+            "target_id": "oc_1",
+            "content": MessageContent(text="reply"),
+        },
+    )
 
     assert calls == [("oc_1", "reply")]

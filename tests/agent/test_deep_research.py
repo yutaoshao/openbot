@@ -14,6 +14,7 @@ from src.agent.research import (
 # TavilyResearchProvider._parse_search_results
 # ---------------------------------------------------------------------------
 
+
 class TestParseSearchResults:
     def test_basic_parsing(self) -> None:
         raw = (
@@ -44,6 +45,7 @@ class TestParseSearchResults:
 # DeepResearch._parse_json_list
 # ---------------------------------------------------------------------------
 
+
 class TestParseJsonList:
     def test_valid_json_array(self) -> None:
         text = '["query 1", "query 2", "query 3"]'
@@ -70,12 +72,13 @@ class TestParseJsonList:
 # DeepResearch._parse_findings
 # ---------------------------------------------------------------------------
 
+
 class TestParseFindings:
     def test_valid_findings(self) -> None:
-        text = '''[
+        text = """[
             {"content": "Finding 1", "source_url": "https://a.com", "source_title": "A"},
             {"content": "Finding 2", "source_url": "https://b.com", "source_title": "B"}
-        ]'''
+        ]"""
         findings = DeepResearch._parse_findings(text, round_num=1)
         assert len(findings) == 2
         assert findings[0].content == "Finding 1"
@@ -103,6 +106,7 @@ class TestParseFindings:
 # DeepResearch._pick_round_angles
 # ---------------------------------------------------------------------------
 
+
 class TestPickRoundAngles:
     def test_first_round(self) -> None:
         angles = ["a", "b", "c", "d", "e", "f"]
@@ -124,6 +128,7 @@ class TestPickRoundAngles:
 # _deduplicate_sources
 # ---------------------------------------------------------------------------
 
+
 class TestDeduplicateSources:
     def test_basic(self) -> None:
         findings = [
@@ -143,6 +148,7 @@ class TestDeduplicateSources:
 # ---------------------------------------------------------------------------
 # ResearchReport
 # ---------------------------------------------------------------------------
+
 
 class TestResearchReport:
     def test_defaults(self) -> None:

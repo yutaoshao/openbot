@@ -41,12 +41,15 @@ class MsgHub:
 
         Publishes msg.receive event -> Agent Core picks it up.
         """
-        await self.event_bus.publish("msg.receive", {
-            "message": message,
-            "platform": message.platform,
-            "sender_id": message.sender_id,
-            "conversation_id": message.conversation_id,
-        })
+        await self.event_bus.publish(
+            "msg.receive",
+            {
+                "message": message,
+                "platform": message.platform,
+                "sender_id": message.sender_id,
+                "conversation_id": message.conversation_id,
+            },
+        )
 
     async def _on_agent_response(self, data: dict[str, Any]) -> None:
         """Route agent's response back to the originating platform."""

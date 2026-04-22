@@ -125,7 +125,7 @@ class KnowledgeRepo:
         async with self._db.get_connection() as conn:
             cursor = await conn.execute(
                 f"""
-                SELECT {', '.join(KNOWLEDGE_COLUMNS)} FROM knowledge
+                SELECT {", ".join(KNOWLEDGE_COLUMNS)} FROM knowledge
                 {where}
                 ORDER BY updated_at DESC
                 LIMIT ? OFFSET ?
@@ -154,8 +154,8 @@ class KnowledgeRepo:
         async with self._db.get_connection() as conn:
             cursor = await conn.execute(
                 f"""
-                SELECT {', '.join(KNOWLEDGE_COLUMNS)} FROM knowledge
-                WHERE {' AND '.join(clauses)}
+                SELECT {", ".join(KNOWLEDGE_COLUMNS)} FROM knowledge
+                WHERE {" AND ".join(clauses)}
                 ORDER BY access_count DESC, updated_at DESC
                 LIMIT ?
                 """,

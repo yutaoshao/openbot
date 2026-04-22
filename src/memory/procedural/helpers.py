@@ -9,9 +9,7 @@ from src.core.logging import get_logger
 
 logger = get_logger(__name__)
 
-CATEGORIES: frozenset[str] = frozenset(
-    {"communication", "coding", "workflow", "tool"}
-)
+CATEGORIES: frozenset[str] = frozenset({"communication", "coding", "workflow", "tool"})
 
 OBSERVATION_PROMPT = """\
 You are a preference extraction engine.  Analyze the conversation below and
@@ -46,8 +44,7 @@ Conversation:
 
 def format_messages(messages: list[dict[str, Any]]) -> str:
     return "\n".join(
-        f"[{msg.get('role', 'unknown')}]: {msg.get('content', '')}"
-        for msg in messages
+        f"[{msg.get('role', 'unknown')}]: {msg.get('content', '')}" for msg in messages
     )
 
 

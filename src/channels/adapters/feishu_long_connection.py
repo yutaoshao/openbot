@@ -97,8 +97,7 @@ class FeishuLongConnectionAdapter(FeishuAdapter):
     def _build_event_handler(self, lark: Any) -> Any:
         """Build the official SDK event handler."""
         return (
-            lark.EventDispatcherHandler
-            .builder("", "")
+            lark.EventDispatcherHandler.builder("", "")
             .register_p2_im_message_receive_v1(self._on_sdk_message)
             .build()
         )

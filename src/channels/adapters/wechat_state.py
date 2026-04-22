@@ -42,9 +42,7 @@ class WeChatStateStore:
         try:
             payload = json.loads(self._path.read_text(encoding="utf-8"))
         except json.JSONDecodeError as exc:
-            raise RuntimeError(
-                f"WeChat state file is not valid JSON: {self._path}"
-            ) from exc
+            raise RuntimeError(f"WeChat state file is not valid JSON: {self._path}") from exc
         if not isinstance(payload, dict):
             raise RuntimeError(f"WeChat state file must contain a JSON object: {self._path}")
         state = WeChatLoginState(

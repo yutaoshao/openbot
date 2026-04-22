@@ -136,7 +136,7 @@ class LogRepo:
         async with self._db.get_connection() as conn:
             cursor = await conn.execute(
                 f"""
-                SELECT {', '.join(LOG_COLUMNS)} FROM logs
+                SELECT {", ".join(LOG_COLUMNS)} FROM logs
                 {where}
                 ORDER BY id DESC
                 LIMIT ? OFFSET ?

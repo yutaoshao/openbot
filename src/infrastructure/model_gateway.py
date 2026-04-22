@@ -80,10 +80,10 @@ class StreamChunk:
     type: Literal["text", "tool_call", "tool_status", "done"]
     text: str = ""
     tool_call: ToolCall | None = None
-    tool_name: str = ""           # type="tool_status"
-    usage: Usage | None = None    # type="done"
-    model: str = ""               # type="done"
-    iterations: int = 0           # type="done" — ReAct loop iteration count
+    tool_name: str = ""  # type="tool_status"
+    usage: Usage | None = None  # type="done"
+    model: str = ""  # type="done"
+    iterations: int = 0  # type="done" — ReAct loop iteration count
 
 
 @runtime_checkable
@@ -134,8 +134,7 @@ class ModelGateway:
         if config.provider == "openai_compatible":
             return OpenAICompatibleProvider(config)
         raise ValueError(
-            f"Unsupported provider: '{config.provider}'. "
-            f"Supported: anthropic, openai_compatible"
+            f"Unsupported provider: '{config.provider}'. Supported: anthropic, openai_compatible"
         )
 
     async def chat(
@@ -167,19 +166,22 @@ class ModelGateway:
                         latency_ms=response.latency_ms,
                     )
 
-                    await self.event_bus.publish("model.request", {
-                        "provider": provider_key,
-                        "model": response.model,
-                        "tokens_in": response.usage.tokens_in,
-                        "tokens_out": response.usage.tokens_out,
-                        "latency_ms": response.latency_ms,
-                    })
+                    await self.event_bus.publish(
+                        "model.request",
+                        {
+                            "provider": provider_key,
+                            "model": response.model,
+                            "tokens_in": response.usage.tokens_in,
+                            "tokens_out": response.usage.tokens_out,
+                            "latency_ms": response.latency_ms,
+                        },
+                    )
 
                     return response
 
                 except Exception as e:
                     last_error = e
-                    delay = self.config.retry_base_delay * (2 ** attempt)
+                    delay = self.config.retry_base_delay * (2**attempt)
                     logger.warning(
                         "llm_requested",
                         surface="operational",
@@ -239,7 +241,7 @@ class ModelGateway:
 
                 except Exception as e:
                     last_error = e
-                    delay = self.config.retry_base_delay * (2 ** attempt)
+                    delay = self.config.retry_base_delay * (2**attempt)
                     logger.warning(
                         "llm_requested",
                         surface="operational",

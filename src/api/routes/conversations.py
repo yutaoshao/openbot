@@ -54,7 +54,7 @@ async def list_conversations(
     if q:
         # Search API has no offset. Fetch larger window then slice locally.
         rows = await storage.conversations.search(q, limit=limit + offset)
-        rows = rows[offset:offset + limit]
+        rows = rows[offset : offset + limit]
     else:
         rows = await storage.conversations.list_recent(limit=limit, offset=offset)
 

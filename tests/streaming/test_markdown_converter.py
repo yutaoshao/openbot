@@ -22,12 +22,7 @@ def test_markdown_link_and_bold_conversion() -> None:
 
 
 def test_table_renders_as_pre_block() -> None:
-    text = (
-        "| Name  | Age |\n"
-        "|-------|-----|\n"
-        "| Alice | 30  |\n"
-        "| Bob   | 25  |"
-    )
+    text = "| Name  | Age |\n|-------|-----|\n| Alice | 30  |\n| Bob   | 25  |"
 
     html = md_to_telegram_html(text, partial=False)
 
@@ -40,11 +35,7 @@ def test_table_renders_as_pre_block() -> None:
 
 
 def test_table_column_alignment() -> None:
-    text = (
-        "| Short | LongHeader |\n"
-        "|-------|------------|\n"
-        "| A     | B          |"
-    )
+    text = "| Short | LongHeader |\n|-------|------------|\n| A     | B          |"
 
     html = md_to_telegram_html(text, partial=False)
 
@@ -56,13 +47,7 @@ def test_table_column_alignment() -> None:
 
 
 def test_table_followed_by_text() -> None:
-    text = (
-        "| X | Y |\n"
-        "|---|---|\n"
-        "| 1 | 2 |\n"
-        "\n"
-        "Regular text after table"
-    )
+    text = "| X | Y |\n|---|---|\n| 1 | 2 |\n\nRegular text after table"
 
     html = md_to_telegram_html(text, partial=False)
 

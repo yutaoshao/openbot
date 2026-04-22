@@ -45,6 +45,7 @@ _FIELD_RE = re.compile(r"^(\w+):\s*(.+)$", re.MULTILINE)
 # Data model
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class SkillMeta:
     """Parsed metadata from a SKILL.md frontmatter."""
@@ -62,6 +63,7 @@ class SkillMeta:
 # ---------------------------------------------------------------------------
 # Registry
 # ---------------------------------------------------------------------------
+
 
 class SkillRegistry:
     """Discovers and manages skills from multiple filesystem locations.
@@ -97,10 +99,10 @@ class SkillRegistry:
         """Return default skill directories in priority order (low → high)."""
         home = Path.home()
         return [
-            home / ".claude" / "skills",   # user global
-            Path(".claude") / "skills",    # project Claude Code
-            Path(".agents") / "skills",    # project generic
-            Path("data") / "skills",       # project built-in
+            home / ".claude" / "skills",  # user global
+            Path(".claude") / "skills",  # project Claude Code
+            Path(".agents") / "skills",  # project generic
+            Path("data") / "skills",  # project built-in
         ]
 
     def _scan(self) -> None:
@@ -236,6 +238,7 @@ class SkillRegistry:
 # Tool: load_skill
 # ---------------------------------------------------------------------------
 
+
 class LoadSkillTool:
     """Agent tool for loading a skill's full instructions.
 
@@ -283,9 +286,7 @@ class LoadSkillTool:
 
         content = self._registry.load(skill_name)
         if content is None:
-            available = ", ".join(
-                m.name for m in self._registry._skills.values()
-            )
+            available = ", ".join(m.name for m in self._registry._skills.values())
             return ToolResult(
                 content=f"Skill '{skill_name}' not found. Available: {available}",
                 is_error=True,
@@ -296,8 +297,7 @@ class LoadSkillTool:
         if refs:
             content += (
                 "\n\n---\nAvailable reference files "
-                "(use file_manager to read if needed):\n"
-                + "\n".join(f"- {r}" for r in refs)
+                "(use file_manager to read if needed):\n" + "\n".join(f"- {r}" for r in refs)
             )
 
         logger.info("skill.loaded", name=skill_name, length=len(content))

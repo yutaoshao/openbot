@@ -61,8 +61,8 @@ class ToolRegistry:
 
     def __init__(self) -> None:
         self._tools: dict[str, Tool] = {}
-        self._enabled: dict[str, bool] = {}       # tool_name -> enabled flag
-        self._config: dict[str, dict] = {}         # tool_name -> extra config
+        self._enabled: dict[str, bool] = {}  # tool_name -> enabled flag
+        self._config: dict[str, dict] = {}  # tool_name -> extra config
         self._last_used: dict[str, str | None] = {}  # tool_name -> ISO timestamp
         self._visibility: dict[str, str] = {}
         self._keywords: dict[str, set[str]] = {}
@@ -110,9 +110,7 @@ class ToolRegistry:
         Only includes enabled tools.
         """
         allowed_names = active_names or {
-            name
-            for name, visibility in self._visibility.items()
-            if visibility == CORE_VISIBILITY
+            name for name, visibility in self._visibility.items() if visibility == CORE_VISIBILITY
         }
         return [
             {
@@ -121,8 +119,7 @@ class ToolRegistry:
                 "parameters": tool.parameters,
             }
             for tool in self._tools.values()
-            if self._enabled.get(tool.name, True)
-            and tool.name in allowed_names
+            if self._enabled.get(tool.name, True) and tool.name in allowed_names
         ]
 
     def get_default_active_names(self) -> set[str]:
@@ -186,7 +183,9 @@ class ToolRegistry:
         ]
 
     def update_config(
-        self, name: str, updates: dict[str, Any],
+        self,
+        name: str,
+        updates: dict[str, Any],
     ) -> dict[str, Any]:
         """Update a tool's configuration. Raises KeyError if not found."""
         tool = self._tools.get(name)

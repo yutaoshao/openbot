@@ -10,11 +10,12 @@ class _FakeConversationRepo:
         self._rows = rows
 
     async def list_recent(self, limit: int = 20, offset: int = 0) -> list[dict]:
-        return self._rows[offset:offset + limit]
+        return self._rows[offset : offset + limit]
 
     async def search(self, query: str, limit: int = 10) -> list[dict]:
         matched = [
-            row for row in self._rows
+            row
+            for row in self._rows
             if query in (row.get("title") or "") or query in (row.get("summary") or "")
         ]
         return matched[:limit]
@@ -37,12 +38,10 @@ class _FakeMessageRepo:
         return len(self._messages_by_conv.get(conversation_id, []))
 
     async def count_by_conversations(
-        self, conversation_ids: list[str],
+        self,
+        conversation_ids: list[str],
     ) -> dict[str, int]:
-        return {
-            cid: len(self._messages_by_conv.get(cid, []))
-            for cid in conversation_ids
-        }
+        return {cid: len(self._messages_by_conv.get(cid, [])) for cid in conversation_ids}
 
     async def get_by_conversation(
         self,
@@ -53,7 +52,7 @@ class _FakeMessageRepo:
         items = self._messages_by_conv.get(conversation_id, [])
         if limit is None:
             return items[offset:]
-        return items[offset:offset + limit]
+        return items[offset : offset + limit]
 
 
 class _FakeStorage:

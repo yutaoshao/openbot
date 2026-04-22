@@ -77,9 +77,7 @@ class FeishuApiClient:
                     raise RuntimeError(self.format_api_error(_FEISHU_TOKEN_PATH, result))
                 expire = int(result.get("expire", 7200))
                 self._tenant_token = str(result.get("tenant_access_token", ""))
-                self._token_expires_at = (
-                    time.monotonic() + expire - _TOKEN_REFRESH_BUFFER_SECONDS
-                )
+                self._token_expires_at = time.monotonic() + expire - _TOKEN_REFRESH_BUFFER_SECONDS
                 logger.info(
                     "feishu.token_refreshed",
                     expires_in=expire,

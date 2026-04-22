@@ -53,7 +53,9 @@ class TestSkillRegistry:
 
     def test_load_skill(self, tmp_path: Path) -> None:
         _create_skill(
-            tmp_path, "test-skill", "Use when testing",
+            tmp_path,
+            "test-skill",
+            "Use when testing",
             body="# Instructions\nDo something.",
         )
 
@@ -162,11 +164,13 @@ class TestSkillRegistry:
         real_dir.mkdir()
         _create_skill(real_dir, "test", "Use when testing")
 
-        registry = SkillRegistry(skills_dirs=[
-            tmp_path / "nope1",
-            tmp_path / "nope2",
-            real_dir,
-        ])
+        registry = SkillRegistry(
+            skills_dirs=[
+                tmp_path / "nope1",
+                tmp_path / "nope2",
+                real_dir,
+            ]
+        )
         assert len(registry.list_skills()) == 1
 
 

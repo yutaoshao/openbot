@@ -114,10 +114,13 @@ class SubAgent:
 
         logger.info("sub_agent.delegating", subtask_count=len(subtasks))
 
-        await self._event_bus.publish("sub_agent.delegate.start", {
-            "subtask_count": len(subtasks),
-            "descriptions": [t.get("description", "") for t in subtasks],
-        })
+        await self._event_bus.publish(
+            "sub_agent.delegate.start",
+            {
+                "subtask_count": len(subtasks),
+                "descriptions": [t.get("description", "") for t in subtasks],
+            },
+        )
 
         # Run with concurrency limit via semaphore
         semaphore = asyncio.Semaphore(max_concurrent)
@@ -147,13 +150,16 @@ class SubAgent:
         succeeded = sum(1 for r in delegation.subtask_results if r.success)
         failed = len(delegation.subtask_results) - succeeded
 
-        await self._event_bus.publish("sub_agent.delegate.complete", {
-            "subtask_count": len(subtasks),
-            "succeeded": succeeded,
-            "failed": failed,
-            "total_tokens_in": delegation.total_tokens_in,
-            "total_tokens_out": delegation.total_tokens_out,
-        })
+        await self._event_bus.publish(
+            "sub_agent.delegate.complete",
+            {
+                "subtask_count": len(subtasks),
+                "succeeded": succeeded,
+                "failed": failed,
+                "total_tokens_in": delegation.total_tokens_in,
+                "total_tokens_out": delegation.total_tokens_out,
+            },
+        )
 
         logger.info(
             "sub_agent.delegation_complete",
@@ -184,7 +190,9 @@ class SubAgent:
 
         # Build worker system prompt
         worker_prompt = self._build_worker_prompt(
-            base_system_prompt, description, extra_context,
+            base_system_prompt,
+            description,
+            extra_context,
         )
 
         messages: list[dict[str, Any]] = [
@@ -253,7 +261,8 @@ class SubAgent:
 
         for _iteration in range(max_iter):
             response = await self._gateway.chat(
-                messages=messages, tools=tools,
+                messages=messages,
+                tools=tools,
             )
 
             if not response.has_tool_calls:
@@ -269,7 +278,9 @@ class SubAgent:
         return await self._gateway.chat(messages=messages, tools=None)
 
     async def _execute_tool(
-        self, name: str, arguments: dict[str, Any],
+        self,
+        name: str,
+        arguments: dict[str, Any],
     ) -> Any:
         """Execute a tool (worker-scoped)."""
         from src.tools.registry import ToolResult
@@ -302,7 +313,8 @@ class SubAgent:
             return ToolResult(content=f"Tool error: {e}", is_error=True)
 
     def _build_scoped_tools(
-        self, allowed_names: list[str] | None,
+        self,
+        allowed_names: list[str] | None,
     ) -> ToolRegistry | None:
         """Build a ToolRegistry containing only the specified tools."""
         if not self._tool_registry:

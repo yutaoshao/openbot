@@ -46,8 +46,7 @@ async def on_message_receive(app: Any, data: dict[str, Any]) -> None:
                     },
                 )
                 use_streaming = isinstance(adapter, StreamingAdapter) and (
-                    message.platform != "telegram"
-                    or app.config.telegram.enable_streaming
+                    message.platform != "telegram" or app.config.telegram.enable_streaming
                 )
                 if use_streaming:
                     await handle_streaming(app, message, adapter)

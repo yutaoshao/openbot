@@ -42,9 +42,7 @@ async def ws_chat(
     web_adapter: WebAdapter | None = _state_or_none(websocket, "web_adapter")
 
     if msg_hub is None or web_adapter is None:
-        await websocket.send_json(
-            {"type": "error", "detail": "WebSocket chat is not initialized."}
-        )
+        await websocket.send_json({"type": "error", "detail": "WebSocket chat is not initialized."})
         await websocket.close(code=1011)
         return
 

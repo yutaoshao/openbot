@@ -222,9 +222,7 @@ class Database:
             RuntimeError: If the database has not been initialized.
         """
         if self._conn is None:
-            raise RuntimeError(
-                "Database not initialized. Call await database.initialize() first."
-            )
+            raise RuntimeError("Database not initialized. Call await database.initialize() first.")
         return self._conn
 
     async def initialize(self) -> None:
@@ -337,9 +335,7 @@ class Database:
         """Return the current schema version, or 0 if not yet tracked."""
         conn = self.connection
         try:
-            cursor = await conn.execute(
-                "SELECT MAX(version) FROM schema_version"
-            )
+            cursor = await conn.execute("SELECT MAX(version) FROM schema_version")
             row = await cursor.fetchone()
             return row[0] if row and row[0] is not None else 0
         except aiosqlite.OperationalError:
@@ -458,16 +454,11 @@ class Database:
     async def _ensure_user_scope_indexes(self) -> None:
         """Create indexes that may need to be recreated after migrations."""
         statements = [
-            "CREATE INDEX IF NOT EXISTS idx_messages_conversation_id "
-            "ON messages(conversation_id)",
-            "CREATE INDEX IF NOT EXISTS idx_messages_created_at "
-            "ON messages(created_at)",
-            "CREATE INDEX IF NOT EXISTS idx_conversations_user_id "
-            "ON conversations(user_id)",
-            "CREATE INDEX IF NOT EXISTS idx_knowledge_user_id "
-            "ON knowledge(user_id)",
-            "CREATE INDEX IF NOT EXISTS idx_preferences_user_id "
-            "ON preferences(user_id)",
+            "CREATE INDEX IF NOT EXISTS idx_messages_conversation_id ON messages(conversation_id)",
+            "CREATE INDEX IF NOT EXISTS idx_messages_created_at ON messages(created_at)",
+            "CREATE INDEX IF NOT EXISTS idx_conversations_user_id ON conversations(user_id)",
+            "CREATE INDEX IF NOT EXISTS idx_knowledge_user_id ON knowledge(user_id)",
+            "CREATE INDEX IF NOT EXISTS idx_preferences_user_id ON preferences(user_id)",
         ]
         for statement in statements:
             await self.connection.execute(statement)

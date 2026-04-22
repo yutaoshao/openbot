@@ -29,7 +29,7 @@ class UserIdentityRepo:
         async with self._db.get_connection() as conn:
             cursor = await conn.execute(
                 f"""
-                SELECT {', '.join(IDENTITY_COLUMNS)} FROM user_identities
+                SELECT {", ".join(IDENTITY_COLUMNS)} FROM user_identities
                 WHERE platform = ? AND platform_user_id = ?
                 """,
                 (platform, platform_user_id),
@@ -93,7 +93,7 @@ class UserIdentityRepo:
         async with self._db.get_connection() as conn:
             cursor = await conn.execute(
                 f"""
-                SELECT {', '.join(IDENTITY_COLUMNS)} FROM user_identities
+                SELECT {", ".join(IDENTITY_COLUMNS)} FROM user_identities
                 {where}
                 ORDER BY user_id ASC, platform ASC, platform_user_id ASC
                 """,

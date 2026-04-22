@@ -26,7 +26,7 @@ class _FakeKnowledgeRepo:
             values = [item for item in values if item["category"] == category]
         if priority:
             values = [item for item in values if item["priority"] == priority]
-        return values[offset:offset + limit]
+        return values[offset : offset + limit]
 
     async def search(self, query: str, limit: int = 10) -> list[dict[str, Any]]:
         return [item for item in self.items.values() if query in item["content"]][:limit]
@@ -72,7 +72,7 @@ class _FakeScheduleRepo:
         values = list(self.items.values())
         if status:
             values = [item for item in values if item["status"] == status]
-        return values[offset:offset + limit]
+        return values[offset : offset + limit]
 
     async def create(self, **kwargs: Any) -> dict[str, Any]:
         self._counter += 1

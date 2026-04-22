@@ -80,8 +80,7 @@ class WebFetchTool:
             content = extracted[:max_length]
             if len(extracted) > max_length:
                 content += (
-                    f"\n\n[Truncated: {len(extracted)} total chars,"
-                    f" showing first {max_length}]"
+                    f"\n\n[Truncated: {len(extracted)} total chars, showing first {max_length}]"
                 )
 
             return ToolResult(

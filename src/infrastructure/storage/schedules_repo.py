@@ -127,7 +127,7 @@ class ScheduleRepo:
         async with self._db.get_connection() as conn:
             cursor = await conn.execute(
                 f"""
-                SELECT {', '.join(SCHEDULE_COLUMNS)} FROM schedules
+                SELECT {", ".join(SCHEDULE_COLUMNS)} FROM schedules
                 {where}
                 ORDER BY created_at DESC
                 LIMIT ? OFFSET ?

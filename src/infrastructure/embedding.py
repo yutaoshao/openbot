@@ -120,15 +120,14 @@ class DashScopeEmbeddingProvider:
                 api_key=self._api_key,
             )
             if resp.status_code != HTTPStatus.OK:
-                raise RuntimeError(
-                    f"DashScope TextEmbedding failed: {resp.code} {resp.message}"
-                )
+                raise RuntimeError(f"DashScope TextEmbedding failed: {resp.code} {resp.message}")
             return resp.output["embeddings"][0]["embedding"]
 
         return await asyncio.to_thread(_call)
 
     async def _embed_text_batch(
-        self, texts: list[str],
+        self,
+        texts: list[str],
     ) -> list[list[float]]:
         """Batch text embedding (max 10 per call)."""
         from http import HTTPStatus
@@ -144,8 +143,7 @@ class DashScopeEmbeddingProvider:
             )
             if resp.status_code != HTTPStatus.OK:
                 raise RuntimeError(
-                    f"DashScope TextEmbedding batch failed: "
-                    f"{resp.code} {resp.message}"
+                    f"DashScope TextEmbedding batch failed: {resp.code} {resp.message}"
                 )
             embeddings = resp.output["embeddings"]
             return [e["embedding"] for e in embeddings]
@@ -167,15 +165,15 @@ class DashScopeEmbeddingProvider:
             )
             if resp.status_code != HTTPStatus.OK:
                 raise RuntimeError(
-                    f"DashScope MultiModalEmbedding failed: "
-                    f"{resp.code} {resp.message}"
+                    f"DashScope MultiModalEmbedding failed: {resp.code} {resp.message}"
                 )
             return resp.output["embeddings"][0]["embedding"]
 
         return await asyncio.to_thread(_call)
 
     async def _embed_multimodal_batch(
-        self, texts: list[str],
+        self,
+        texts: list[str],
     ) -> list[list[float]]:
         """Batch multimodal embedding (sequential, one per call)."""
         results: list[list[float]] = []
@@ -240,7 +238,8 @@ class EmbeddingService:
             return []
 
     async def embed_batch(
-        self, texts: list[str],
+        self,
+        texts: list[str],
     ) -> list[list[float]]:
         """Generate embedding vectors for a batch of texts.
 
@@ -273,7 +272,8 @@ class NullEmbeddingService:
         return []
 
     async def embed_batch(
-        self, texts: list[str],
+        self,
+        texts: list[str],
     ) -> list[list[float]]:
         """Always returns empty lists."""
         return [[] for _ in texts]

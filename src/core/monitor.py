@@ -115,8 +115,11 @@ class MetricsCollector:
         start = self._period_start(period).isoformat()
         grouped = await self.storage.metrics.query_multi(
             event_names=[
-                "agent.response", "agent.metrics",
-                "agent.think.complete", "model.request", "app.agent_error",
+                "agent.response",
+                "agent.metrics",
+                "agent.think.complete",
+                "model.request",
+                "app.agent_error",
             ],
             start=start,
         )
@@ -166,7 +169,7 @@ class MetricsCollector:
             if isinstance(value, int):
                 latencies.append(value)
                 ts = _parse_iso(item.get("timestamp"))
-                day = (ts.date().isoformat() if ts else "unknown")
+                day = ts.date().isoformat() if ts else "unknown"
                 by_day[day].append(value)
 
         daily = [
@@ -205,7 +208,7 @@ class MetricsCollector:
             total_out += tokens_out
 
             ts = _parse_iso(item.get("timestamp"))
-            day = (ts.date().isoformat() if ts else "unknown")
+            day = ts.date().isoformat() if ts else "unknown"
             daily[day]["tokens_in"] += tokens_in
             daily[day]["tokens_out"] += tokens_out
 
@@ -216,8 +219,7 @@ class MetricsCollector:
             "avg_tokens_in_per_request": (total_in / len(events)) if events else 0.0,
             "avg_tokens_out_per_request": (total_out / len(events)) if events else 0.0,
             "daily": [
-                {"date": date, **value}
-                for date, value in sorted(daily.items(), key=lambda x: x[0])
+                {"date": date, **value} for date, value in sorted(daily.items(), key=lambda x: x[0])
             ],
         }
 
@@ -258,8 +260,7 @@ class MetricsCollector:
         )
         queue_events = grouped.get("harness.queue_wait", [])
         queue_waits = [
-            int((item.get("data") or {}).get("queue_wait_ms") or 0)
-            for item in queue_events
+            int((item.get("data") or {}).get("queue_wait_ms") or 0) for item in queue_events
         ]
         activated = grouped.get("harness.tool_activated", [])
         verified = grouped.get("harness.completion_verified", [])

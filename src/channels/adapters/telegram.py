@@ -92,7 +92,9 @@ class TelegramAdapter:
     # ------------------------------------------------------------------
 
     async def _on_message(
-        self, update: Update, context: ContextTypes.DEFAULT_TYPE,
+        self,
+        update: Update,
+        context: ContextTypes.DEFAULT_TYPE,
     ) -> None:
         """Handle incoming Telegram message."""
         if not update.message or not update.message.text:
@@ -102,10 +104,7 @@ class TelegramAdapter:
         sender_id = str(tg_msg.from_user.id) if tg_msg.from_user else "unknown"
 
         # Access control
-        if (
-            self.config.allowed_user_ids
-            and int(sender_id) not in self.config.allowed_user_ids
-        ):
+        if self.config.allowed_user_ids and int(sender_id) not in self.config.allowed_user_ids:
             logger.warning("telegram.unauthorized", sender_id=sender_id)
             return
 
@@ -139,7 +138,8 @@ class TelegramAdapter:
         for attachment in content.attachments:
             if attachment.type == "image" and isinstance(attachment.data, bytes):
                 await self.app.bot.send_photo(
-                    chat_id=int(chat_id), photo=attachment.data,
+                    chat_id=int(chat_id),
+                    photo=attachment.data,
                 )
             elif attachment.type == "file" and isinstance(attachment.data, bytes):
                 await self.app.bot.send_document(
@@ -172,7 +172,9 @@ class TelegramAdapter:
                 now = time.monotonic()
                 if now - last_draft_time >= self._stream_throttle:
                     if not await self._update_draft(
-                        chat_id, draft_id, accumulated,
+                        chat_id,
+                        draft_id,
+                        accumulated,
                     ):
                         consecutive_failures += 1
                         if consecutive_failures >= _MAX_DRAFT_FAILURES:
@@ -200,7 +202,9 @@ class TelegramAdapter:
         if accumulated:
             final_html = md_to_telegram_html(accumulated, partial=False)
             await self._send_final_message(
-                chat_id, final_html, parse_mode="HTML",
+                chat_id,
+                final_html,
+                parse_mode="HTML",
             )
 
     # ------------------------------------------------------------------
@@ -208,7 +212,10 @@ class TelegramAdapter:
     # ------------------------------------------------------------------
 
     async def _update_draft(
-        self, chat_id: str, draft_id: int, text: str,
+        self,
+        chat_id: str,
+        draft_id: int,
+        text: str,
     ) -> bool:
         """Send a draft update.  Returns True on success."""
         try:

@@ -113,7 +113,7 @@ class EpisodicMemory:
         ]
         try:
             response = await self._gateway.chat(llm_messages)
-            title = response.text.strip().strip('"\'')
+            title = response.text.strip().strip("\"'")
             return title[:50] if title else "Untitled conversation"
         except Exception:
             logger.warning("episodic.title_generation_failed", exc_info=True)

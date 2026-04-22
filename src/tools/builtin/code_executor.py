@@ -64,15 +64,14 @@ class CodeExecutorTool:
 
         try:
             # Write code to a temp file and run in subprocess
-            with tempfile.NamedTemporaryFile(
-                mode="w", suffix=".py", delete=False
-            ) as f:
+            with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False) as f:
                 f.write(code)
                 script_path = f.name
 
             try:
                 process = await asyncio.create_subprocess_exec(
-                    "python3", script_path,
+                    "python3",
+                    script_path,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
                     # Isolate: no inherited env except PATH

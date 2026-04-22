@@ -164,10 +164,12 @@ class WeChatIlinkClient:
                     "message_type": 2,
                     "message_state": 2,
                     "context_token": context_token,
-                    "item_list": [{
-                        "type": 1,
-                        "text_item": {"text": text},
-                    }],
+                    "item_list": [
+                        {
+                            "type": 1,
+                            "text_item": {"text": text},
+                        }
+                    ],
                 },
                 "base_info": {"channel_version": self._channel_version},
             },
@@ -220,12 +222,14 @@ class WeChatIlinkClient:
 
     def _request_headers(self, token: str) -> dict[str, str]:
         headers = self._common_headers()
-        headers.update({
-            "Content-Type": "application/json",
-            "AuthorizationType": "ilink_bot_token",
-            "Authorization": f"Bearer {token}",
-            "X-WECHAT-UIN": self._wechat_uin(),
-        })
+        headers.update(
+            {
+                "Content-Type": "application/json",
+                "AuthorizationType": "ilink_bot_token",
+                "Authorization": f"Bearer {token}",
+                "X-WECHAT-UIN": self._wechat_uin(),
+            }
+        )
         return headers
 
     def _common_headers(self) -> dict[str, str]:

@@ -89,9 +89,7 @@ class TaskState:
             lines.extend(f"  - {item}" for item in self.open_items[:MAX_OPEN_ITEMS])
         if self.completed_items:
             lines.append("- Completed items:")
-            lines.extend(
-                f"  - {item}" for item in self.completed_items[:MAX_COMPLETED_ITEMS]
-            )
+            lines.extend(f"  - {item}" for item in self.completed_items[:MAX_COMPLETED_ITEMS])
         if self.activated_tools:
             activated = ", ".join(sorted(self.activated_tools))
             lines.append(f"- Activated tools: {activated}")

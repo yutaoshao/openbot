@@ -180,7 +180,7 @@ class PreferenceRepo:
         async with self._db.get_connection() as conn:
             cursor = await conn.execute(
                 f"""
-                SELECT {', '.join(PREFERENCE_COLUMNS)} FROM preferences
+                SELECT {", ".join(PREFERENCE_COLUMNS)} FROM preferences
                 WHERE user_id = ?
                 ORDER BY category ASC, key ASC
                 """,
@@ -191,7 +191,7 @@ class PreferenceRepo:
                 pref = row_to_dict(row, PREFERENCE_COLUMNS, PREFERENCE_JSON_FIELDS)
                 target_cursor = await conn.execute(
                     f"""
-                    SELECT {', '.join(PREFERENCE_COLUMNS)} FROM preferences
+                    SELECT {", ".join(PREFERENCE_COLUMNS)} FROM preferences
                     WHERE user_id = ? AND category = ? AND key = ?
                     """,
                     (target_user_id, pref["category"], pref["key"]),

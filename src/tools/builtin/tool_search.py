@@ -55,9 +55,7 @@ class ToolSearchTool:
         activate_tools: list[str] = []
         for match in matches:
             activate_tools.append(match["name"])
-            lines.append(
-                f"- {match['name']} ({match['category']}): {match['description']}"
-            )
+            lines.append(f"- {match['name']} ({match['category']}): {match['description']}")
         return ToolResult(
             content="\n".join(lines),
             metadata={"activate_tools": activate_tools},

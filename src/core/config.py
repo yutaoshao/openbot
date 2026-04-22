@@ -113,10 +113,12 @@ class FeishuConfig(BaseModel):
             (self.app_secret_env, self.app_secret),
         ]
         if self.mode == "webhook":
-            required.extend([
-                (self.verification_token_env, self.verification_token),
-                (self.encrypt_key_env, self.encrypt_key),
-            ])
+            required.extend(
+                [
+                    (self.verification_token_env, self.verification_token),
+                    (self.encrypt_key_env, self.encrypt_key),
+                ]
+            )
         return [env_name for env_name, value in required if not value]
 
 

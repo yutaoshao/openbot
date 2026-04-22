@@ -40,6 +40,7 @@ _PII_PATTERNS = [
 # Structlog processors
 # ---------------------------------------------------------------------------
 
+
 def _inject_trace_context(
     logger: structlog.types.WrappedLogger,
     method: str,
@@ -76,10 +77,21 @@ def _sanitize_pii(
 # Structured event names that should be persisted to DB.
 # Non-agent events (app lifecycle, third-party) are excluded to reduce noise.
 _PERSIST_EVENTS = {
-    "task_received", "session_started", "session_ended", "guardrail_blocked",
-    "thought_step", "decision_made", "reflection_updated", "plan_generated",
-    "tool_called", "llm_requested", "llm_completed", "memory_retrieved",
-    "skill_loaded", "task_finished", "task_failed",
+    "task_received",
+    "session_started",
+    "session_ended",
+    "guardrail_blocked",
+    "thought_step",
+    "decision_made",
+    "reflection_updated",
+    "plan_generated",
+    "tool_called",
+    "llm_requested",
+    "llm_completed",
+    "memory_retrieved",
+    "skill_loaded",
+    "task_finished",
+    "task_failed",
 }
 
 # Singleton reference for the DB writer (set by enable_db_logging)
@@ -151,23 +163,33 @@ def _persist_to_db(
 
     # Extract structured fields, put the rest into data JSON
     known_keys = {
-        "event", "level", "timestamp", "surface", "trace_id",
-        "interaction_id", "platform", "iteration", "logger", "logger_name",
+        "event",
+        "level",
+        "timestamp",
+        "surface",
+        "trace_id",
+        "interaction_id",
+        "platform",
+        "iteration",
+        "logger",
+        "logger_name",
     }
     extra = {k: v for k, v in event_dict.items() if k not in known_keys}
     data_json = json.dumps(extra, ensure_ascii=False, default=str) if extra else None
 
-    _db_writer.enqueue({
-        "timestamp": event_dict.get("timestamp", ""),
-        "level": event_dict.get("level", "info"),
-        "event": event_name,
-        "surface": event_dict.get("surface"),
-        "trace_id": event_dict.get("trace_id"),
-        "interaction_id": event_dict.get("interaction_id"),
-        "platform": event_dict.get("platform"),
-        "iteration": event_dict.get("iteration"),
-        "data": data_json,
-    })
+    _db_writer.enqueue(
+        {
+            "timestamp": event_dict.get("timestamp", ""),
+            "level": event_dict.get("level", "info"),
+            "event": event_name,
+            "surface": event_dict.get("surface"),
+            "trace_id": event_dict.get("trace_id"),
+            "interaction_id": event_dict.get("interaction_id"),
+            "platform": event_dict.get("platform"),
+            "iteration": event_dict.get("iteration"),
+            "data": data_json,
+        }
+    )
 
     return event_dict
 
@@ -190,6 +212,7 @@ def disable_db_logging() -> None:
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
+
 
 def setup_logging(
     level: str = "INFO",

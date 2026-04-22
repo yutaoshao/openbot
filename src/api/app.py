@@ -61,6 +61,7 @@ def create_api_app(
     The ``agent`` dependency is optional at startup time to allow running
     API smoke tests and wiring runtime dependencies in the application layer.
     """
+
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
         logger.info("api.starting")
@@ -94,7 +95,8 @@ def create_api_app(
 
     @app.exception_handler(Exception)
     async def unhandled_exception_handler(
-        request: Request, exc: Exception,
+        request: Request,
+        exc: Exception,
     ) -> JSONResponse:
         logger.exception("api.unhandled_exception", path=str(request.url.path))
         return JSONResponse(

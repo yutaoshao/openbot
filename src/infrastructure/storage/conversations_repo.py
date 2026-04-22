@@ -96,7 +96,7 @@ class ConversationRepo:
         async with self._db.get_connection() as conn:
             cursor = await conn.execute(
                 f"""
-                SELECT {', '.join(CONVERSATION_COLUMNS)} FROM conversations
+                SELECT {", ".join(CONVERSATION_COLUMNS)} FROM conversations
                 ORDER BY updated_at DESC
                 LIMIT ? OFFSET ?
                 """,
@@ -114,7 +114,7 @@ class ConversationRepo:
         async with self._db.get_connection() as conn:
             cursor = await conn.execute(
                 f"""
-                SELECT {', '.join(CONVERSATION_COLUMNS)} FROM conversations
+                SELECT {", ".join(CONVERSATION_COLUMNS)} FROM conversations
                 WHERE title LIKE ? OR summary LIKE ?
                 ORDER BY updated_at DESC
                 LIMIT ?

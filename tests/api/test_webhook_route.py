@@ -57,10 +57,13 @@ def _client(monkeypatch: Any) -> tuple[TestClient, _RecordingMsgHub]:
 def test_feishu_webhook_returns_challenge(monkeypatch: Any) -> None:
     client, _ = _client(monkeypatch)
 
-    response = client.post("/webhook/feishu", json={
-        "challenge": "challenge_test",
-        "token": "verify_test",
-    })
+    response = client.post(
+        "/webhook/feishu",
+        json={
+            "challenge": "challenge_test",
+            "token": "verify_test",
+        },
+    )
 
     assert response.status_code == 200
     assert response.json() == {"challenge": "challenge_test"}
@@ -69,10 +72,13 @@ def test_feishu_webhook_returns_challenge(monkeypatch: Any) -> None:
 def test_feishu_webhook_rejects_invalid_token(monkeypatch: Any) -> None:
     client, _ = _client(monkeypatch)
 
-    response = client.post("/webhook/feishu", json={
-        "challenge": "challenge_test",
-        "token": "wrong_token",
-    })
+    response = client.post(
+        "/webhook/feishu",
+        json={
+            "challenge": "challenge_test",
+            "token": "wrong_token",
+        },
+    )
 
     assert response.status_code == 403
     assert response.json()["error"] == "Invalid Feishu verification token."
@@ -80,21 +86,23 @@ def test_feishu_webhook_rejects_invalid_token(monkeypatch: Any) -> None:
 
 def test_feishu_webhook_rejects_invalid_signature(monkeypatch: Any) -> None:
     client, _ = _client(monkeypatch)
-    payload = _encrypt_payload({
-        "header": {
-            "event_type": "im.message.receive_v1",
-            "token": "verify_test",
-        },
-        "event": {
-            "sender": {"sender_id": {"open_id": "ou_test"}},
-            "message": {
-                "message_id": "om_123",
-                "chat_id": "oc_456",
-                "message_type": "text",
-                "content": json.dumps({"text": "hello"}),
+    payload = _encrypt_payload(
+        {
+            "header": {
+                "event_type": "im.message.receive_v1",
+                "token": "verify_test",
             },
-        },
-    })
+            "event": {
+                "sender": {"sender_id": {"open_id": "ou_test"}},
+                "message": {
+                    "message_id": "om_123",
+                    "chat_id": "oc_456",
+                    "message_type": "text",
+                    "content": json.dumps({"text": "hello"}),
+                },
+            },
+        }
+    )
 
     response = client.post(
         "/webhook/feishu",
@@ -113,21 +121,23 @@ def test_feishu_webhook_rejects_invalid_signature(monkeypatch: Any) -> None:
 
 def test_feishu_webhook_publishes_text_message(monkeypatch: Any) -> None:
     client, msg_hub = _client(monkeypatch)
-    payload = _encrypt_payload({
-        "header": {
-            "event_type": "im.message.receive_v1",
-            "token": "verify_test",
-        },
-        "event": {
-            "sender": {"sender_id": {"open_id": "ou_test"}},
-            "message": {
-                "message_id": "om_123",
-                "chat_id": "oc_456",
-                "message_type": "text",
-                "content": json.dumps({"text": "@_user_1 hello"}),
+    payload = _encrypt_payload(
+        {
+            "header": {
+                "event_type": "im.message.receive_v1",
+                "token": "verify_test",
             },
-        },
-    })
+            "event": {
+                "sender": {"sender_id": {"open_id": "ou_test"}},
+                "message": {
+                    "message_id": "om_123",
+                    "chat_id": "oc_456",
+                    "message_type": "text",
+                    "content": json.dumps({"text": "@_user_1 hello"}),
+                },
+            },
+        }
+    )
     headers = {
         "content-type": "application/json",
         "x-lark-request-timestamp": "123",

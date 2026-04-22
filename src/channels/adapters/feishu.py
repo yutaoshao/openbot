@@ -189,10 +189,12 @@ class FeishuAdapter:
     def _build_card(text: str) -> dict[str, Any]:
         return {
             "config": {"wide_screen_mode": True},
-            "elements": [{
-                "tag": "div",
-                "text": {"tag": "lark_md", "content": text},
-            }],
+            "elements": [
+                {
+                    "tag": "div",
+                    "text": {"tag": "lark_md", "content": text},
+                }
+            ],
         }
 
     @staticmethod

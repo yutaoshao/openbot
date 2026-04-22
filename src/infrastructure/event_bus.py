@@ -73,9 +73,7 @@ class EventBus:
             *(self._safe_call(handler, event, data) for handler in matched_handlers),
         )
 
-    async def _safe_call(
-        self, handler: EventHandler, event: str, data: dict[str, Any]
-    ) -> None:
+    async def _safe_call(self, handler: EventHandler, event: str, data: dict[str, Any]) -> None:
         """Call handler with error isolation."""
         try:
             await handler(data)

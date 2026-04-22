@@ -149,9 +149,7 @@ class RerankerService:
         if not items:
             return []
 
-        documents = [
-            str(item.get(content_key, ""))[:2000] for item in items
-        ]
+        documents = [str(item.get(content_key, ""))[:2000] for item in items]
 
         results = await self.rerank(query, documents, top_n)
 

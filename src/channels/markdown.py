@@ -150,15 +150,14 @@ def _convert(text: str, *, partial: bool) -> str:
 
 
 def _flush_code_block(
-    lang: str, lines: list[str], output: list[str],
+    lang: str,
+    lines: list[str],
+    output: list[str],
 ) -> None:
     """Render a code block as <pre><code>...</code></pre>."""
     escaped = html_escape("\n".join(lines))
     if lang:
-        output.append(
-            f'<pre><code class="language-{html_escape(lang)}">'
-            f"{escaped}</code></pre>"
-        )
+        output.append(f'<pre><code class="language-{html_escape(lang)}">{escaped}</code></pre>')
     else:
         output.append(f"<pre><code>{escaped}</code></pre>")
 
@@ -317,7 +316,7 @@ def _display_width(text: str) -> int:
         cp = ord(ch)
         # CJK Unified Ideographs, CJK Compat, Fullwidth forms, etc.
         if (
-            0x1100 <= cp <= 0x115F   # Hangul Jamo
+            0x1100 <= cp <= 0x115F  # Hangul Jamo
             or 0x2E80 <= cp <= 0x9FFF  # CJK radicals through Unified Ideographs
             or 0xAC00 <= cp <= 0xD7AF  # Hangul syllables
             or 0xF900 <= cp <= 0xFAFF  # CJK Compat Ideographs

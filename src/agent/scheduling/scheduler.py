@@ -208,7 +208,6 @@ class AgentScheduler:
         if updated is not None:
             logger.info("scheduler.schedule_resumed", schedule_id=schedule_id)
 
-
     async def _execute_schedule(self, schedule_id: str) -> None:
         """Called by APScheduler when a cron trigger fires."""
         sched = await self._storage.schedules.get(schedule_id)
@@ -259,13 +258,16 @@ class AgentScheduler:
                 next_run_at=next_run,
             )
 
-            await self._event_bus.publish("scheduler.executed", {
-                "schedule_id": schedule_id,
-                "name": sched["name"],
-                "success": True,
-                "content_preview": result.content[:200],
-                "latency_ms": result.latency_ms,
-            })
+            await self._event_bus.publish(
+                "scheduler.executed",
+                {
+                    "schedule_id": schedule_id,
+                    "name": sched["name"],
+                    "success": True,
+                    "content_preview": result.content[:200],
+                    "latency_ms": result.latency_ms,
+                },
+            )
 
             logger.info(
                 "scheduler.executed",
@@ -278,12 +280,14 @@ class AgentScheduler:
                 "scheduler.execution_failed",
                 schedule_id=schedule_id,
             )
-            await self._event_bus.publish("scheduler.executed", {
-                "schedule_id": schedule_id,
-                "name": sched["name"],
-                "success": False,
-            })
-
+            await self._event_bus.publish(
+                "scheduler.executed",
+                {
+                    "schedule_id": schedule_id,
+                    "name": sched["name"],
+                    "success": False,
+                },
+            )
 
     def _add_job(self, sched: dict[str, Any]) -> None:
         """Register an APScheduler job from a schedule dict."""

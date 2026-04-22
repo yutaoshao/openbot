@@ -38,6 +38,7 @@ DEFAULT_MAX_SOURCES_PER_ROUND = 3  # top URLs to deep-fetch per round
 # Data models
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class SearchResult:
     """A single search hit."""
@@ -80,6 +81,7 @@ class ResearchReport:
 # ResearchProvider protocol
 # ---------------------------------------------------------------------------
 
+
 @runtime_checkable
 class ResearchProvider(Protocol):
     """Pluggable backend for search and content extraction."""
@@ -97,6 +99,7 @@ class ResearchProvider(Protocol):
 # Built-in provider: Tavily (web_search + web_fetch tools)
 # ---------------------------------------------------------------------------
 
+
 class TavilyResearchProvider:
     """ResearchProvider backed by WebSearchTool and WebFetchTool.
 
@@ -112,20 +115,24 @@ class TavilyResearchProvider:
         self._fetch_tool = WebFetchTool()
 
     async def search(self, query: str, max_results: int = 5) -> list[SearchResult]:
-        result = await self._search_tool.execute({
-            "query": query,
-            "max_results": max_results,
-        })
+        result = await self._search_tool.execute(
+            {
+                "query": query,
+                "max_results": max_results,
+            }
+        )
         if result.is_error:
             logger.warning("research.search_error", query=query, error=result.content)
             return []
         return self._parse_search_results(result.content)
 
     async def fetch(self, url: str, max_length: int = 8000) -> str:
-        result = await self._fetch_tool.execute({
-            "url": url,
-            "max_length": max_length,
-        })
+        result = await self._fetch_tool.execute(
+            {
+                "url": url,
+                "max_length": max_length,
+            }
+        )
         if result.is_error:
             logger.warning("research.fetch_error", url=url, error=result.content)
             return ""
@@ -148,17 +155,20 @@ class TavilyResearchProvider:
             if line[0].isdigit() and ". [" in line:
                 # Save previous
                 if current_url:
-                    results.append(SearchResult(
-                        title=current_title, url=current_url,
-                        snippet=current_snippet.strip(),
-                    ))
+                    results.append(
+                        SearchResult(
+                            title=current_title,
+                            url=current_url,
+                            snippet=current_snippet.strip(),
+                        )
+                    )
                 # Parse new
                 try:
                     bracket_start = line.index("[") + 1
                     bracket_end = line.index("](")
                     paren_end = line.index(")", bracket_end + 2)
                     current_title = line[bracket_start:bracket_end]
-                    current_url = line[bracket_end + 2:paren_end]
+                    current_url = line[bracket_end + 2 : paren_end]
                     current_snippet = ""
                 except ValueError:
                     current_title = line
@@ -171,10 +181,13 @@ class TavilyResearchProvider:
 
         # Don't forget the last one
         if current_url:
-            results.append(SearchResult(
-                title=current_title, url=current_url,
-                snippet=current_snippet.strip(),
-            ))
+            results.append(
+                SearchResult(
+                    title=current_title,
+                    url=current_url,
+                    snippet=current_snippet.strip(),
+                )
+            )
 
         return results
 
@@ -182,6 +195,7 @@ class TavilyResearchProvider:
 # ---------------------------------------------------------------------------
 # Core engine
 # ---------------------------------------------------------------------------
+
 
 class DeepResearch:
     """Multi-round deep research engine.
@@ -277,7 +291,11 @@ class DeepResearch:
 
             # Extract findings via LLM
             new_findings, usage = await self._extract_findings(
-                topic, round_num, round_results, fetched_contents, all_findings,
+                topic,
+                round_num,
+                round_results,
+                fetched_contents,
+                all_findings,
             )
             total_tokens_in += usage.get("tokens_in", 0)
             total_tokens_out += usage.get("tokens_out", 0)
@@ -304,13 +322,16 @@ class DeepResearch:
                 total_findings=len(all_findings),
             )
 
-            await self._event_bus.publish("research.round", {
-                "topic": topic,
-                "round": round_num,
-                "new_findings": len(new_findings),
-                "total_findings": len(all_findings),
-                "saturated": False,
-            })
+            await self._event_bus.publish(
+                "research.round",
+                {
+                    "topic": topic,
+                    "round": round_num,
+                    "new_findings": len(new_findings),
+                    "total_findings": len(all_findings),
+                    "saturated": False,
+                },
+            )
 
         # Step 3: Synthesise report
         synthesis, usage = await self._synthesise(topic, all_findings)
@@ -337,14 +358,17 @@ class DeepResearch:
             saturated=saturated,
         )
 
-        await self._event_bus.publish("research.complete", {
-            "topic": topic,
-            "rounds": rounds_executed,
-            "findings": len(all_findings),
-            "sources": len(sources),
-            "saturated": saturated,
-            "latency_ms": latency_ms,
-        })
+        await self._event_bus.publish(
+            "research.complete",
+            {
+                "topic": topic,
+                "rounds": rounds_executed,
+                "findings": len(all_findings),
+                "sources": len(sources),
+                "saturated": saturated,
+                "latency_ms": latency_ms,
+            },
+        )
 
         logger.info(
             "research.complete",
@@ -362,7 +386,9 @@ class DeepResearch:
     # ------------------------------------------------------------------
 
     async def _plan_angles(
-        self, topic: str, count: int,
+        self,
+        topic: str,
+        count: int,
     ) -> tuple[list[str], dict[str, Any]]:
         """Use LLM to generate diverse search angles for the topic."""
         messages = [
@@ -402,9 +428,8 @@ class DeepResearch:
         existing_summary = ""
         if existing_findings:
             existing_points = [f"- {f.content[:150]}" for f in existing_findings[:20]]
-            existing_summary = (
-                "Already known findings (avoid duplicates):\n"
-                + "\n".join(existing_points)
+            existing_summary = "Already known findings (avoid duplicates):\n" + "\n".join(
+                existing_points
             )
 
         # Build source material
@@ -421,10 +446,7 @@ class DeepResearch:
         for query, sr in search_results:
             if not any(sr.url == f[1].url for f in fetched):
                 source_parts.append(
-                    f"## Source: {sr.title}\n"
-                    f"URL: {sr.url}\n"
-                    f"Query: {query}\n"
-                    f"Snippet: {sr.snippet}\n"
+                    f"## Source: {sr.title}\nURL: {sr.url}\nQuery: {query}\nSnippet: {sr.snippet}\n"
                 )
 
         messages = [
@@ -459,16 +481,16 @@ class DeepResearch:
         return findings, usage
 
     async def _synthesise(
-        self, topic: str, findings: list[Finding],
+        self,
+        topic: str,
+        findings: list[Finding],
     ) -> tuple[str, dict[str, Any]]:
         """Use LLM to cross-validate findings and produce a structured report."""
         if not findings:
             return "No findings to synthesise.", {"tokens_in": 0, "tokens_out": 0}
 
         # Group findings by source for cross-validation
-        findings_text = "\n".join(
-            f"- [{f.source_title}] {f.content}" for f in findings
-        )
+        findings_text = "\n".join(f"- [{f.source_title}] {f.content}" for f in findings)
 
         messages = [
             {
@@ -509,7 +531,7 @@ class DeepResearch:
         start = (round_num - 1) * per_round
         if start >= len(angles):
             return []
-        return angles[start:start + per_round]
+        return angles[start : start + per_round]
 
     @staticmethod
     def _parse_json_list(text: str, *, fallback_topic: str = "") -> list[str]:
@@ -560,19 +582,22 @@ class DeepResearch:
             content = item.get("content", "")
             if not content:
                 continue
-            findings.append(Finding(
-                content=content,
-                source_url=item.get("source_url", ""),
-                source_title=item.get("source_title", ""),
-                query="",
-                round=round_num,
-            ))
+            findings.append(
+                Finding(
+                    content=content,
+                    source_url=item.get("source_url", ""),
+                    source_title=item.get("source_title", ""),
+                    query="",
+                    round=round_num,
+                )
+            )
         return findings
 
 
 # ---------------------------------------------------------------------------
 # Utilities
 # ---------------------------------------------------------------------------
+
 
 def _deduplicate_sources(findings: list[Finding]) -> list[dict[str, str]]:
     """Build a deduplicated list of sources from findings."""
@@ -581,8 +606,10 @@ def _deduplicate_sources(findings: list[Finding]) -> list[dict[str, str]]:
     for f in findings:
         if f.source_url and f.source_url not in seen:
             seen.add(f.source_url)
-            sources.append({
-                "url": f.source_url,
-                "title": f.source_title,
-            })
+            sources.append(
+                {
+                    "url": f.source_url,
+                    "title": f.source_title,
+                }
+            )
     return sources

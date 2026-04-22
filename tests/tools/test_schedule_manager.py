@@ -46,7 +46,7 @@ class _FakeScheduler:
         items = list(self.items.values())
         if status:
             items = [item for item in items if item["status"] == status]
-        return items[offset:offset + limit]
+        return items[offset : offset + limit]
 
     async def get_schedule(self, schedule_id: str) -> dict[str, Any] | None:
         return self.items.get(schedule_id)

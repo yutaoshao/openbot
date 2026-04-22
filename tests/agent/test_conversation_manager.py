@@ -38,10 +38,12 @@ class _FakeMessageRepo:
 
     async def add(self, **kwargs: object) -> None:
         conversation_id = str(kwargs["conversation_id"])
-        self._messages.setdefault(conversation_id, []).append({
-            "role": str(kwargs["role"]),
-            "content": str(kwargs["content"]),
-        })
+        self._messages.setdefault(conversation_id, []).append(
+            {
+                "role": str(kwargs["role"]),
+                "content": str(kwargs["content"]),
+            }
+        )
 
     async def get_by_conversation(self, conversation_id: str) -> list[dict[str, str]]:
         return list(self._messages.get(conversation_id, []))

@@ -53,7 +53,7 @@ class MetricsRepo:
         async with self._db.get_connection() as conn:
             cursor = await conn.execute(
                 f"""
-                SELECT {', '.join(METRIC_COLUMNS)} FROM metrics
+                SELECT {", ".join(METRIC_COLUMNS)} FROM metrics
                 {where}
                 ORDER BY timestamp DESC
                 LIMIT ?
@@ -81,8 +81,8 @@ class MetricsRepo:
         async with self._db.get_connection() as conn:
             cursor = await conn.execute(
                 f"""
-                SELECT {', '.join(METRIC_COLUMNS)} FROM metrics
-                WHERE {' AND '.join(clauses)}
+                SELECT {", ".join(METRIC_COLUMNS)} FROM metrics
+                WHERE {" AND ".join(clauses)}
                 ORDER BY timestamp DESC
                 LIMIT ?
                 """,

@@ -72,14 +72,16 @@ class _FakeAsyncClient:
 async def test_refresh_token_stores_token_and_expiry(monkeypatch: Any) -> None:
     _set_feishu_env(monkeypatch)
     api_client = FeishuApiClient(FeishuConfig(enabled=True))
-    api_client.client = _FakeAsyncClient(post_results=[
-        _response(
-            "POST",
-            "https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal",
-            200,
-            json_body={"code": 0, "tenant_access_token": "tenant_token", "expire": 7200},
-        ),
-    ])
+    api_client.client = _FakeAsyncClient(
+        post_results=[
+            _response(
+                "POST",
+                "https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal",
+                200,
+                json_body={"code": 0, "tenant_access_token": "tenant_token", "expire": 7200},
+            ),
+        ]
+    )
 
     before = time.monotonic()
     token = await api_client.refresh_token(force=True)
@@ -92,14 +94,16 @@ async def test_refresh_token_stores_token_and_expiry(monkeypatch: Any) -> None:
 async def test_refresh_token_raises_on_business_error(monkeypatch: Any) -> None:
     _set_feishu_env(monkeypatch)
     api_client = FeishuApiClient(FeishuConfig(enabled=True))
-    api_client.client = _FakeAsyncClient(post_results=[
-        _response(
-            "POST",
-            "https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal",
-            200,
-            json_body={"code": 999, "msg": "bad credentials"},
-        ),
-    ])
+    api_client.client = _FakeAsyncClient(
+        post_results=[
+            _response(
+                "POST",
+                "https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal",
+                200,
+                json_body={"code": 999, "msg": "bad credentials"},
+            ),
+        ]
+    )
 
     try:
         await api_client.refresh_token(force=True)
@@ -112,20 +116,22 @@ async def test_refresh_token_raises_on_business_error(monkeypatch: Any) -> None:
 async def test_refresh_token_raises_on_http_error(monkeypatch: Any) -> None:
     _set_feishu_env(monkeypatch)
     api_client = FeishuApiClient(FeishuConfig(enabled=True))
-    api_client.client = _FakeAsyncClient(post_results=[
-        _response(
-            "POST",
-            "https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal",
-            503,
-            text="service unavailable",
-        ),
-        _response(
-            "POST",
-            "https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal",
-            503,
-            text="service unavailable",
-        ),
-    ])
+    api_client.client = _FakeAsyncClient(
+        post_results=[
+            _response(
+                "POST",
+                "https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal",
+                503,
+                text="service unavailable",
+            ),
+            _response(
+                "POST",
+                "https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal",
+                503,
+                text="service unavailable",
+            ),
+        ]
+    )
 
     try:
         await api_client.refresh_token(force=True)

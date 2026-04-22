@@ -76,7 +76,7 @@ class MessageRepo:
         offset: int = 0,
     ) -> list[dict[str, Any]]:
         sql = f"""
-            SELECT {', '.join(MESSAGE_COLUMNS)} FROM messages
+            SELECT {", ".join(MESSAGE_COLUMNS)} FROM messages
             WHERE conversation_id = ?
             ORDER BY created_at ASC
         """
@@ -97,7 +97,7 @@ class MessageRepo:
         async with self._db.get_connection() as conn:
             cursor = await conn.execute(
                 f"""
-                SELECT {', '.join(MESSAGE_COLUMNS)} FROM messages
+                SELECT {", ".join(MESSAGE_COLUMNS)} FROM messages
                 WHERE conversation_id = ?
                 ORDER BY created_at DESC
                 """,
@@ -120,7 +120,7 @@ class MessageRepo:
         async with self._db.get_connection() as conn:
             cursor = await conn.execute(
                 f"""
-                SELECT m.{', m.'.join(MESSAGE_COLUMNS)}
+                SELECT m.{", m.".join(MESSAGE_COLUMNS)}
                 FROM messages AS m
                 JOIN conversations AS c ON c.id = m.conversation_id
                 WHERE c.platform IN ({placeholders}) AND c.user_id = ?

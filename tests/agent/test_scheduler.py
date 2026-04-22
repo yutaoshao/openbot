@@ -60,8 +60,7 @@ class _FakeEventBus:
 class _FakeMsgHub:
     def get_adapter(self, platform: str) -> Any | None:
         raise AssertionError(
-            "wechat proactive send should be blocked "
-            f"before adapter lookup: {platform}"
+            f"wechat proactive send should be blocked before adapter lookup: {platform}"
         )
 
 

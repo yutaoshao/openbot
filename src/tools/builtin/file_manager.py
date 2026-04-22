@@ -180,17 +180,12 @@ class FileManagerTool:
             if not lines:
                 return ToolResult(
                     content=(
-                        f"Workspace root: {self.workspace_root}\n"
-                        f"Path: {path}\n"
-                        "(empty directory)"
+                        f"Workspace root: {self.workspace_root}\nPath: {path}\n(empty directory)"
                     ),
                     metadata={"path": path, "workspace_root": self.workspace_root},
                 )
 
-            header = (
-                f"Workspace root: {self.workspace_root}\n"
-                f"Path: {path}\n"
-            )
+            header = f"Workspace root: {self.workspace_root}\nPath: {path}\n"
             return ToolResult(
                 content=header + "\n".join(lines),
                 metadata={
