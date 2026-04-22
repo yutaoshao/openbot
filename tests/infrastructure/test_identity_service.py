@@ -107,7 +107,7 @@ async def test_bind_identity_records_platform_under_single_user_scope() -> None:
     service = IdentityService(storage)  # type: ignore[arg-type]
 
     bound = await service.bind_identity(
-        user_id="new-user",
+        user_id=SINGLE_USER_ID,
         platform="feishu",
         platform_user_id="ou_1",
     )

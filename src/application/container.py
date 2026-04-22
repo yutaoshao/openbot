@@ -19,6 +19,7 @@ from src.tools.registry import ToolRegistry
 from .bootstrap import init_runtime_services, register_builtin_tools
 from .lifecycle import start_application, stop_application, wait_for_api_ready
 from .message_dispatch import on_message_receive
+from .settings import SettingsService
 
 logger = get_logger(__name__)
 
@@ -29,7 +30,8 @@ class Application:
     def __init__(self) -> None:
         import asyncio
 
-        self.config = load_config()
+        self.config_path = "config.yaml"
+        self.config = load_config(self.config_path)
         self._shutdown_event = asyncio.Event()
         self.event_bus = EventBus()
         self.model_gateway = ModelGateway(self.config.model, self.event_bus)
@@ -39,6 +41,7 @@ class Application:
         )
         self.storage = Storage(self.database)
         self.identity_service = IdentityService(self.storage)
+        self.settings_service = SettingsService(self.config_path)
         self.tool_registry = ToolRegistry()
         init_runtime_services(self)
         register_builtin_tools(self)

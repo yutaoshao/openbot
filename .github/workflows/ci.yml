@@ -26,6 +26,10 @@ jobs:
       - name: Install dependencies
         run: uv sync --frozen
 
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
       - name: Lint
         run: uv run ruff check .
 
@@ -34,3 +38,7 @@ jobs:
 
       - name: Test
         run: uv run pytest -q --tb=short
+
+      - name: Frontend build
+        working-directory: frontend
+        run: npm run build

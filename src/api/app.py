@@ -10,6 +10,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 
+from src.api.local_access import enforce_local_request
 from src.api.routes.chat import router as chat_router
 from src.api.routes.conversations import router as conversations_router
 from src.api.routes.identities import router as identities_router
@@ -28,6 +29,7 @@ from src.core.logging import get_logger
 if TYPE_CHECKING:
     from src.agent.agent import Agent
     from src.agent.scheduling import AgentScheduler
+    from src.application.settings import SettingsService
     from src.channels.adapters.web import WebAdapter
     from src.channels.hub import MsgHub
     from src.core.config import AppConfig
@@ -55,6 +57,7 @@ def create_api_app(
     tool_registry: Any | None = None,
     monitor: Any | None = None,
     identity_service: IdentityService | None = None,
+    settings_service: SettingsService | None = None,
 ) -> FastAPI:
     """Create a FastAPI app instance.
 
@@ -72,12 +75,16 @@ def create_api_app(
     app.state.agent = agent
     app.state.storage = storage
     app.state.config = config
+    app.state.runtime_config = config
     app.state.scheduler = scheduler
     app.state.msg_hub = msg_hub
     app.state.web_adapter = web_adapter
     app.state.tool_registry = tool_registry
     app.state.monitor = monitor
     app.state.identity_service = identity_service
+    app.state.settings_service = settings_service
+    app.state.restart_required = False
+    app.state.restart_reasons = []
     # Populated later by Application.start() for webhook routes
     app.state.telegram = None
     app.state.feishu = None
@@ -92,6 +99,7 @@ def create_api_app(
         allow_methods=["*"],
         allow_headers=["*"],
     )
+    app.middleware("http")(enforce_local_request)
 
     @app.exception_handler(Exception)
     async def unhandled_exception_handler(

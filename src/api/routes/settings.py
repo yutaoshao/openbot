@@ -2,25 +2,21 @@
 
 from __future__ import annotations
 
-from copy import deepcopy
-from typing import Any
+from typing import TYPE_CHECKING, Annotated, Any
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Body, HTTPException, Request
+from pydantic import ValidationError
 
 from src.api.runtime_status import build_runtime_status
-from src.core.config import AppConfig
+from src.api.schemas import SettingsUpdateRequest
+from src.core.logging import get_logger
+
+if TYPE_CHECKING:
+    from src.application.settings import SettingsService
+    from src.core.config import AppConfig
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
-
-
-def _deep_update(base: dict[str, Any], patch: dict[str, Any]) -> dict[str, Any]:
-    result = deepcopy(base)
-    for key, value in patch.items():
-        if isinstance(value, dict) and isinstance(result.get(key), dict):
-            result[key] = _deep_update(result[key], value)
-        else:
-            result[key] = value
-    return result
+logger = get_logger(__name__)
 
 
 def _get_config(request: Request) -> AppConfig:
@@ -33,27 +29,85 @@ def _get_config(request: Request) -> AppConfig:
     return config
 
 
+def _get_settings_service(request: Request) -> SettingsService:
+    service = getattr(request.app.state, "settings_service", None)
+    if service is None:
+        raise HTTPException(
+            status_code=503,
+            detail="Settings persistence is not initialized for API requests.",
+        )
+    return service
+
+
+def _current_restart_notice(request: Request) -> tuple[bool, list[str]]:
+    return (
+        bool(getattr(request.app.state, "restart_required", False)),
+        list(getattr(request.app.state, "restart_reasons", [])),
+    )
+
+
+def _set_restart_notice(request: Request, restart_reasons: list[str]) -> None:
+    if not restart_reasons:
+        return
+    existing = set(getattr(request.app.state, "restart_reasons", []))
+    request.app.state.restart_required = True
+    request.app.state.restart_reasons = [
+        reason for reason in ("telegram", "model") if reason in existing | set(restart_reasons)
+    ]
+
+
+def _config_snapshot(request: Request, config: AppConfig) -> dict[str, Any]:
+    service = getattr(request.app.state, "settings_service", None)
+    snapshot = service.snapshot(config) if service else config.model_dump()
+    restart_required, restart_reasons = _current_restart_notice(request)
+    snapshot["runtime"] = build_runtime_status(request.app)
+    snapshot["restart_required"] = restart_required
+    snapshot["restart_reasons"] = restart_reasons
+    return snapshot
+
+
+def _settings_body(snapshot: dict[str, Any]) -> dict[str, Any]:
+    return {
+        key: value
+        for key, value in snapshot.items()
+        if key not in {"runtime", "restart_required", "restart_reasons"}
+    }
+
+
 @router.get("")
 async def get_settings(request: Request) -> dict[str, Any]:
     config = _get_config(request)
-    settings = config.model_dump()
-    settings["runtime"] = build_runtime_status(request.app)
-    return settings
+    return _config_snapshot(request, config)
 
 
 @router.put("")
-async def update_settings(request: Request, payload: dict[str, Any]) -> dict[str, Any]:
+async def update_settings(
+    request: Request,
+    payload: Annotated[Any, Body(...)],
+) -> dict[str, Any]:
     config = _get_config(request)
-    current = config.model_dump()
-    merged = _deep_update(current, payload)
+    service = _get_settings_service(request)
 
     try:
-        updated = AppConfig(**merged)
-    except Exception as e:  # pydantic validation error types vary
-        raise HTTPException(status_code=400, detail=f"Invalid settings payload: {e}") from e
+        patch = SettingsUpdateRequest.model_validate(payload).model_dump(exclude_none=True)
+    except ValidationError as exc:
+        raise HTTPException(status_code=400, detail=f"Invalid settings payload: {exc}") from exc
 
-    request.app.state.config = updated
+    try:
+        result = service.update_config(config, patch)
+    except ValidationError as exc:
+        raise HTTPException(status_code=400, detail=f"Invalid settings payload: {exc}") from exc
+    except OSError as exc:
+        logger.exception("settings.persist_failed")
+        raise HTTPException(status_code=500, detail="Failed to persist settings.") from exc
+
+    request.app.state.config = result.config
+    _set_restart_notice(request, result.restart_reasons)
+    snapshot = _config_snapshot(request, result.config)
     return {
         "status": "updated",
-        "settings": updated.model_dump(),
+        "settings": _settings_body(snapshot),
+        "runtime": snapshot["runtime"],
+        "restart_required": snapshot["restart_required"],
+        "restart_reasons": snapshot["restart_reasons"],
     }

@@ -51,7 +51,7 @@ def _client(monkeypatch: Any) -> tuple[TestClient, _RecordingMsgHub]:
     adapter = FeishuAdapter(config.feishu, msg_hub)  # type: ignore[arg-type]
     app = create_api_app(config=config)
     app.state.feishu = adapter
-    return TestClient(app), msg_hub
+    return TestClient(app, client=("127.0.0.1", 50000)), msg_hub
 
 
 def test_feishu_webhook_returns_challenge(monkeypatch: Any) -> None:

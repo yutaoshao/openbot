@@ -12,6 +12,7 @@ from src.api.schemas import (
     KnowledgeItem,
     KnowledgeUpdateRequest,
 )
+from src.core.user_scope import SINGLE_USER_ID
 
 if TYPE_CHECKING:
     from src.infrastructure.storage import Storage
@@ -68,7 +69,7 @@ async def create_knowledge(
 
     await storage.knowledge.add(
         id=knowledge_id,
-        user_id="",
+        user_id=SINGLE_USER_ID,
         category=payload.category,
         content=payload.content,
         tags=payload.tags,

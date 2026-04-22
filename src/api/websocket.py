@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
+from src.api.local_access import websocket_requires_local_access
 from src.channels.types import MessageContent, UnifiedMessage
 from src.core.logging import get_logger
 
@@ -36,6 +37,10 @@ async def ws_chat(
 
     Server streams back JSON chunks via ``WebAdapter.send_streaming()``.
     """
+    if websocket_requires_local_access(websocket):
+        await websocket.close(code=1008, reason="local-only")
+        return
+
     await websocket.accept()
 
     msg_hub: MsgHub | None = _state_or_none(websocket, "msg_hub")

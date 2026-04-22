@@ -1,13 +1,20 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
+import pytest
 from fastapi.testclient import TestClient
+from starlette.websockets import WebSocketDisconnect
 
 from src.api.app import create_api_app
-from src.core.config import AppConfig, WeChatConfig
+from src.application.settings import SettingsService
+from src.core.config import AppConfig, WeChatConfig, load_config
+from src.core.user_scope import SINGLE_USER_ID
 from src.tools.registry import ToolRegistry, ToolResult
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 class _FakeKnowledgeRepo:
@@ -34,6 +41,7 @@ class _FakeKnowledgeRepo:
     async def add(self, **kwargs: Any) -> None:
         item = {
             "id": kwargs["id"],
+            "user_id": kwargs.get("user_id", ""),
             "source_conversation_id": kwargs.get("source_conversation_id"),
             "category": kwargs["category"],
             "content": kwargs["content"],
@@ -182,13 +190,17 @@ class _FakeIdentityService:
     async def bind_identity(
         self,
         *,
-        user_id: str,
+        user_id: str | None = None,
         platform: str,
         platform_user_id: str,
     ) -> dict[str, str]:
+        if user_id and user_id != SINGLE_USER_ID:
+            raise ValueError(
+                "OpenBot runs in local single-user mode; only local-single-user is supported.",
+            )
         item = {
             "id": f"{platform}-{platform_user_id}",
-            "user_id": user_id,
+            "user_id": SINGLE_USER_ID,
             "platform": platform,
             "platform_user_id": platform_user_id,
             "created_at": "2026-03-19T00:00:00Z",
@@ -255,6 +267,8 @@ def _client(
     scheduler: Any | None = None,
     identity_service: _FakeIdentityService | None = None,
     config: AppConfig | None = None,
+    settings_service: SettingsService | None = None,
+    client_host: str = "127.0.0.1",
 ) -> TestClient:
     storage = storage or _FakeStorage()
     registry = ToolRegistry()
@@ -267,12 +281,36 @@ def _client(
         config=config,
         scheduler=scheduler,
         identity_service=identity_service,
+        settings_service=settings_service,
     )
-    return TestClient(app)
+    return TestClient(app, client=(client_host, 50000))
+
+
+def _write_config_file(config_path: Path) -> None:
+    config_path.write_text(
+        """# test config
+model:
+  primary:
+    provider: anthropic
+    model: claude-test
+    api_key_env: ANTHROPIC_API_KEY
+    pricing_input: 0.6
+    pricing_output: 1.2
+  max_retries: 3
+telegram:
+  enabled: true
+  mode: polling
+  enable_streaming: false
+agent:
+  max_task_cost: 5
+""",
+        encoding="utf-8",
+    )
 
 
 def test_knowledge_crud_and_search() -> None:
-    client = _client()
+    storage = _FakeStorage()
+    client = _client(storage=storage)
 
     created = client.post(
         "/api/knowledge",
@@ -280,6 +318,7 @@ def test_knowledge_crud_and_search() -> None:
     )
     assert created.status_code == 201
     knowledge_id = created.json()["id"]
+    assert storage.knowledge.items[knowledge_id]["user_id"] == SINGLE_USER_ID
 
     listed = client.get("/api/knowledge")
     assert listed.status_code == 200
@@ -368,24 +407,79 @@ def test_metrics_endpoints() -> None:
     assert client.get("/api/metrics/cost?period=30d").status_code == 404
 
 
-def test_settings_get_and_put() -> None:
-    client = _client()
+def test_settings_get_and_put(monkeypatch: Any, tmp_path: Path) -> None:
+    monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
+    monkeypatch.delenv("FEISHU_APP_ID", raising=False)
+    monkeypatch.delenv("FEISHU_APP_SECRET", raising=False)
+    monkeypatch.delenv("FEISHU_VERIFICATION_TOKEN", raising=False)
+    monkeypatch.delenv("FEISHU_ENCRYPT_KEY", raising=False)
+    config_path = tmp_path / "config.yaml"
+    _write_config_file(config_path)
+    config = load_config(str(config_path))
+    client = _client(
+        config=config,
+        settings_service=SettingsService(str(config_path)),
+    )
 
     current = client.get("/api/settings")
     assert current.status_code == 200
     assert current.json()["telegram"]["enabled"] is True
     assert current.json()["telegram"]["mode"] == "polling"
+    assert current.json()["api"]["local_only"] is True
+    assert current.json()["restart_required"] is False
     assert current.json()["runtime"]["feishu"]["status"] == "disabled"
-    assert current.json()["runtime"]["telegram"]["status"] == "incomplete"
+    telegram_runtime_status = current.json()["runtime"]["telegram"]["status"]
+    assert telegram_runtime_status in {"incomplete", "starting"}
     assert current.json()["runtime"]["wechat"]["status"] == "disabled"
 
     updated = client.put(
         "/api/settings",
-        json={"telegram": {"enabled": False, "enable_streaming": True}},
+        json={
+            "telegram": {"enabled": False, "enable_streaming": True},
+            "model": {"max_retries": 5},
+        },
     )
     assert updated.status_code == 200
     assert updated.json()["settings"]["telegram"]["enabled"] is False
     assert updated.json()["settings"]["telegram"]["enable_streaming"] is True
+    assert updated.json()["settings"]["model"]["max_retries"] == 5
+    assert updated.json()["restart_required"] is True
+    assert updated.json()["restart_reasons"] == ["telegram", "model"]
+    assert updated.json()["runtime"]["telegram"]["status"] == telegram_runtime_status
+
+    reloaded = client.get("/api/settings")
+    assert reloaded.status_code == 200
+    assert reloaded.json()["telegram"]["enabled"] is False
+    assert reloaded.json()["model"]["max_retries"] == 5
+    assert reloaded.json()["restart_required"] is True
+    assert reloaded.json()["restart_reasons"] == ["telegram", "model"]
+    assert reloaded.json()["runtime"]["telegram"]["status"] == telegram_runtime_status
+
+    persisted = config_path.read_text(encoding="utf-8")
+    assert "# test config" in persisted
+    assert "enable_streaming: true" in persisted
+    assert "max_retries: 5" in persisted
+    assert "pricing_input: 0.6" in persisted
+    assert "max_task_cost: 5" in persisted
+
+
+def test_settings_put_rejects_invalid_patch_without_mutating_file(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yaml"
+    _write_config_file(config_path)
+    original = config_path.read_text(encoding="utf-8")
+    config = load_config(str(config_path))
+    client = _client(
+        config=config,
+        settings_service=SettingsService(str(config_path)),
+    )
+
+    response = client.put(
+        "/api/settings",
+        json={"telegram": {"bot_token_env": "SHOULD_NOT_BE_ALLOWED"}},
+    )
+
+    assert response.status_code == 400
+    assert config_path.read_text(encoding="utf-8") == original
 
 
 def test_settings_reports_wechat_login_required_when_enabled_without_state(tmp_path) -> None:
@@ -404,6 +498,32 @@ def test_settings_reports_wechat_login_required_when_enabled_without_state(tmp_p
     assert current.json()["runtime"]["wechat"]["status"] == "login_required"
 
 
+def test_local_only_blocks_remote_management_http() -> None:
+    client = _client(client_host="203.0.113.10")
+
+    response = client.get("/api/tools")
+
+    assert response.status_code == 403
+    assert "local access" in response.json()["detail"]
+
+
+def test_local_only_allows_remote_webhook_requests() -> None:
+    client = _client(client_host="203.0.113.10")
+
+    response = client.post("/webhook/telegram", json={"message": "hello"})
+
+    assert response.status_code == 503
+
+
+def test_local_only_blocks_remote_websocket() -> None:
+    client = _client(client_host="203.0.113.10")
+
+    with pytest.raises(WebSocketDisconnect) as exc_info, client.websocket_connect("/api/ws/chat"):
+        pass
+
+    assert exc_info.value.code == 1008
+
+
 def test_identity_routes_bind_and_list() -> None:
     identity_service = _FakeIdentityService()
     client = _client(identity_service=identity_service)
@@ -411,14 +531,30 @@ def test_identity_routes_bind_and_list() -> None:
     bound = client.post(
         "/api/identities/bind",
         json={
-            "user_id": "user-1",
             "platform": "telegram",
             "platform_user_id": "12345",
         },
     )
     assert bound.status_code == 200
-    assert bound.json()["user_id"] == "user-1"
+    assert bound.json()["user_id"] == SINGLE_USER_ID
 
     listed = client.get("/api/identities?platform=telegram")
     assert listed.status_code == 200
     assert listed.json() == [bound.json()]
+
+
+def test_identity_routes_reject_non_single_user_binding() -> None:
+    identity_service = _FakeIdentityService()
+    client = _client(identity_service=identity_service)
+
+    response = client.post(
+        "/api/identities/bind",
+        json={
+            "user_id": "user-1",
+            "platform": "telegram",
+            "platform_user_id": "12345",
+        },
+    )
+
+    assert response.status_code == 400
+    assert "single-user mode" in response.json()["detail"]

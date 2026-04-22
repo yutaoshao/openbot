@@ -28,7 +28,7 @@ def test_spa_fallback_serves_index(tmp_path: Path) -> None:
     (dist / "index.html").write_text("<html><body>INDEX_OK</body></html>", encoding="utf-8")
 
     app = create_api_app(config=_build_config(dist))
-    client = TestClient(app)
+    client = TestClient(app, client=("127.0.0.1", 50000))
 
     response = client.get("/")
 
@@ -44,7 +44,7 @@ def test_static_asset_under_dist_is_served(tmp_path: Path) -> None:
     (assets / "app.js").write_text("console.log('ok');", encoding="utf-8")
 
     app = create_api_app(config=_build_config(dist))
-    client = TestClient(app)
+    client = TestClient(app, client=("127.0.0.1", 50000))
 
     response = client.get("/assets/app.js")
 

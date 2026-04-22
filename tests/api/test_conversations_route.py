@@ -111,7 +111,7 @@ class _FakeStorage:
 
 
 def test_list_conversations_returns_recent_items() -> None:
-    client = TestClient(create_api_app(storage=_FakeStorage()))
+    client = TestClient(create_api_app(storage=_FakeStorage()), client=("127.0.0.1", 50000))
 
     response = client.get("/api/conversations?limit=10&offset=0")
 
@@ -125,7 +125,7 @@ def test_list_conversations_returns_recent_items() -> None:
 
 
 def test_list_conversations_supports_search_query() -> None:
-    client = TestClient(create_api_app(storage=_FakeStorage()))
+    client = TestClient(create_api_app(storage=_FakeStorage()), client=("127.0.0.1", 50000))
 
     response = client.get("/api/conversations?q=Memory&limit=10&offset=0")
 
@@ -136,7 +136,7 @@ def test_list_conversations_supports_search_query() -> None:
 
 
 def test_conversation_detail_returns_conversation_and_messages() -> None:
-    client = TestClient(create_api_app(storage=_FakeStorage()))
+    client = TestClient(create_api_app(storage=_FakeStorage()), client=("127.0.0.1", 50000))
 
     response = client.get("/api/conversations/conv-1")
 
@@ -148,7 +148,7 @@ def test_conversation_detail_returns_conversation_and_messages() -> None:
 
 
 def test_conversation_detail_returns_404_for_missing_id() -> None:
-    client = TestClient(create_api_app(storage=_FakeStorage()))
+    client = TestClient(create_api_app(storage=_FakeStorage()), client=("127.0.0.1", 50000))
 
     response = client.get("/api/conversations/not-found")
 
@@ -157,7 +157,7 @@ def test_conversation_detail_returns_404_for_missing_id() -> None:
 
 
 def test_conversations_returns_503_when_storage_is_missing() -> None:
-    client = TestClient(create_api_app(storage=None))
+    client = TestClient(create_api_app(storage=None), client=("127.0.0.1", 50000))
 
     response = client.get("/api/conversations")
 
@@ -166,7 +166,7 @@ def test_conversations_returns_503_when_storage_is_missing() -> None:
 
 
 def test_conversation_delete_works() -> None:
-    client = TestClient(create_api_app(storage=_FakeStorage()))
+    client = TestClient(create_api_app(storage=_FakeStorage()), client=("127.0.0.1", 50000))
 
     response = client.delete("/api/conversations/conv-1")
 

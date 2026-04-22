@@ -28,11 +28,35 @@ if TYPE_CHECKING:
 
 _PII_PATTERNS = [
     # Phone numbers — require leading + or at least 10 consecutive digits with separators
-    (re.compile(r"\+\d{1,3}[-.\s]?\(?\d{2,4}\)?[-.\s]?\d{3,4}[-.\s]?\d{3,4}\b"), "[PHONE]"),
+    (
+        re.compile(r"\+\d{1,3}[-.\s]?\(?\d{2,4}\)?[-.\s]?\d{3,4}[-.\s]?\d{3,4}\b"),
+        "[REDACTED_PHONE]",
+    ),
     # Email addresses
-    (re.compile(r"\b[\w.+-]+@[\w-]+\.[\w.-]+\b"), "[EMAIL]"),
-    # API keys / tokens (long hex or base64 strings)
-    (re.compile(r"\b(?:sk-|tok_|key_|Bearer\s)[A-Za-z0-9_-]{20,}\b"), "[API_KEY]"),
+    (
+        re.compile(r"\b[\w.+-]+@[\w-]+\.[\w.-]+\b"),
+        "[REDACTED_EMAIL]",
+    ),
+    # Bearer tokens
+    (
+        re.compile(r"\bBearer\s+[A-Za-z0-9_-]{20,}\b", re.IGNORECASE),
+        "[REDACTED_BEARER_TOKEN]",
+    ),
+    # OpenAI / Anthropic-style secret keys
+    (
+        re.compile(r"\bsk-[A-Za-z0-9_-]{20,}\b"),
+        "[REDACTED_SECRET_KEY]",
+    ),
+    # Access tokens with tok_ prefix
+    (
+        re.compile(r"\btok_[A-Za-z0-9_-]{20,}\b"),
+        "[REDACTED_ACCESS_TOKEN]",
+    ),
+    # Generic API keys with key_ prefix
+    (
+        re.compile(r"\bkey_[A-Za-z0-9_-]{20,}\b"),
+        "[REDACTED_API_KEY]",
+    ),
 ]
 
 

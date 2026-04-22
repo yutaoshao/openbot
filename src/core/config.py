@@ -34,6 +34,8 @@ class ModelProviderConfig(BaseModel):
     temperature: float = 0.7
     # Name of the environment variable that holds the API key
     api_key_env: str = "ANTHROPIC_API_KEY"
+    pricing_input: float | None = None
+    pricing_output: float | None = None
     # Connection timeout: max seconds to establish TCP connection (fast-fail)
     connect_timeout: float = 30.0
     # Read timeout: max seconds to wait for first token from model
@@ -160,6 +162,7 @@ class ApiConfig(BaseModel):
     enabled: bool = True
     host: str = "127.0.0.1"
     port: int = 8000
+    local_only: bool = True
     cors_origins: list[str] = Field(
         default_factory=lambda: [
             "http://127.0.0.1:8000",
@@ -200,6 +203,8 @@ class AgentConfig(BaseModel):
     task_timeout: int = 0
     # Max seconds for a single tool call (0 = no limit)
     tool_timeout: float = 120.0
+    # Max total cost in USD for a single task (0 = no limit)
+    max_task_cost: float = 0.0
     # Consecutive identical tool calls before declaring "stuck" (0 = disable)
     stuck_detection_threshold: int = 3
 

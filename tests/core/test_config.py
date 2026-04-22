@@ -2,7 +2,14 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from src.core.config import FeishuConfig, StorageConfig, TelegramConfig, WeChatConfig
+from src.core.config import (
+    ApiConfig,
+    FeishuConfig,
+    ModelProviderConfig,
+    StorageConfig,
+    TelegramConfig,
+    WeChatConfig,
+)
 
 
 def test_storage_config_expands_user_in_workspace_path() -> None:
@@ -56,3 +63,16 @@ def test_telegram_enabled_requires_token(monkeypatch) -> None:
     config = TelegramConfig(enabled=True)
 
     assert config.missing_required_env_vars() == ["TELEGRAM_BOT_TOKEN"]
+
+
+def test_api_config_defaults_to_local_only() -> None:
+    config = ApiConfig()
+
+    assert config.local_only is True
+
+
+def test_model_provider_accepts_pricing_metadata() -> None:
+    config = ModelProviderConfig(pricing_input=0.6, pricing_output=3.0)
+
+    assert config.pricing_input == 0.6
+    assert config.pricing_output == 3.0

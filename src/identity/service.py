@@ -36,13 +36,15 @@ class IdentityService:
     async def bind_identity(
         self,
         *,
-        user_id: str,
+        user_id: str | None = None,
         platform: str,
         platform_user_id: str,
     ) -> dict[str, Any]:
         """Bind a platform identity to a canonical user, merging old data."""
-        if not user_id:
-            raise ValueError("user_id is required")
+        if user_id and user_id != SINGLE_USER_ID:
+            raise ValueError(
+                "OpenBot runs in local single-user mode; only local-single-user is supported.",
+            )
         if not platform:
             raise ValueError("platform is required")
         if not platform_user_id:

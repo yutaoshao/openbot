@@ -2,7 +2,7 @@
 
 # OpenBot
 
-Personal AI agent with multi-platform messaging, tool execution, 4-tier memory, and management dashboard.
+Local single-user AI agent with multi-platform messaging, tool execution, 4-tier memory, and a loopback-first management dashboard.
 
 ## Architecture
 
@@ -31,6 +31,8 @@ cd frontend && npm install && npm run build && cd ..
 ```
 
 ### Configuration
+
+OpenBot is designed for a local single-user workflow. By default, management pages, REST APIs, and WebSocket chat stay on local-only access, while webhook endpoints remain explicitly configurable for platform callbacks.
 
 1. Copy `.env.example` to `.env` and fill in API keys:
 

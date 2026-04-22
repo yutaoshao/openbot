@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from pydantic import BaseModel, Field, field_validator
+from typing import Literal
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 MAX_CHAT_MESSAGE_CHARS = 32000
 
@@ -54,7 +56,7 @@ class HealthResponse(BaseModel):
 class IdentityBindRequest(BaseModel):
     """Bind a platform account to a canonical internal user id."""
 
-    user_id: str = Field(min_length=1)
+    user_id: str | None = Field(default=None, min_length=1)
     platform: str = Field(min_length=1)
     platform_user_id: str = Field(min_length=1)
 
@@ -202,3 +204,30 @@ class ScheduleItem(BaseModel):
     next_run_at: str | None = None
     created_at: str
     updated_at: str
+
+
+class TelegramSettingsPatch(BaseModel):
+    """Editable Telegram settings surfaced in the dashboard."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool | None = None
+    mode: Literal["polling", "webhook"] | None = None
+    enable_streaming: bool | None = None
+
+
+class ModelSettingsPatch(BaseModel):
+    """Editable model gateway settings surfaced in the dashboard."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    max_retries: int | None = Field(default=None, ge=0)
+
+
+class SettingsUpdateRequest(BaseModel):
+    """Restricted settings patch accepted by ``PUT /api/settings``."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    telegram: TelegramSettingsPatch | None = None
+    model: ModelSettingsPatch | None = None

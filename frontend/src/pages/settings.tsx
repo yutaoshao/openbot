@@ -7,7 +7,20 @@ import { SettingsSectionHeader } from "../components/SettingsSectionHeader";
 import { useI18n, type Language } from "../i18n";
 import { api } from "../lib/api";
 import { operatorQueryDefaults } from "../lib/query-defaults";
-import { buildSecrets, syncDraft, type SecretRow, type Settings } from "../lib/settings-view";
+import {
+  buildSecrets,
+  formatRestartReasons,
+  syncDraft,
+  type SecretRow,
+  type Settings,
+} from "../lib/settings-view";
+
+type SettingsUpdateResponse = {
+  settings: Omit<Settings, "runtime" | "restart_required" | "restart_reasons">;
+  runtime: Settings["runtime"];
+  restart_required: boolean;
+  restart_reasons: string[];
+};
 
 export function SettingsPage(): JSX.Element {
   const qc = useQueryClient();
@@ -36,7 +49,7 @@ export function SettingsPage(): JSX.Element {
 
   const update = useMutation({
     mutationFn: () =>
-      api.put("/api/settings", {
+      api.put<SettingsUpdateResponse>("/api/settings", {
         telegram: {
           enabled,
           enable_streaming: streaming,
@@ -46,7 +59,13 @@ export function SettingsPage(): JSX.Element {
           max_retries: maxRetries,
         },
       }),
-    onSuccess: () => {
+    onSuccess: (response) => {
+      qc.setQueryData<Settings>(["settings"], {
+        ...response.settings,
+        runtime: response.runtime,
+        restart_required: response.restart_required,
+        restart_reasons: response.restart_reasons,
+      });
       void qc.invalidateQueries({ queryKey: ["settings"] });
     },
   });
@@ -61,6 +80,15 @@ export function SettingsPage(): JSX.Element {
   const secrets = useMemo<SecretRow[]>(() => (
     settings.data ? buildSecrets(settings.data, t) : []
   ), [settings.data, t]);
+  const restartReasons = useMemo<string[]>(() => (
+    settings.data ? formatRestartReasons(settings.data, t) : []
+  ), [settings.data, t]);
+  const saveError = update.error instanceof Error ? update.error.message : "";
+  const statusText = settings.data?.restart_required
+    ? t("settings.restartRequiredFooter")
+    : isDirty
+      ? t("settings.unsavedChanges")
+      : t("settings.savedToConfig");
 
   return (
     <div className="settings-page">
@@ -95,6 +123,17 @@ export function SettingsPage(): JSX.Element {
                   <option value="en-US">{t("settings.language.en-US")}</option>
                 </select>
                 <p className="field-help">{t("settings.languageLocalHint")}</p>
+              </div>
+              <div className="field-card">
+                <label className="field-label">{t("settings.localOnly")}</label>
+                <div className="settings-runtime-value">
+                  {settings.data
+                    ? settings.data.api.local_only
+                      ? t("settings.localOnlyEnabled")
+                      : t("settings.localOnlyDisabled")
+                    : "-"}
+                </div>
+                <p className="field-help">{t("settings.localOnlyHint")}</p>
               </div>
             </div>
           </section>
@@ -248,13 +287,41 @@ export function SettingsPage(): JSX.Element {
               ))}
             </div>
           </section>
+
+          {(settings.data?.restart_required || saveError) ? (
+            <section className="surface-panel settings-section" id="restart">
+              <SettingsSectionHeader
+                icon="shield"
+                title={t("settings.restartTitle")}
+                description={t("settings.restartHint")}
+              />
+              <div className="settings-grid">
+                {settings.data?.restart_required ? (
+                  <div className="field-card">
+                    <label className="field-label">{t("settings.restartRequiredLabel")}</label>
+                    <div className="settings-runtime-value">{t("settings.restartRequiredValue")}</div>
+                    <p className="field-help">
+                      {restartReasons.length > 0 ? restartReasons.join(" / ") : t("settings.restartDefaultReason")}
+                    </p>
+                  </div>
+                ) : null}
+                {saveError ? (
+                  <div className="field-card">
+                    <label className="field-label">{t("settings.saveErrorTitle")}</label>
+                    <div className="settings-runtime-value">{t("settings.saveErrorValue")}</div>
+                    <p className="field-help">{saveError}</p>
+                  </div>
+                ) : null}
+              </div>
+            </section>
+          ) : null}
         </div>
       </div>
 
       <footer className="settings-footer surface-panel">
         <div className="settings-footer-status">
           <Icon name="shield" className="icon-sm" />
-          <span>{isDirty ? t("settings.unsavedChanges") : t("settings.localDraftSaved")}</span>
+          <span>{statusText}</span>
         </div>
         <div className="settings-footer-actions">
           <button

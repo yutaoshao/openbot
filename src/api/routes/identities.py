@@ -44,9 +44,12 @@ async def bind_identity(
 ) -> IdentityItem:
     """Bind a Telegram/Feishu account to a shared internal user id."""
     service = _get_identity_service(request)
-    item = await service.bind_identity(
-        user_id=payload.user_id,
-        platform=payload.platform,
-        platform_user_id=payload.platform_user_id,
-    )
+    try:
+        item = await service.bind_identity(
+            user_id=payload.user_id,
+            platform=payload.platform,
+            platform_user_id=payload.platform_user_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     return IdentityItem(**item)

@@ -7,7 +7,7 @@ from typing import Any
 
 def build_runtime_status(app: Any) -> dict[str, dict[str, str | bool | list[str] | None]]:
     """Build a lightweight runtime status snapshot for adapters and API."""
-    config = getattr(app.state, "config", None)
+    config = getattr(app.state, "runtime_config", None) or getattr(app.state, "config", None)
     feishu_config = getattr(config, "feishu", None)
     telegram_config = getattr(config, "telegram", None)
     wechat_config = getattr(config, "wechat", None)

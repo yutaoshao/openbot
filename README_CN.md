@@ -2,7 +2,7 @@
 
 # OpenBot
 
-一个具备多平台消息接入、工具执行、四层记忆系统和管理面板的个人 AI Agent。
+一个面向本机单用户场景的个人 AI Agent，具备多平台消息接入、工具执行、四层记忆系统和本地优先的管理面板。
 
 ## 架构
 
@@ -31,6 +31,8 @@ cd frontend && npm install && npm run build && cd ..
 ```
 
 ### 配置
+
+OpenBot 以本机单用户工作流为默认形态。管理页面、REST API 和 WebSocket 聊天默认只允许本机访问；平台回调相关的 webhook 端点则按适配器配置显式开放。
 
 1. 复制 `.env.example` 为 `.env`，并填写 API Key：
 

@@ -43,6 +43,7 @@ async def start_application(app: Any) -> None:
             tool_registry=app.tool_registry,
             monitor=app.monitor,
             identity_service=app.identity_service,
+            settings_service=app.settings_service,
         )
         uvicorn_config = uvicorn.Config(
             app=app.api_app,

@@ -37,7 +37,7 @@ class _FakeAgent:
 
 
 def test_health_returns_ok() -> None:
-    client = TestClient(create_api_app())
+    client = TestClient(create_api_app(), client=("127.0.0.1", 50000))
 
     response = client.get("/health")
 
@@ -47,7 +47,7 @@ def test_health_returns_ok() -> None:
 
 
 def test_chat_returns_503_when_agent_is_missing() -> None:
-    client = TestClient(create_api_app(agent=None))
+    client = TestClient(create_api_app(agent=None), client=("127.0.0.1", 50000))
 
     response = client.post(
         "/api/chat",
@@ -60,7 +60,7 @@ def test_chat_returns_503_when_agent_is_missing() -> None:
 
 def test_chat_returns_agent_output() -> None:
     fake_agent = _FakeAgent()
-    client = TestClient(create_api_app(agent=fake_agent))
+    client = TestClient(create_api_app(agent=fake_agent), client=("127.0.0.1", 50000))
 
     response = client.post(
         "/api/chat",
@@ -85,7 +85,7 @@ def test_chat_returns_agent_output() -> None:
 
 def test_chat_generates_conversation_id_when_missing() -> None:
     fake_agent = _FakeAgent()
-    client = TestClient(create_api_app(agent=fake_agent))
+    client = TestClient(create_api_app(agent=fake_agent), client=("127.0.0.1", 50000))
 
     response = client.post(
         "/api/chat",
@@ -105,7 +105,7 @@ def test_chat_generates_conversation_id_when_missing() -> None:
 
 def test_chat_rejects_blank_messages() -> None:
     fake_agent = _FakeAgent()
-    client = TestClient(create_api_app(agent=fake_agent))
+    client = TestClient(create_api_app(agent=fake_agent), client=("127.0.0.1", 50000))
 
     response = client.post(
         "/api/chat",
@@ -118,7 +118,7 @@ def test_chat_rejects_blank_messages() -> None:
 
 def test_chat_rejects_overly_long_messages() -> None:
     fake_agent = _FakeAgent()
-    client = TestClient(create_api_app(agent=fake_agent))
+    client = TestClient(create_api_app(agent=fake_agent), client=("127.0.0.1", 50000))
 
     response = client.post(
         "/api/chat",

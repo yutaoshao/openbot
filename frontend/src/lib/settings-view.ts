@@ -1,4 +1,5 @@
 type Settings = {
+  api: { local_only: boolean };
   telegram: { enabled: boolean; enable_streaming: boolean; mode: string; bot_token_env: string };
   feishu: { enabled: boolean; mode: string; app_id_env: string; app_secret_env: string; verification_token_env: string; encrypt_key_env: string };
   wechat: { enabled: boolean; mode: string; state_path: string; api_base_url: string; poll_interval: number; max_backoff: number };
@@ -12,6 +13,8 @@ type Settings = {
     primary: { model: string; api_key_env: string };
     fallback: { model: string; api_key_env: string } | null;
   };
+  restart_required: boolean;
+  restart_reasons: string[];
 };
 
 type SecretRow = {
@@ -48,6 +51,13 @@ export function buildSecrets(settings: Settings, t: (key: string) => string): Se
     { label: "feishu_encrypt_key", envName: settings.feishu.encrypt_key_env },
   );
   return rows;
+}
+
+export function formatRestartReasons(
+  settings: Settings,
+  t: (key: string) => string,
+): string[] {
+  return settings.restart_reasons.map((reason) => t(`settings.restartReason.${reason}`));
 }
 
 export type { Settings, SecretRow };
