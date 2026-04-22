@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from src.agent.skill import LoadSkillTool, SkillRegistry
+from src.agent.skills import LoadSkillTool, SkillRegistry
 
 if TYPE_CHECKING:
     from pathlib import Path

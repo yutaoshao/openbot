@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Any
 from src.tools.registry import ToolResult
 
 if TYPE_CHECKING:
-    from src.agent.deep_research import DeepResearch
+    from src.agent.research import DeepResearch
 
 
 class DeepResearchTool:

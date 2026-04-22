@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 from src.agent.agent import Agent
@@ -33,6 +34,60 @@ class FakeStreamingGateway:
             usage=Usage(tokens_in=12, tokens_out=8),
             model="fake-model",
         )
+
+
+class FakeConversationManager:
+    def __init__(self) -> None:
+        self.end_started = asyncio.Event()
+        self.release_end = asyncio.Event()
+        self.end_calls: list[tuple[str, bool]] = []
+
+    async def get_or_create_conversation(
+        self,
+        conversation_id: str,
+        platform: str,
+        user_id: str,
+        token_budget: int,
+    ) -> None:
+        return None
+
+    async def add_user_message(
+        self,
+        conversation_id: str,
+        content: str,
+    ) -> None:
+        return None
+
+    async def build_messages(
+        self,
+        conversation_id: str,
+        system_prompt: str,
+        user_input: str,
+        user_id: str,
+    ) -> list[dict[str, str]]:
+        return [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_input},
+        ]
+
+    def get_task_state(self, conversation_id: str) -> None:
+        return None
+
+    async def add_assistant_message(self, conversation_id: str, **_: Any) -> None:
+        return None
+
+    async def maybe_compress(self, conversation_id: str) -> None:
+        return None
+
+    async def end_conversation(
+        self,
+        conversation_id: str,
+        *,
+        clear_working_memory: bool = True,
+    ) -> None:
+        self.end_started.set()
+        await self.release_end.wait()
+        self.end_calls.append((conversation_id, clear_working_memory))
 
 
 async def test_run_stream_yields_text_then_done() -> None:
@@ -74,3 +129,37 @@ async def test_run_consumes_stream_and_returns_aggregated_response() -> None:
     assert result.model == "fake-model"
     assert result.tokens_in == 12
     assert result.tokens_out == 8
+
+
+async def test_run_returns_before_background_memory_finalize_completes() -> None:
+    gateway = FakeStreamingGateway()
+    bus = FakeEventBus()
+    conversation_manager = FakeConversationManager()
+    agent = Agent(
+        model_gateway=gateway,
+        event_bus=bus,
+        config=AgentConfig(max_iterations=3),
+        tool_registry=None,
+        conversation_manager=conversation_manager,
+    )
+
+    result = await asyncio.wait_for(
+        agent.run(
+            "hello world",
+            conversation_id="conv-1",
+            platform="telegram",
+        ),
+        timeout=0.5,
+    )
+
+    assert result.content == "Hello streaming"
+
+    await asyncio.sleep(0)
+    assert conversation_manager.end_started.is_set()
+    assert conversation_manager.end_calls == []
+
+    background_task = agent._memory_finalize_tasks["conv-1"]
+    conversation_manager.release_end.set()
+    await asyncio.wait_for(background_task, timeout=0.5)
+
+    assert conversation_manager.end_calls == [("conv-1", False)]

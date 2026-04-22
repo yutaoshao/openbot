@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-import uuid
 from typing import TYPE_CHECKING, Any
+
+from src.core.user_scope import SINGLE_USER_ID
 
 if TYPE_CHECKING:
     from src.infrastructure.storage import Storage
@@ -23,28 +24,14 @@ class IdentityService:
         conversation_id: str = "",
         user_id: str | None = None,
     ) -> str:
-        """Return an existing canonical user id or create a new one."""
-        if user_id:
-            return user_id
-        if platform == "web":
-            return conversation_id or platform_user_id or uuid.uuid4().hex
-        if not platform or not platform_user_id:
-            return conversation_id or uuid.uuid4().hex
-
-        identity = await self._storage.user_identities.get(
-            platform,
-            platform_user_id,
-        )
-        if identity is not None:
-            return identity["user_id"]
-
-        resolved_user_id = uuid.uuid4().hex
-        await self._storage.user_identities.set(
-            user_id=resolved_user_id,
-            platform=platform,
-            platform_user_id=platform_user_id,
-        )
-        return resolved_user_id
+        """Return the fixed single-user id and record observed identities."""
+        if platform and platform_user_id:
+            await self._storage.user_identities.set(
+                user_id=SINGLE_USER_ID,
+                platform=platform,
+                platform_user_id=platform_user_id,
+            )
+        return SINGLE_USER_ID
 
     async def bind_identity(
         self,
@@ -61,30 +48,8 @@ class IdentityService:
         if not platform_user_id:
             raise ValueError("platform_user_id is required")
 
-        existing = await self._storage.user_identities.get(
-            platform,
-            platform_user_id,
-        )
-        if existing is not None and existing["user_id"] != user_id:
-            await self._storage.conversations.reassign_user(
-                existing["user_id"],
-                user_id,
-            )
-            await self._storage.knowledge.reassign_user(
-                existing["user_id"],
-                user_id,
-            )
-            await self._storage.preferences.reassign_user(
-                existing["user_id"],
-                user_id,
-            )
-            await self._storage.user_identities.reassign_user(
-                existing["user_id"],
-                user_id,
-            )
-
         return await self._storage.user_identities.set(
-            user_id=user_id,
+            user_id=SINGLE_USER_ID,
             platform=platform,
             platform_user_id=platform_user_id,
         )

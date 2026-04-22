@@ -14,6 +14,7 @@ import aiosqlite
 import sqlite_vec
 
 from src.core.logging import get_logger
+from src.core.user_scope import SINGLE_USER_ID
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -23,7 +24,7 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 # Bump this when schema changes require migration
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 
 _SCHEMA_SQL = """\
 -- Schema version tracking
@@ -35,7 +36,7 @@ CREATE TABLE IF NOT EXISTS schema_version (
 -- Conversations
 CREATE TABLE IF NOT EXISTS conversations (
     id TEXT PRIMARY KEY,
-    user_id TEXT NOT NULL DEFAULT '',
+    user_id TEXT NOT NULL DEFAULT '{single_user_id}',
     title TEXT,
     summary TEXT,
     platform TEXT NOT NULL DEFAULT 'unknown',
@@ -66,7 +67,7 @@ CREATE INDEX IF NOT EXISTS idx_messages_created_at
 -- Knowledge
 CREATE TABLE IF NOT EXISTS knowledge (
     id TEXT PRIMARY KEY,
-    user_id TEXT NOT NULL DEFAULT '',
+    user_id TEXT NOT NULL DEFAULT '{single_user_id}',
     source_conversation_id TEXT,
     category TEXT NOT NULL,
     content TEXT NOT NULL,
@@ -89,7 +90,7 @@ CREATE INDEX IF NOT EXISTS idx_knowledge_expires_at
 -- Preferences
 CREATE TABLE IF NOT EXISTS preferences (
     id TEXT PRIMARY KEY,
-    user_id TEXT NOT NULL DEFAULT '',
+    user_id TEXT NOT NULL DEFAULT '{single_user_id}',
     category TEXT NOT NULL,
     key TEXT NOT NULL,
     value TEXT NOT NULL,
@@ -183,6 +184,12 @@ CREATE VIRTUAL TABLE IF NOT EXISTS conversation_embeddings USING vec0(
     embedding float[{dimensions}]
 );
 """
+
+
+def _migration_now() -> str:
+    from datetime import UTC, datetime
+
+    return datetime.now(UTC).isoformat()
 
 
 class Database:
@@ -296,7 +303,7 @@ class Database:
             return
 
         # Apply core tables and indexes
-        await conn.executescript(_SCHEMA_SQL)
+        await conn.executescript(_SCHEMA_SQL.format(single_user_id=SINGLE_USER_ID))
 
         if current_version != 0:
             await self._apply_migrations(current_version)
@@ -345,6 +352,8 @@ class Database:
             await self._migrate_to_v5()
         if current_version < 6:
             await self._migrate_to_v6()
+        if current_version < 7:
+            await self._migrate_to_v7()
 
     async def _migrate_to_v5(self) -> None:
         """Backfill user-scoped memory tables and identity mapping support."""
@@ -462,3 +471,69 @@ class Database:
         ]
         for statement in statements:
             await self.connection.execute(statement)
+
+    async def _migrate_to_v7(self) -> None:
+        """Collapse historical data into the single-user memory scope."""
+        await self.connection.execute(
+            "UPDATE conversations SET user_id = ?, updated_at = ?",
+            (SINGLE_USER_ID, _migration_now()),
+        )
+        await self.connection.execute(
+            "UPDATE knowledge SET user_id = ?, updated_at = ?",
+            (SINGLE_USER_ID, _migration_now()),
+        )
+        await self.connection.execute(
+            "UPDATE user_identities SET user_id = ?, updated_at = ?",
+            (SINGLE_USER_ID, _migration_now()),
+        )
+        await self._recreate_preferences_for_single_user()
+        await self.connection.commit()
+
+    async def _recreate_preferences_for_single_user(self) -> None:
+        """Rebuild preferences so all rows live under the single-user scope."""
+        await self.connection.executescript(
+            f"""
+            CREATE TABLE preferences_v7 (
+                id TEXT PRIMARY KEY,
+                user_id TEXT NOT NULL DEFAULT '{SINGLE_USER_ID}',
+                category TEXT NOT NULL,
+                key TEXT NOT NULL,
+                value TEXT NOT NULL,
+                evidence TEXT,
+                confidence REAL DEFAULT 0.5,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                UNIQUE(user_id, category, key)
+            );
+
+            INSERT INTO preferences_v7
+                (id, user_id, category, key, value, evidence, confidence,
+                 created_at, updated_at)
+            SELECT
+                ranked.id,
+                '{SINGLE_USER_ID}',
+                ranked.category,
+                ranked.key,
+                ranked.value,
+                ranked.evidence,
+                ranked.confidence,
+                ranked.created_at,
+                ranked.updated_at
+            FROM (
+                SELECT
+                    id, category, key, value, evidence, confidence, created_at, updated_at,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY category, key
+                        ORDER BY updated_at DESC,
+                                 COALESCE(confidence, 0) DESC,
+                                 created_at DESC,
+                                 id DESC
+                    ) AS row_num
+                FROM preferences
+            ) AS ranked
+            WHERE ranked.row_num = 1;
+
+            DROP TABLE preferences;
+            ALTER TABLE preferences_v7 RENAME TO preferences;
+            """
+        )

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+from src.core.user_scope import SINGLE_USER_ID
 from src.identity.service import IdentityService
 
 
@@ -83,11 +84,11 @@ async def test_resolve_user_id_creates_identity_for_new_platform_user() -> None:
         platform_user_id="12345",
     )
 
-    assert user_id
+    assert user_id == SINGLE_USER_ID
     assert identity_repo.items[("telegram", "12345")]["user_id"] == user_id
 
 
-async def test_bind_identity_merges_existing_user_scope() -> None:
+async def test_bind_identity_records_platform_under_single_user_scope() -> None:
     identity_repo = _FakeIdentityRepo()
     await identity_repo.set(
         user_id="old-user",
@@ -111,8 +112,8 @@ async def test_bind_identity_merges_existing_user_scope() -> None:
         platform_user_id="ou_1",
     )
 
-    assert bound["user_id"] == "new-user"
-    assert conversations.calls == [("old-user", "new-user")]
-    assert knowledge.calls == [("old-user", "new-user")]
-    assert preferences.calls == [("old-user", "new-user")]
-    assert identity_repo.reassign_calls == [("old-user", "new-user")]
+    assert bound["user_id"] == SINGLE_USER_ID
+    assert conversations.calls == []
+    assert knowledge.calls == []
+    assert preferences.calls == []
+    assert identity_repo.reassign_calls == []

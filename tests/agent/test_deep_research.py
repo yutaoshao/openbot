@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from src.agent.deep_research import (
+from src.agent.research import (
     DeepResearch,
     Finding,
     ResearchReport,

@@ -27,7 +27,7 @@ from src.core.logging import get_logger
 
 if TYPE_CHECKING:
     from src.agent.agent import Agent
-    from src.agent.scheduler import AgentScheduler
+    from src.agent.scheduling import AgentScheduler
     from src.channels.adapters.web import WebAdapter
     from src.channels.hub import MsgHub
     from src.core.config import AppConfig
@@ -80,6 +80,8 @@ def create_api_app(
     # Populated later by Application.start() for webhook routes
     app.state.telegram = None
     app.state.feishu = None
+    app.state.wechat = None
+    app.state.wechat_runtime_status = None
 
     cors_origins = config.api.cors_origins if config else _DEFAULT_CORS_ORIGINS
     app.add_middleware(

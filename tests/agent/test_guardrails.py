@@ -4,7 +4,7 @@ import asyncio
 from dataclasses import dataclass
 
 from src.agent.agent import Agent
-from src.agent.sub_agent import SubAgent
+from src.agent.delegation import SubAgent
 from src.core.config import AgentConfig
 from src.tools.registry import ToolRegistry, ToolResult
 

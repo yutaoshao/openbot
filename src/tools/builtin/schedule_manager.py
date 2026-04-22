@@ -10,7 +10,7 @@ from src.tools.runtime import get_tool_execution_context
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from src.agent.scheduler import AgentScheduler
+    from src.agent.scheduling import AgentScheduler
 
 
 class ScheduleManagerTool:

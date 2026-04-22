@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import asyncio
 
-from src.agent.serialization import UserExecutionCoordinator
-from src.agent.task_state import TaskState
+from src.agent.coordination import UserExecutionCoordinator
+from src.agent.state import TaskState
 from src.agent.verification import verify_final_response
 from src.tools.builtin.tool_search import ToolSearchTool
 from src.tools.registry import CORE_VISIBILITY, DEFERRED_VISIBILITY, ToolRegistry

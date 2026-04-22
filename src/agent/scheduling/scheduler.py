@@ -26,6 +26,10 @@ if TYPE_CHECKING:
 
 logger = get_logger(__name__)
 
+_WECHAT_PROACTIVE_SEND_UNSUPPORTED = (
+    "个人微信 iLink 当前仅支持基于活跃会话上下文回复，暂不支持独立主动推送。"
+)
+
 
 class AgentScheduler:
     """Runs scheduled prompts through the Agent and delivers results.
@@ -232,6 +236,13 @@ class AgentScheduler:
             if target_platform and target_id:
                 from src.channels.types import MessageContent
 
+                if target_platform == "wechat":
+                    logger.warning(
+                        "wechat.proactive_send_unsupported",
+                        schedule_id=schedule_id,
+                        target_id=target_id,
+                    )
+                    raise RuntimeError(_WECHAT_PROACTIVE_SEND_UNSUPPORTED)
                 adapter = self._msg_hub.get_adapter(target_platform)
                 if adapter:
                     await adapter.send_message(

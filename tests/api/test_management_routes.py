@@ -6,7 +6,7 @@ from typing import Any
 from fastapi.testclient import TestClient
 
 from src.api.app import create_api_app
-from src.core.config import AppConfig
+from src.core.config import AppConfig, WeChatConfig
 from src.tools.registry import ToolRegistry, ToolResult
 
 
@@ -254,15 +254,17 @@ def _client(
     storage: _FakeStorage | None = None,
     scheduler: Any | None = None,
     identity_service: _FakeIdentityService | None = None,
+    config: AppConfig | None = None,
 ) -> TestClient:
     storage = storage or _FakeStorage()
     registry = ToolRegistry()
     registry.register(_DummyTool())
+    config = config or AppConfig()
     app = create_api_app(
         storage=storage,
         tool_registry=registry,
         monitor=_FakeMonitor(),
-        config=AppConfig(),
+        config=config,
         scheduler=scheduler,
         identity_service=identity_service,
     )
@@ -375,6 +377,7 @@ def test_settings_get_and_put() -> None:
     assert current.json()["telegram"]["mode"] == "polling"
     assert current.json()["runtime"]["feishu"]["status"] == "disabled"
     assert current.json()["runtime"]["telegram"]["status"] == "incomplete"
+    assert current.json()["runtime"]["wechat"]["status"] == "disabled"
 
     updated = client.put(
         "/api/settings",
@@ -383,6 +386,22 @@ def test_settings_get_and_put() -> None:
     assert updated.status_code == 200
     assert updated.json()["settings"]["telegram"]["enabled"] is False
     assert updated.json()["settings"]["telegram"]["enable_streaming"] is True
+
+
+def test_settings_reports_wechat_login_required_when_enabled_without_state(tmp_path) -> None:
+    client = _client(
+        config=AppConfig(
+            wechat=WeChatConfig(
+                enabled=True,
+                state_path=str(tmp_path / "missing-ilink-state.json"),
+            ),
+        ),
+    )
+
+    current = client.get("/api/settings")
+
+    assert current.status_code == 200
+    assert current.json()["runtime"]["wechat"]["status"] == "login_required"
 
 
 def test_identity_routes_bind_and_list() -> None:

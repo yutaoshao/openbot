@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Protocol
 if TYPE_CHECKING:
     from collections.abc import Iterable
 
-    from src.agent.task_state import TaskState
+    from src.agent.state import TaskState
     from src.tools.registry import ToolResult
 
 
