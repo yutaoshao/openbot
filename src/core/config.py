@@ -19,6 +19,11 @@ from dotenv import load_dotenv
 from pydantic import BaseModel, Field, field_validator
 
 
+def _expand_user_path(value: str) -> str:
+    """Expand ``~`` and env vars while preserving relative paths."""
+    return str(Path(os.path.expandvars(value)).expanduser())
+
+
 class ModelProviderConfig(BaseModel):
     """Single model provider configuration."""
 
@@ -124,10 +129,27 @@ class StorageConfig(BaseModel):
     @field_validator("db_path", "workspace_path", mode="before")
     @classmethod
     def _expand_path(cls, value: str) -> str:
-        """Expand ``~`` and env vars while preserving relative paths."""
         if not isinstance(value, str):
             return value
-        return str(Path(os.path.expandvars(value)).expanduser())
+        return _expand_user_path(value)
+
+
+class WeChatConfig(BaseModel):
+    """WeChat personal-account iLink adapter configuration."""
+
+    enabled: bool = False
+    mode: Literal["ilink_polling"] = "ilink_polling"
+    state_path: str = "data/wechat/ilink_state.json"
+    api_base_url: str = "https://ilinkai.weixin.qq.com"
+    poll_interval: float = 2.0
+    max_backoff: float = 30.0
+
+    @field_validator("state_path", mode="before")
+    @classmethod
+    def _expand_state_path(cls, value: str) -> str:
+        if not isinstance(value, str):
+            return value
+        return _expand_user_path(value)
 
 
 class ApiConfig(BaseModel):
@@ -226,6 +248,7 @@ class AppConfig(BaseModel):
     model: ModelConfig = Field(default_factory=ModelConfig)
     telegram: TelegramConfig = Field(default_factory=TelegramConfig)
     feishu: FeishuConfig = Field(default_factory=FeishuConfig)
+    wechat: WeChatConfig = Field(default_factory=WeChatConfig)
     storage: StorageConfig = Field(default_factory=StorageConfig)
     api: ApiConfig = Field(default_factory=ApiConfig)
     scheduler: SchedulerConfig = Field(default_factory=SchedulerConfig)

@@ -2,13 +2,19 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from src.core.config import FeishuConfig, StorageConfig, TelegramConfig
+from src.core.config import FeishuConfig, StorageConfig, TelegramConfig, WeChatConfig
 
 
 def test_storage_config_expands_user_in_workspace_path() -> None:
     config = StorageConfig(workspace_path="~/Project/openbot")
 
     assert config.workspace_path == str(Path("~/Project/openbot").expanduser())
+
+
+def test_wechat_config_expands_user_in_state_path() -> None:
+    config = WeChatConfig(state_path="~/data/wechat/ilink_state.json")
+
+    assert config.state_path == str(Path("~/data/wechat/ilink_state.json").expanduser())
 
 
 def test_feishu_long_connection_requires_only_app_credentials(monkeypatch) -> None:

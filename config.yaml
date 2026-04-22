@@ -5,9 +5,9 @@
 model:
   primary:
     provider: openai_compatible
-    model: qwen3-max-2026-01-23
-    base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
-    api_key_env: DASHSCOPE_API_KEY
+    model: minimaxai/minimax-m2.7
+    base_url: https://integrate.api.nvidia.com/v1
+    api_key_env: NGC_API_KEY
     max_tokens: 4096
     temperature: 0.7
     pricing_input: 0.6                # per 1M tokens
@@ -26,7 +26,7 @@ telegram:
   enabled: true
   mode: polling
   bot_token_env: TELEGRAM_BOT_TOKEN   # reads from .env: TELEGRAM_BOT_TOKEN=xxx
-  enable_streaming: false
+  enable_streaming: true
   # allowed_user_ids: []  # Empty = allow all, set IDs to restrict access
 
 feishu:
@@ -36,6 +36,14 @@ feishu:
   app_secret_env: FEISHU_APP_SECRET
   verification_token_env: FEISHU_VERIFICATION_TOKEN
   encrypt_key_env: FEISHU_ENCRYPT_KEY
+
+wechat:
+  enabled: true
+  mode: ilink_polling
+  state_path: data/wechat/ilink_state.json
+  api_base_url: https://ilinkai.weixin.qq.com
+  poll_interval: 2.0
+  max_backoff: 30.0
 
 storage:
   db_path: data/openbot.db
