@@ -5,6 +5,7 @@ from typing import Any
 
 from src.agent.agent import Agent
 from src.core.config import AgentConfig
+from src.core.trace import current_trace, trace_scope
 from src.infrastructure.model_gateway import StreamChunk, ToolCall, Usage
 
 
@@ -19,6 +20,7 @@ class FakeEventBus:
 class FakeStreamingGateway:
     def __init__(self) -> None:
         self.calls: list[tuple[list[dict[str, Any]], list[dict[str, Any]] | None]] = []
+        self.trace_ids: list[str] = []
 
     async def chat_stream(
         self,
@@ -27,6 +29,8 @@ class FakeStreamingGateway:
         **_: Any,
     ):
         self.calls.append((messages, tools))
+        trace = current_trace()
+        self.trace_ids.append(trace.trace_id if trace else "")
         yield StreamChunk(type="text", text="Hello")
         yield StreamChunk(type="text", text=" streaming")
         yield StreamChunk(
@@ -197,3 +201,21 @@ async def test_run_stops_before_tool_execution_when_cost_limit_is_reached() -> N
     result = await agent.run("hello world")
 
     assert "Task exceeded cost limit" in result.content
+
+
+async def test_run_reuses_active_trace_context() -> None:
+    gateway = FakeStreamingGateway()
+    bus = FakeEventBus()
+    agent = Agent(
+        model_gateway=gateway,
+        event_bus=bus,
+        config=AgentConfig(max_iterations=3),
+        tool_registry=None,
+        conversation_manager=None,
+    )
+
+    with trace_scope(interaction_id="conv-1", platform="wechat") as trace:
+        result = await agent.run("hello world", conversation_id="conv-1", platform="wechat")
+
+    assert result.content == "Hello streaming"
+    assert gateway.trace_ids == [trace.trace_id]

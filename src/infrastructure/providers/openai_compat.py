@@ -25,6 +25,22 @@ from src.infrastructure.model_gateway import ModelResponse, StreamChunk, ToolCal
 logger = get_logger(__name__)
 
 
+def _merge_tool_name(existing: str, delta: str) -> str:
+    """Merge streaming tool-name fragments without duplicating full names."""
+    if not existing:
+        return delta
+    if not delta or delta == existing or existing.endswith(delta):
+        return existing
+    if delta.startswith(existing):
+        return delta
+    overlap = min(len(existing), len(delta))
+    while overlap > 0:
+        if existing[-overlap:] == delta[:overlap]:
+            return existing + delta[overlap:]
+        overlap -= 1
+    return existing + delta
+
+
 class OpenAICompatibleProvider:
     """Provider for any OpenAI-compatible API endpoint."""
 
@@ -191,7 +207,10 @@ class OpenAICompatibleProvider:
                         acc["id"] = tc_delta.id
                     if tc_delta.function:
                         if tc_delta.function.name:
-                            acc["name"] += tc_delta.function.name
+                            acc["name"] = _merge_tool_name(
+                                acc["name"],
+                                tc_delta.function.name,
+                            )
                         if tc_delta.function.arguments:
                             acc["arguments"] += tc_delta.function.arguments
 

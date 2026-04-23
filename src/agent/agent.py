@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import asyncio
 import time
+from contextlib import nullcontext
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from src.agent.runtime import execute_tool_call, run_stream_inner
-from src.core.trace import TraceContext
+from src.core.trace import TraceContext, current_trace
 from src.tools.hooks import ToolHookManager, ToolSearchActivationHook
 
 if TYPE_CHECKING:
@@ -104,17 +105,26 @@ class Agent:
         user_id: str = "",
     ) -> AsyncIterator[StreamChunk]:
         """Execute the agent ReAct loop, yielding StreamChunks."""
-        ctx = TraceContext(interaction_id=conversation_id, platform=platform)
-        with ctx:
-            async for chunk in run_stream_inner(
-                self,
-                input_text,
-                conversation_id,
-                platform,
-                user_id,
-                ctx,
-            ):
-                yield chunk
+        active_trace = current_trace()
+        ctx = active_trace or TraceContext(
+            interaction_id=conversation_id,
+            platform=platform,
+        )
+        previous_iteration = ctx.iteration
+        scope = nullcontext() if active_trace is not None else ctx
+        with scope:
+            try:
+                async for chunk in run_stream_inner(
+                    self,
+                    input_text,
+                    conversation_id,
+                    platform,
+                    user_id,
+                    ctx,
+                ):
+                    yield chunk
+            finally:
+                ctx.iteration = previous_iteration
 
     async def _execute_tool(
         self,

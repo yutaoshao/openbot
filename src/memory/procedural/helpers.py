@@ -60,12 +60,28 @@ def parse_preferences(text: str) -> list[dict[str, Any]]:
     try:
         parsed = json.loads(cleaned)
     except json.JSONDecodeError:
-        logger.warning("procedural.parse_failed", text_preview=cleaned[:200])
-        return []
+        parsed = _extract_json_array(cleaned)
+        if parsed is None:
+            logger.warning("procedural.parse_failed", text_preview=cleaned[:200])
+            return []
 
     if not isinstance(parsed, list):
         return []
     return [item for item in parsed if isinstance(item, dict)]
+
+
+def _extract_json_array(text: str) -> list[dict[str, Any]] | None:
+    decoder = json.JSONDecoder()
+    for index, char in enumerate(text):
+        if char != "[":
+            continue
+        try:
+            parsed, _ = decoder.raw_decode(text[index:])
+        except json.JSONDecodeError:
+            continue
+        if isinstance(parsed, list):
+            return parsed
+    return None
 
 
 def dedupe_preferences(prefs: list[dict[str, Any]]) -> list[dict[str, Any]]:
