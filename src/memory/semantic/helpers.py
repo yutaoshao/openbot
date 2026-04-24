@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-import json
 import math
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from src.core.logging import get_logger
+from src.memory.structured_json import parse_json_array_response
 
 logger = get_logger(__name__)
 
@@ -33,7 +33,7 @@ Rules:
   P1 = useful information (technical details, project context, how-tos)
   P2 = minor details (casual mentions, low-impact notes)
 
-Return a JSON array. Each element:
+Return ONLY a raw JSON array. Each element:
 {
   "category": "fact" | "concept" | "procedure" | "reference",
   "content": "<concise knowledge statement>",
@@ -78,23 +78,15 @@ def format_messages(messages: list[dict]) -> str:
 
 
 def parse_extraction_response(text: str) -> list[dict[str, Any]]:
-    cleaned = text.strip()
-    if cleaned.startswith("```"):
-        first_newline = cleaned.find("\n")
-        if first_newline != -1:
-            cleaned = cleaned[first_newline + 1 :]
-        if cleaned.endswith("```"):
-            cleaned = cleaned[:-3].rstrip()
-
-    try:
-        parsed = json.loads(cleaned)
-    except json.JSONDecodeError:
-        logger.warning("semantic.parse_extraction_failed", response_len=len(text))
+    result = parse_json_array_response(text)
+    if not result.ok:
+        logger.warning(
+            "semantic.parse_extraction_failed",
+            response_len=len(text),
+            reason=result.reason,
+        )
         return []
-
-    if not isinstance(parsed, list):
-        return []
-    return [item for item in parsed if isinstance(item, dict)]
+    return result.items
 
 
 def belongs_to_user(entry: dict[str, Any], user_id: str) -> bool:

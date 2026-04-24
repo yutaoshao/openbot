@@ -8,6 +8,13 @@ from typing import TYPE_CHECKING, Any
 from src.core.logging import get_logger
 from src.core.user_scope import CHAT_MEMORY_PLATFORMS, SINGLE_USER_ID
 
+from .archive_helpers import (
+    background_trace_scope,
+    conversation_llm_messages,
+    conversation_platform,
+    pending_llm_messages,
+)
+from .compression import maybe_compress_shared_timeline
 from .prompt_builder import PromptBuilder
 from .shared_timeline import SharedTimelineMemory
 from .task_state_store import TaskStateStore
@@ -43,6 +50,8 @@ class ConversationManager:
         self._procedural = procedural_memory
         self._task_store = TaskStateStore()
         self._shared_timeline: SharedTimelineMemory | None = None
+        self._last_memory_sync_count: dict[str, int] = {}
+        self._last_archive_count: dict[str, int] = {}
         self._prompt_builder = PromptBuilder(
             semantic_memory,
             episodic_memory,
@@ -56,7 +65,6 @@ class ConversationManager:
         user_id: str,
         token_budget: int = 8000,
     ) -> SharedTimelineMemory:
-        await self._prune_stale_task_states()
         await self._ensure_conversation_record(conversation_id, platform, user_id)
         if self._shared_timeline is None:
             self._shared_timeline = SharedTimelineMemory(token_budget=token_budget)
@@ -123,29 +131,95 @@ class ConversationManager:
         )
 
     async def maybe_compress(self, conversation_id: str) -> None:
-        if self._shared_timeline is None or not self._shared_timeline.needs_compression():
-            return
-        logger.info(
-            "conversation.compression_triggered",
+        await maybe_compress_shared_timeline(
+            self._shared_timeline,
+            self._gateway,
+            self._semantic,
             conversation_id=conversation_id,
-            tokens_est=self._shared_timeline.estimate_tokens(),
         )
-        try:
-            extracted = await self._shared_timeline.extract_before_compression(self._gateway)
-            for item in extracted:
-                await self._semantic.add_knowledge(
-                    user_id=SINGLE_USER_ID,
-                    category=item["category"],
-                    content=item["content"],
-                    priority="P1",
+
+    async def prune_idle_conversations(self, *, now: float | None = None) -> None:
+        stale_ids = self._task_store.stale_conversations(
+            _WORKING_MEMORY_IDLE_TTL_SECONDS,
+            now=now,
+        )
+        for conversation_id in stale_ids:
+            platform = await conversation_platform(self._storage, conversation_id)
+            with background_trace_scope(
+                conversation_id,
+                platform,
+                trigger="idle_prune",
+            ):
+                await self.archive_idle_conversation(
+                    conversation_id,
+                    clear_working_memory=True,
                 )
-        except Exception:
-            logger.warning(
-                "conversation.pre_compression_flush_failed",
+            logger.debug("conversation.evicted_idle", conversation_id=conversation_id)
+
+    async def sync_memory_after_turn(self, conversation_id: str) -> None:
+        llm_messages, total_count = await pending_llm_messages(
+            self._storage,
+            conversation_id,
+            self._last_memory_sync_count.get(conversation_id, 0),
+        )
+        if total_count == self._last_memory_sync_count.get(conversation_id, 0):
+            logger.info(
+                "conversation.memory_sync_skipped",
                 conversation_id=conversation_id,
-                exc_info=True,
+                reason="no_new_messages",
             )
-        await self._shared_timeline.compress(self._gateway)
+            return
+
+        await self._semantic.extract_knowledge(
+            llm_messages,
+            conversation_id,
+            SINGLE_USER_ID,
+        )
+        await self._procedural.observe(
+            llm_messages,
+            conversation_id,
+            SINGLE_USER_ID,
+        )
+        self._last_memory_sync_count[conversation_id] = total_count
+        logger.info(
+            "conversation.memory_synced",
+            conversation_id=conversation_id,
+            user_id=SINGLE_USER_ID,
+            message_count=total_count,
+        )
+
+    async def archive_idle_conversation(
+        self,
+        conversation_id: str,
+        *,
+        clear_working_memory: bool,
+    ) -> None:
+        llm_messages, total_count = await conversation_llm_messages(
+            self._storage,
+            conversation_id,
+        )
+        if total_count == 0:
+            self._clear_task_state(conversation_id, clear_working_memory)
+            return
+        if total_count <= self._last_archive_count.get(conversation_id, 0):
+            self._clear_task_state(conversation_id, clear_working_memory)
+            logger.info(
+                "conversation.idle_archive_skipped",
+                conversation_id=conversation_id,
+                reason="no_new_messages",
+            )
+            return
+
+        await self.sync_memory_after_turn(conversation_id)
+        await self._episodic.on_conversation_end(conversation_id, SINGLE_USER_ID)
+        self._last_archive_count[conversation_id] = total_count
+        self._clear_task_state(conversation_id, clear_working_memory)
+        logger.info(
+            "conversation.idle_archived",
+            conversation_id=conversation_id,
+            user_id=SINGLE_USER_ID,
+            message_count=len(llm_messages),
+        )
 
     async def end_conversation(
         self,
@@ -153,56 +227,9 @@ class ConversationManager:
         *,
         clear_working_memory: bool = True,
     ) -> None:
-        messages = await self._storage.messages.get_by_conversation(conversation_id)
-        if not messages:
-            if clear_working_memory:
-                self._task_store.clear(conversation_id)
-            return
-
-        llm_messages = [
-            {"role": item["role"], "content": item["content"]}
-            for item in messages
-            if item.get("content")
-        ]
-        try:
-            await self._episodic.on_conversation_end(conversation_id, SINGLE_USER_ID)
-        except Exception:
-            logger.warning(
-                "conversation.episodic_archive_failed",
-                conversation_id=conversation_id,
-                exc_info=True,
-            )
-        try:
-            await self._semantic.extract_knowledge(
-                llm_messages,
-                conversation_id,
-                SINGLE_USER_ID,
-            )
-        except Exception:
-            logger.warning(
-                "conversation.semantic_extract_failed",
-                conversation_id=conversation_id,
-                exc_info=True,
-            )
-        try:
-            await self._procedural.observe(
-                llm_messages,
-                conversation_id,
-                SINGLE_USER_ID,
-            )
-        except Exception:
-            logger.warning(
-                "conversation.procedural_observe_failed",
-                conversation_id=conversation_id,
-                exc_info=True,
-            )
-        if clear_working_memory:
-            self._task_store.clear(conversation_id)
-        logger.info(
-            "conversation.ended",
-            conversation_id=conversation_id,
-            user_id=SINGLE_USER_ID,
-            message_count=len(messages),
+        await self.archive_idle_conversation(
+            conversation_id,
+            clear_working_memory=clear_working_memory,
         )
 
     def get_task_state(self, conversation_id: str) -> TaskState | None:
@@ -267,10 +294,6 @@ class ConversationManager:
         if existing.get("user_id") != user_id:
             await self._storage.conversations.update(conversation_id, user_id=user_id)
 
-    async def _prune_stale_task_states(self, *, now: float | None = None) -> None:
-        for conversation_id in self._task_store.stale_conversations(
-            _WORKING_MEMORY_IDLE_TTL_SECONDS,
-            now=now,
-        ):
-            await self.end_conversation(conversation_id, clear_working_memory=True)
-            logger.debug("conversation.evicted_idle", conversation_id=conversation_id)
+    def _clear_task_state(self, conversation_id: str, clear_working_memory: bool) -> None:
+        if clear_working_memory:
+            self._task_store.clear(conversation_id)

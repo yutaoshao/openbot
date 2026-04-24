@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-import json
 from typing import Any
 
 from src.core.logging import get_logger
+from src.memory.structured_json import parse_json_array_response
 
 logger = get_logger(__name__)
 
@@ -29,7 +29,8 @@ Categorize each preference into exactly one of:
 - workflow: preferred tools, processes, habits
 - tool: tool-specific preferences and configurations
 
-Return a JSON array (no markdown fences).  Each element must have:
+Return ONLY a raw JSON array (no markdown fences, no prose, no tool calls).
+Each element must have:
 - "category": one of communication / coding / workflow / tool
 - "key": short snake_case identifier (e.g. "preferred_language")
 - "value": concise description of the preference
@@ -49,39 +50,15 @@ def format_messages(messages: list[dict[str, Any]]) -> str:
 
 
 def parse_preferences(text: str) -> list[dict[str, Any]]:
-    cleaned = text.strip()
-    if cleaned.startswith("```"):
-        first_newline = cleaned.index("\n") + 1
-        cleaned = cleaned[first_newline:]
-    if cleaned.endswith("```"):
-        cleaned = cleaned[: cleaned.rfind("```")]
-    cleaned = cleaned.strip()
-
-    try:
-        parsed = json.loads(cleaned)
-    except json.JSONDecodeError:
-        parsed = _extract_json_array(cleaned)
-        if parsed is None:
-            logger.warning("procedural.parse_failed", text_preview=cleaned[:200])
-            return []
-
-    if not isinstance(parsed, list):
+    result = parse_json_array_response(text)
+    if not result.ok:
+        logger.warning(
+            "procedural.parse_failed",
+            reason=result.reason,
+            text_preview=text.strip()[:200],
+        )
         return []
-    return [item for item in parsed if isinstance(item, dict)]
-
-
-def _extract_json_array(text: str) -> list[dict[str, Any]] | None:
-    decoder = json.JSONDecoder()
-    for index, char in enumerate(text):
-        if char != "[":
-            continue
-        try:
-            parsed, _ = decoder.raw_decode(text[index:])
-        except json.JSONDecodeError:
-            continue
-        if isinstance(parsed, list):
-            return parsed
-    return None
+    return result.items
 
 
 def dedupe_preferences(prefs: list[dict[str, Any]]) -> list[dict[str, Any]]:

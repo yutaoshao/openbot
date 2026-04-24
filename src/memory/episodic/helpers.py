@@ -3,17 +3,24 @@
 from __future__ import annotations
 
 import math
+import re
 from typing import Any
 
 TITLE_CONTEXT_MESSAGES = 6
 SUMMARY_HEAD = 10
 SUMMARY_TAIL = 20
+MAX_TITLE_LENGTH = 50
+SENTENCE_LIKE_LENGTH = 20
+UNTITLED_CONVERSATION = "Untitled conversation"
+_MARKDOWN_TITLE_MARKERS = re.compile(r"[*_`#>\[\]\(\)]")
+_MULTISPACE = re.compile(r"\s+")
+_SENTENCE_ENDINGS = ".!?。！？"
 
 TITLE_SYSTEM_PROMPT = (
     "You are a concise title generator. "
     "Given the opening messages of a conversation, produce a short title "
     "(less than 50 characters) that captures the main topic. "
-    "Return ONLY the title text, with no quotes or extra punctuation."
+    "Return ONLY the title text, with no quotes, markdown, or commentary."
 )
 
 SUMMARY_SYSTEM_PROMPT = (
@@ -68,3 +75,18 @@ def normalize_embedding(embedding: list[float]) -> list[float]:
 def belongs_to_user(conversation: dict[str, Any], user_id: str) -> bool:
     conversation_user_id = conversation.get("user_id", "")
     return conversation_user_id in {"", user_id}
+
+
+def sanitize_title(text: str) -> str:
+    cleaned = text.strip().strip("\"'")
+    cleaned = cleaned.replace("\\n", " ")
+    cleaned = cleaned.replace("\n", " ")
+    cleaned = _MARKDOWN_TITLE_MARKERS.sub("", cleaned)
+    cleaned = _MULTISPACE.sub(" ", cleaned).strip(" -:;,.!?。！？")
+    if not cleaned or _looks_like_sentence(cleaned):
+        return UNTITLED_CONVERSATION
+    return cleaned[:MAX_TITLE_LENGTH].rstrip()
+
+
+def _looks_like_sentence(text: str) -> bool:
+    return len(text) >= SENTENCE_LIKE_LENGTH and any(mark in text for mark in _SENTENCE_ENDINGS)

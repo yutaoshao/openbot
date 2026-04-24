@@ -5,6 +5,7 @@ from types import SimpleNamespace
 
 from src.infrastructure.model_gateway import ModelResponse
 from src.memory.episodic import EpisodicMemory, _normalize_embedding
+from src.memory.episodic.helpers import sanitize_title
 
 
 class _FakeConnection:
@@ -113,3 +114,15 @@ async def test_generate_summary_sends_transcript_as_final_user_message() -> None
     assert summary == "Two sentence summary."
     assert gateway.calls[0][-1]["role"] == "user"
     assert "Conversation transcript:" in gateway.calls[0][-1]["content"]
+
+
+def test_sanitize_title_normalizes_markdown_and_whitespace() -> None:
+    assert sanitize_title('  "**Identity**\\n limits"  ') == "Identity limits"
+
+
+def test_sanitize_title_falls_back_for_empty_or_sentence_like_titles() -> None:
+    assert sanitize_title('""') == "Untitled conversation"
+    assert (
+        sanitize_title("好问题！根据系统提供的信息，我能看到简短的对话摘要。")
+        == "Untitled conversation"
+    )

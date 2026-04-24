@@ -53,6 +53,7 @@ def init_runtime_services(app: Any) -> None:
     app.api_server = None
     app.api_app = None
     app.api_task = None
+    app.housekeeping_task = None
     app.execution_coordinator = UserExecutionCoordinator()
     app.sub_agent = SubAgent(
         model_gateway=app.model_gateway,

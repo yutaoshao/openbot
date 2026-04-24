@@ -52,6 +52,8 @@ class _FakeMessageRepo:
 class _NoopMemoryTier:
     def __init__(self) -> None:
         self.ended: list[tuple[str, str]] = []
+        self.extracted: list[tuple[str, str, list[dict[str, str]]]] = []
+        self.observed: list[tuple[str, str, list[dict[str, str]]]] = []
 
     async def on_conversation_end(self, conversation_id: str, user_id: str) -> None:
         self.ended.append((conversation_id, user_id))
@@ -62,6 +64,7 @@ class _NoopMemoryTier:
         conversation_id: str,
         user_id: str,
     ) -> None:
+        self.extracted.append((conversation_id, user_id, llm_messages))
         return None
 
     async def observe(
@@ -70,6 +73,7 @@ class _NoopMemoryTier:
         conversation_id: str,
         user_id: str,
     ) -> None:
+        self.observed.append((conversation_id, user_id, llm_messages))
         return None
 
     async def get_system_prompt_context(self, user_id: str) -> str:
@@ -100,7 +104,7 @@ class _PromptContextTier(_NoopMemoryTier):
         return [{"category": "fact", "content": "shared context"}]
 
 
-async def test_get_or_create_prunes_idle_working_memories() -> None:
+async def test_get_or_create_does_not_prune_idle_working_memories_inline() -> None:
     episodic = _NoopMemoryTier()
     storage = SimpleNamespace(
         conversations=_FakeConversationRepo(),
@@ -120,9 +124,41 @@ async def test_get_or_create_prunes_idle_working_memories() -> None:
 
     await manager.get_or_create_conversation("fresh-conv", "web", "user-fresh")
 
+    assert manager.get_task_state("stale-conv") is not None
+    assert manager.get_task_state("fresh-conv") is not None
+    assert episodic.ended == []
+
+
+async def test_prune_idle_conversations_archives_stale_working_memories() -> None:
+    episodic = _NoopMemoryTier()
+    semantic = _NoopMemoryTier()
+    procedural = _NoopMemoryTier()
+    storage = SimpleNamespace(
+        conversations=_FakeConversationRepo(),
+        messages=_FakeMessageRepo(),
+    )
+    manager = ConversationManager(
+        storage=storage,
+        model_gateway=object(),
+        semantic_memory=semantic,
+        episodic_memory=episodic,
+        procedural_memory=procedural,
+    )
+
+    await manager.get_or_create_conversation("stale-conv", "web", "user-stale")
+    await manager.add_user_message("stale-conv", "remember this")
+    manager._task_store._last_active["stale-conv"] -= _WORKING_MEMORY_IDLE_TTL_SECONDS + 1  # noqa: SLF001
+
+    await manager.get_or_create_conversation("fresh-conv", "web", "user-fresh")
+    await manager.add_user_message("fresh-conv", "still active")
+
+    await manager.prune_idle_conversations()
+
     assert manager.get_task_state("stale-conv") is None
     assert manager.get_task_state("fresh-conv") is not None
     assert episodic.ended == [("stale-conv", SINGLE_USER_ID)]
+    assert [item[:2] for item in semantic.extracted] == [("stale-conv", SINGLE_USER_ID)]
+    assert [item[:2] for item in procedural.observed] == [("stale-conv", SINGLE_USER_ID)]
 
 
 async def test_build_messages_uses_shared_cross_platform_timeline() -> None:

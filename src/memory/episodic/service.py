@@ -15,6 +15,7 @@ from .helpers import (
     format_messages_for_llm,
     normalize_embedding,
     render_transcript,
+    sanitize_title,
     truncate_for_summary,
 )
 
@@ -113,8 +114,7 @@ class EpisodicMemory:
         ]
         try:
             response = await self._gateway.chat(llm_messages)
-            title = response.text.strip().strip("\"'")
-            return title[:50] if title else "Untitled conversation"
+            return sanitize_title(response.text)
         except Exception:
             logger.warning("episodic.title_generation_failed", exc_info=True)
             return "Untitled conversation"

@@ -54,3 +54,70 @@ async def test_extract_before_compression_filters_invalid_items() -> None:
     assert items == [
         {"category": "fact", "content": "timezone is Asia/Shanghai"},
     ]
+
+
+async def test_extract_before_compression_accepts_wrapped_json_array() -> None:
+    gateway = FakeModelGateway(
+        [
+            """
+            Here are the long-term items:
+            [
+              {"category":"fact","content":"timezone is Asia/Shanghai"}
+            ]
+            """,
+        ]
+    )
+    wm = WorkingMemory(conversation_id="conv-3", token_budget=1)
+
+    wm.add({"role": "user", "content": "message 1"})
+    wm.add({"role": "assistant", "content": "message 2"})
+    wm.add({"role": "user", "content": "message 3"})
+    wm.add({"role": "assistant", "content": "message 4"})
+
+    items = await wm.extract_before_compression(gateway)
+
+    assert items == [{"category": "fact", "content": "timezone is Asia/Shanghai"}]
+
+
+async def test_extract_before_compression_accepts_fenced_json_array() -> None:
+    gateway = FakeModelGateway(
+        [
+            """```json
+            [
+              {"category":"procedure","content":"Deploy with make release"}
+            ]
+            ```""",
+        ]
+    )
+    wm = WorkingMemory(conversation_id="conv-4", token_budget=1)
+
+    wm.add({"role": "user", "content": "message 1"})
+    wm.add({"role": "assistant", "content": "message 2"})
+    wm.add({"role": "user", "content": "message 3"})
+    wm.add({"role": "assistant", "content": "message 4"})
+
+    items = await wm.extract_before_compression(gateway)
+
+    assert items == [{"category": "procedure", "content": "Deploy with make release"}]
+
+
+async def test_extract_before_compression_ignores_tool_call_wrappers() -> None:
+    gateway = FakeModelGateway(
+        [
+            """
+            [TOOL_CALL]
+            {tool => "web_search", args => {"query": "memory system"}}
+            [/TOOL_CALL]
+            """,
+        ]
+    )
+    wm = WorkingMemory(conversation_id="conv-5", token_budget=1)
+
+    wm.add({"role": "user", "content": "message 1"})
+    wm.add({"role": "assistant", "content": "message 2"})
+    wm.add({"role": "user", "content": "message 3"})
+    wm.add({"role": "assistant", "content": "message 4"})
+
+    items = await wm.extract_before_compression(gateway)
+
+    assert items == []

@@ -8,11 +8,11 @@ decisions so they can be persisted to semantic memory by the caller.
 
 from __future__ import annotations
 
-import json
 from collections import OrderedDict
 from typing import TYPE_CHECKING, Any
 
 from src.core.logging import get_logger
+from src.memory.structured_json import parse_json_array_response
 
 if TYPE_CHECKING:
     from src.infrastructure.model_gateway import ModelGateway
@@ -47,14 +47,14 @@ For each item, classify it into exactly one category:
 
 Filter out noise (greetings, filler, acknowledgements).
 
-Return a JSON array of objects with keys "category" and "content".
+Return ONLY a raw JSON array of objects with keys "category" and "content".
 Example:
 [
   {{"category": "fact", "content": "User's timezone is Asia/Shanghai"}},
   {{"category": "procedure", "content": "Deploy via 'make release' then tag"}}
 ]
 
-Return ONLY the JSON array, no markdown fences or extra text.
+Do not include markdown fences, explanations, or tool calls.
 If nothing worth extracting, return an empty array: []
 
 Messages:
@@ -250,29 +250,19 @@ class WorkingMemory:
             messages=[{"role": "user", "content": prompt}],
         )
 
-        raw = response.text.strip()
-
-        try:
-            items = json.loads(raw)
-        except json.JSONDecodeError:
+        result = parse_json_array_response(response.text)
+        if not result.ok:
             logger.warning(
-                "working_memory.extract.parse_error",
+                "working_memory.extract.parse_failed",
                 conversation_id=self._conversation_id,
-                raw_length=len(raw),
-            )
-            return []
-
-        if not isinstance(items, list):
-            logger.warning(
-                "working_memory.extract.unexpected_type",
-                conversation_id=self._conversation_id,
-                type=type(items).__name__,
+                raw_length=len(response.text.strip()),
+                reason=result.reason,
             )
             return []
 
         valid: list[dict[str, str]] = []
         allowed_categories = {"fact", "concept", "procedure"}
-        for item in items:
+        for item in result.items:
             if (
                 isinstance(item, dict)
                 and isinstance(item.get("category"), str)
@@ -290,7 +280,7 @@ class WorkingMemory:
             "working_memory.extract.done",
             conversation_id=self._conversation_id,
             extracted=len(valid),
-            discarded=len(items) - len(valid),
+            discarded=len(result.items) - len(valid),
         )
 
         return valid

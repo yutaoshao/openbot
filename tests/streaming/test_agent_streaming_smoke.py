@@ -42,9 +42,13 @@ class FakeStreamingGateway:
 
 class FakeConversationManager:
     def __init__(self) -> None:
-        self.end_started = asyncio.Event()
-        self.release_end = asyncio.Event()
-        self.end_calls: list[tuple[str, bool]] = []
+        self.compress_started = asyncio.Event()
+        self.release_background = asyncio.Event()
+        self.compress_calls: list[str] = []
+        self.sync_calls: list[str] = []
+        self.sync_trace_ids: list[str] = []
+        self.sync_interaction_ids: list[str] = []
+        self.sync_triggers: list[str] = []
 
     async def get_or_create_conversation(
         self,
@@ -81,7 +85,19 @@ class FakeConversationManager:
         return None
 
     async def maybe_compress(self, conversation_id: str) -> None:
-        return None
+        self.compress_started.set()
+        await self.release_background.wait()
+        self.compress_calls.append(conversation_id)
+
+    async def sync_memory_after_turn(
+        self,
+        conversation_id: str,
+    ) -> None:
+        trace = current_trace()
+        self.sync_calls.append(conversation_id)
+        self.sync_trace_ids.append(trace.trace_id if trace else "")
+        self.sync_interaction_ids.append(trace.interaction_id if trace else "")
+        self.sync_triggers.append(trace.extra.get("trigger", "") if trace else "")
 
     async def end_conversation(
         self,
@@ -89,9 +105,7 @@ class FakeConversationManager:
         *,
         clear_working_memory: bool = True,
     ) -> None:
-        self.end_started.set()
-        await self.release_end.wait()
-        self.end_calls.append((conversation_id, clear_working_memory))
+        raise AssertionError("end_conversation should not be used for post-reply sync")
 
 
 async def test_run_stream_yields_text_then_done() -> None:
@@ -159,14 +173,16 @@ async def test_run_returns_before_background_memory_finalize_completes() -> None
     assert result.content == "Hello streaming"
 
     await asyncio.sleep(0)
-    assert conversation_manager.end_started.is_set()
-    assert conversation_manager.end_calls == []
+    assert conversation_manager.compress_started.is_set()
+    assert conversation_manager.compress_calls == []
+    assert conversation_manager.sync_calls == []
 
     background_task = agent._memory_finalize_tasks["conv-1"]
-    conversation_manager.release_end.set()
+    conversation_manager.release_background.set()
     await asyncio.wait_for(background_task, timeout=0.5)
 
-    assert conversation_manager.end_calls == [("conv-1", False)]
+    assert conversation_manager.compress_calls == ["conv-1"]
+    assert conversation_manager.sync_calls == ["conv-1"]
 
 
 class FakeCostLimitedGateway:
@@ -219,3 +235,29 @@ async def test_run_reuses_active_trace_context() -> None:
 
     assert result.content == "Hello streaming"
     assert gateway.trace_ids == [trace.trace_id]
+
+
+async def test_background_memory_sync_uses_child_trace_context() -> None:
+    gateway = FakeStreamingGateway()
+    bus = FakeEventBus()
+    conversation_manager = FakeConversationManager()
+    agent = Agent(
+        model_gateway=gateway,
+        event_bus=bus,
+        config=AgentConfig(max_iterations=3),
+        tool_registry=None,
+        conversation_manager=conversation_manager,
+    )
+
+    with trace_scope(interaction_id="conv-1", platform="wechat") as trace:
+        result = await agent.run("hello world", conversation_id="conv-1", platform="wechat")
+
+    assert result.content == "Hello streaming"
+    background_task = agent._memory_finalize_tasks["conv-1"]
+    conversation_manager.release_background.set()
+    await asyncio.wait_for(background_task, timeout=0.5)
+
+    assert len(conversation_manager.sync_trace_ids) == 1
+    assert conversation_manager.sync_trace_ids[0] != trace.trace_id
+    assert conversation_manager.sync_interaction_ids == ["conv-1"]
+    assert conversation_manager.sync_triggers == ["post_reply_sync"]

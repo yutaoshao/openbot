@@ -18,6 +18,7 @@ from src.channels.adapters.wechat_state import WeChatStateStore
 from src.core.logging import disable_db_logging, enable_db_logging, get_logger
 
 logger = get_logger(__name__)
+_IDLE_PRUNE_INTERVAL_SECONDS = 60
 
 
 class UvicornServerNoSignals(uvicorn.Server):
@@ -69,6 +70,7 @@ async def start_application(app: Any) -> None:
         config=app.config.scheduler,
     )
     await app.scheduler.start()
+    await start_housekeeping(app)
     if app.api_app:
         app.api_app.state.scheduler = app.scheduler
     logger.info("app.started")
@@ -84,6 +86,7 @@ async def stop_application(app: Any) -> None:
             await app.api_task
         app.api_task = None
         app.api_server = None
+    await stop_housekeeping(app)
     if app.scheduler:
         await app.scheduler.stop()
     if app.feishu:
@@ -95,6 +98,42 @@ async def stop_application(app: Any) -> None:
     disable_db_logging()
     await app.database.close()
     logger.info("app.stopped")
+
+
+async def start_housekeeping(app: Any) -> None:
+    """Start background housekeeping tasks."""
+    if app.housekeeping_task and not app.housekeeping_task.done():
+        return
+    app.housekeeping_task = asyncio.create_task(
+        _run_housekeeping_loop(app),
+        name="openbot-housekeeping",
+    )
+
+
+async def stop_housekeeping(app: Any) -> None:
+    """Stop background housekeeping tasks."""
+    task = app.housekeeping_task
+    if task is None:
+        return
+    task.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        await task
+    app.housekeeping_task = None
+
+
+async def _run_housekeeping_loop(app: Any) -> None:
+    while True:
+        await asyncio.sleep(_IDLE_PRUNE_INTERVAL_SECONDS)
+        await _prune_idle_conversations(app)
+
+
+async def _prune_idle_conversations(app: Any) -> None:
+    try:
+        await app.conversation_manager.prune_idle_conversations()
+    except asyncio.CancelledError:
+        raise
+    except Exception:
+        logger.exception("app.housekeeping_prune_failed")
 
 
 async def start_telegram(app: Any) -> None:
