@@ -12,6 +12,7 @@ from src.channels.adapters.wechat import (
     _TEXT_ONLY_REPLY,
     WeChatAdapter,
 )
+from src.channels.adapters.wechat_ilink_api import ILinkApiError
 from src.channels.adapters.wechat_state import WeChatLoginState
 from src.channels.types import MessageContent
 from src.core.config import WeChatConfig
@@ -48,6 +49,7 @@ class _FakeIlinkClient:
         self.sent_messages: list[dict[str, str]] = []
         self.get_updates_calls = 0
         self.fail_first_poll = False
+        self.send_error: Exception | None = None
         self._adapter: WeChatAdapter | None = None
 
     async def start(self) -> None:
@@ -80,6 +82,8 @@ class _FakeIlinkClient:
         context_token: str,
         base_url: str | None = None,
     ) -> dict[str, Any]:
+        if self.send_error is not None:
+            raise self.send_error
         self.sent_messages.append(
             {
                 "bot_token": bot_token,
@@ -126,6 +130,7 @@ async def test_handle_inbound_text_message_routes_to_msg_hub() -> None:
     assert message.sender_id == "wx-user-1"
     assert message.conversation_id == "wechat:acc-1:wx-user-1"
     assert message.content.text == "你好"
+    assert adapter._context_tokens["wechat:acc-1:wx-user-1"].source_message_id == "101"  # noqa: SLF001
 
 
 async def test_handle_inbound_group_message_is_ignored() -> None:
@@ -150,6 +155,7 @@ async def test_handle_inbound_group_message_is_ignored() -> None:
     )
 
     assert hub.messages == []
+    assert adapter._context_tokens == {}  # noqa: SLF001
 
 
 async def test_handle_inbound_non_text_message_replies_with_text_only_notice() -> None:
@@ -161,7 +167,6 @@ async def test_handle_inbound_non_text_message_replies_with_text_only_notice() -
         api_client=client,
     )
     adapter._state = _state()  # noqa: SLF001
-    adapter._context_tokens["wechat:acc-1:wx-user-3"] = "ctx-3"  # noqa: SLF001
 
     await adapter._handle_inbound_message(
         {  # noqa: SLF001
@@ -182,6 +187,7 @@ async def test_handle_inbound_non_text_message_replies_with_text_only_notice() -
             "base_url": "https://ilinkai.weixin.qq.com",
         }
     ]
+    assert "wechat:acc-1:wx-user-3" not in adapter._context_tokens  # noqa: SLF001
 
 
 async def test_send_message_uses_cached_context_token() -> None:
@@ -193,12 +199,47 @@ async def test_send_message_uses_cached_context_token() -> None:
         api_client=client,
     )
     adapter._state = _state()  # noqa: SLF001
-    adapter._context_tokens["wechat:acc-1:wx-user-4"] = "ctx-4"  # noqa: SLF001
+    await adapter._handle_inbound_message(
+        {  # noqa: SLF001
+            "message_id": 104,
+            "from_user_id": "wx-user-4",
+            "message_type": 1,
+            "context_token": "ctx-4",
+            "item_list": [{"type": 1, "text_item": {"text": "ping"}}],
+        }
+    )
 
     await adapter.send_message("wechat:acc-1:wx-user-4", MessageContent(text="reply"))
 
     assert client.sent_messages[0]["context_token"] == "ctx-4"
     assert client.sent_messages[0]["text"] == "reply"
+    assert "wechat:acc-1:wx-user-4" not in adapter._context_tokens  # noqa: SLF001
+
+
+async def test_send_message_clears_ret_minus_two_context_token() -> None:
+    client = _FakeIlinkClient()
+    client.send_error = ILinkApiError("failed", ret=-2, errmsg="")
+    adapter = WeChatAdapter(
+        WeChatConfig(enabled=True),
+        _FakeMsgHub(),  # type: ignore[arg-type]
+        state_store=_FakeStateStore(_state()),
+        api_client=client,
+    )
+    adapter._state = _state()  # noqa: SLF001
+    await adapter._handle_inbound_message(
+        {  # noqa: SLF001
+            "message_id": 105,
+            "from_user_id": "wx-user-6",
+            "message_type": 1,
+            "context_token": "ctx-6",
+            "item_list": [{"type": 1, "text_item": {"text": "ping"}}],
+        }
+    )
+
+    with pytest.raises(ILinkApiError):
+        await adapter.send_message("wechat:acc-1:wx-user-6", MessageContent(text="reply"))
+
+    assert "wechat:acc-1:wx-user-6" not in adapter._context_tokens  # noqa: SLF001
 
 
 async def test_send_message_without_context_token_raises_explicit_error() -> None:

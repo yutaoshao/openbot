@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+from dataclasses import dataclass
+from time import monotonic
 from typing import TYPE_CHECKING, Any
 
 from src.channels.types import MessageContent, UnifiedMessage
@@ -24,6 +26,14 @@ _PROACTIVE_SEND_UNSUPPORTED = (
 )
 _EMPTY_MESSAGE_REPLY = "当前微信通道暂时无法处理空消息。"
 _DEFAULT_POLL_TIMEOUT_MS = 35_000
+_ILINK_CONTEXT_INVALID_RET = -2
+
+
+@dataclass(frozen=True)
+class _ContextToken:
+    value: str
+    source_message_id: str
+    received_at: float
 
 
 class WeChatAdapter:
@@ -44,7 +54,7 @@ class WeChatAdapter:
         self._state: WeChatLoginState | None = None
         self._poll_task: asyncio.Task[None] | None = None
         self._stop_event = asyncio.Event()
-        self._context_tokens: dict[str, str] = {}
+        self._context_tokens: dict[str, _ContextToken] = {}
         self._status = "starting"
         self._last_error = ""
 
@@ -90,21 +100,16 @@ class WeChatAdapter:
                 "WeChat conversation account mismatch: "
                 f"expected {state.account_id}, got {account_id}"
             )
-        context_token = self._context_tokens.get(chat_id)
-        if not context_token:
+        token = self._context_tokens.get(chat_id)
+        if not token:
             logger.warning("wechat.proactive_send_unsupported", conversation_id=chat_id)
             raise RuntimeError(_PROACTIVE_SEND_UNSUPPORTED)
         try:
-            await self._api.send_text_message(
-                bot_token=state.bot_token,
-                to_user_id=peer_id,
-                text=content.text,
-                context_token=context_token,
-                base_url=state.api_base_url,
-            )
+            await self._send_text(state=state, peer_id=peer_id, text=content.text, token=token)
+            self._discard_context_token(chat_id, token, reason="sent")
         except ILinkApiError as exc:
             if self._is_context_invalid_error(exc):
-                self._context_tokens.pop(chat_id, None)
+                self._discard_context_token(chat_id, token, reason="invalid")
             raise
 
     async def _poll_loop(self) -> None:
@@ -149,12 +154,17 @@ class WeChatAdapter:
         if not peer_id:
             return
         conversation_id = self._conversation_id(state.account_id, peer_id)
-        context_token = str(payload.get("context_token", "")).strip()
-        if context_token:
-            self._context_tokens[conversation_id] = context_token
+        message_id = self._message_id(payload, peer_id)
         if payload.get("group_id"):
             logger.debug("wechat.group_ignored", conversation_id=conversation_id)
             return
+        context_token = str(payload.get("context_token", "")).strip()
+        if context_token:
+            self._context_tokens[conversation_id] = _ContextToken(
+                value=context_token,
+                source_message_id=message_id,
+                received_at=monotonic(),
+            )
         text = self._extract_text(payload.get("item_list"))
         if text is None:
             await self._reply_with_context(conversation_id, peer_id, _TEXT_ONLY_REPLY)
@@ -163,7 +173,7 @@ class WeChatAdapter:
             await self._reply_with_context(conversation_id, peer_id, _EMPTY_MESSAGE_REPLY)
             return
         message = UnifiedMessage(
-            id=str(payload.get("message_id") or payload.get("seq") or peer_id),
+            id=message_id,
             platform="wechat",
             sender_id=peer_id,
             conversation_id=conversation_id,
@@ -179,20 +189,54 @@ class WeChatAdapter:
 
     async def _reply_with_context(self, conversation_id: str, peer_id: str, text: str) -> None:
         state = self._require_state()
-        context_token = self._context_tokens.get(conversation_id)
-        if not context_token:
+        token = self._context_tokens.get(conversation_id)
+        if not token:
             logger.warning(
                 "wechat.context_token_missing",
                 conversation_id=conversation_id,
                 text=text,
             )
             return
+        await self._send_text(state=state, peer_id=peer_id, text=text, token=token)
+        self._discard_context_token(conversation_id, token, reason="sent")
+
+    async def _send_text(
+        self,
+        *,
+        state: WeChatLoginState,
+        peer_id: str,
+        text: str,
+        token: _ContextToken,
+    ) -> None:
+        logger.info(
+            "wechat.send_context",
+            source_message_id=token.source_message_id,
+            context_token_len=len(token.value),
+            context_token_age_ms=int((monotonic() - token.received_at) * 1000),
+        )
         await self._api.send_text_message(
             bot_token=state.bot_token,
             to_user_id=peer_id,
             text=text,
-            context_token=context_token,
+            context_token=token.value,
             base_url=state.api_base_url,
+        )
+
+    def _discard_context_token(
+        self,
+        conversation_id: str,
+        token: _ContextToken,
+        *,
+        reason: str,
+    ) -> None:
+        if self._context_tokens.get(conversation_id) != token:
+            return
+        self._context_tokens.pop(conversation_id, None)
+        logger.info(
+            "wechat.context_token_discarded",
+            conversation_id=conversation_id,
+            source_message_id=token.source_message_id,
+            reason=reason,
         )
 
     def _require_state(self) -> WeChatLoginState:
@@ -228,6 +272,12 @@ class WeChatAdapter:
         return None
 
     @staticmethod
+    def _message_id(payload: dict[str, Any], peer_id: str) -> str:
+        return str(payload.get("message_id") or payload.get("seq") or peer_id)
+
+    @staticmethod
     def _is_context_invalid_error(exc: ILinkApiError) -> bool:
+        if exc.ret == _ILINK_CONTEXT_INVALID_RET:
+            return True
         errmsg = (exc.errmsg or "").lower()
         return "context" in errmsg and ("invalid" in errmsg or "expired" in errmsg)

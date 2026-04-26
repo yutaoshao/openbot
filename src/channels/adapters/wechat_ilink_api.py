@@ -42,10 +42,12 @@ class ILinkApiError(RuntimeError):
         self,
         message: str,
         *,
+        ret: int | None = None,
         errcode: int | None = None,
         errmsg: str | None = None,
     ) -> None:
         super().__init__(message)
+        self.ret = ret
         self.errcode = errcode
         self.errmsg = errmsg
 
@@ -256,6 +258,7 @@ class WeChatIlinkClient:
             "iLink "
             f"{endpoint} failed: ret={ret} errcode={errcode} "
             f"errmsg={payload.get('errmsg', '')}",
+            ret=ret if isinstance(ret, int) else None,
             errcode=errcode if isinstance(errcode, int) else None,
             errmsg=str(payload.get("errmsg", "")),
         )
