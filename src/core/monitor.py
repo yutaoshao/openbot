@@ -8,6 +8,7 @@ from statistics import mean
 from typing import TYPE_CHECKING, Any
 
 from src.core.logging import get_logger
+from src.core.monitor_tokens import aggregate_token_events
 
 if TYPE_CHECKING:
     from src.infrastructure.event_bus import EventBus
@@ -196,32 +197,7 @@ class MetricsCollector:
 
     async def get_tokens(self, period: str = "7d") -> dict[str, Any]:
         events = await self._query_period(period=period, event_name="model.request")
-        total_in = 0
-        total_out = 0
-        daily: dict[str, dict[str, int]] = defaultdict(lambda: {"tokens_in": 0, "tokens_out": 0})
-
-        for item in events:
-            data = item.get("data") or {}
-            tokens_in = int(data.get("tokens_in") or 0)
-            tokens_out = int(data.get("tokens_out") or 0)
-            total_in += tokens_in
-            total_out += tokens_out
-
-            ts = _parse_iso(item.get("timestamp"))
-            day = ts.date().isoformat() if ts else "unknown"
-            daily[day]["tokens_in"] += tokens_in
-            daily[day]["tokens_out"] += tokens_out
-
-        return {
-            "period": period,
-            "tokens_in": total_in,
-            "tokens_out": total_out,
-            "avg_tokens_in_per_request": (total_in / len(events)) if events else 0.0,
-            "avg_tokens_out_per_request": (total_out / len(events)) if events else 0.0,
-            "daily": [
-                {"date": date, **value} for date, value in sorted(daily.items(), key=lambda x: x[0])
-            ],
-        }
+        return aggregate_token_events(events, period)
 
     async def get_cost(self, period: str = "30d") -> dict[str, Any]:
         events = await self._query_period(period=period, event_name="model.request")

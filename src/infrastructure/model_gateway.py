@@ -7,12 +7,18 @@ Provider implementations live in src/infrastructure/providers/.
 from __future__ import annotations
 
 import asyncio
-import json
 import time
-from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Literal, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any
 
 from src.core.logging import get_logger
+from src.infrastructure.model_types import (
+    ModelProvider,
+    ModelResponse,
+    StreamChunk,
+    ToolCall,
+    Usage,
+)
+from src.infrastructure.model_usage import llm_completed_fields, model_request_payload
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -22,89 +28,14 @@ if TYPE_CHECKING:
 
 logger = get_logger(__name__)
 
-
-@dataclass
-class ToolCall:
-    """A tool call requested by the model."""
-
-    id: str
-    name: str
-    arguments: dict[str, Any]
-
-
-@dataclass
-class Usage:
-    """Token usage metadata for a single request."""
-
-    tokens_in: int = 0
-    tokens_out: int = 0
-    cost_usd: float = 0.0
-
-
-@dataclass
-class ModelResponse:
-    """Unified response from any model provider."""
-
-    text: str = ""
-    tool_calls: list[ToolCall] = field(default_factory=list)
-    usage: Usage = field(default_factory=Usage)
-    model: str = ""
-    latency_ms: int = 0
-
-    @property
-    def has_tool_calls(self) -> bool:
-        return len(self.tool_calls) > 0
-
-    def to_assistant_message(self) -> dict[str, Any]:
-        """Convert to message dict for conversation context (OpenAI format)."""
-        msg: dict[str, Any] = {"role": "assistant"}
-        if self.text:
-            msg["content"] = self.text
-        if self.tool_calls:
-            msg["tool_calls"] = [
-                {
-                    "id": tc.id,
-                    "type": "function",
-                    "function": {
-                        "name": tc.name,
-                        "arguments": json.dumps(tc.arguments, ensure_ascii=False),
-                    },
-                }
-                for tc in self.tool_calls
-            ]
-        return msg
-
-
-@dataclass
-class StreamChunk:
-    """A single chunk from a streaming model response."""
-
-    type: Literal["text", "tool_call", "tool_status", "done"]
-    text: str = ""
-    tool_call: ToolCall | None = None
-    tool_name: str = ""  # type="tool_status"
-    usage: Usage | None = None  # type="done"
-    model: str = ""  # type="done"
-    iterations: int = 0  # type="done" — ReAct loop iteration count
-
-
-@runtime_checkable
-class ModelProvider(Protocol):
-    """Protocol for LLM provider implementations."""
-
-    async def chat(
-        self,
-        messages: list[dict[str, Any]],
-        tools: list[dict[str, Any]] | None = None,
-        **kwargs: Any,
-    ) -> ModelResponse: ...
-
-    async def chat_stream(
-        self,
-        messages: list[dict[str, Any]],
-        tools: list[dict[str, Any]] | None = None,
-        **kwargs: Any,
-    ) -> AsyncIterator[StreamChunk]: ...
+__all__ = [
+    "ModelGateway",
+    "ModelProvider",
+    "ModelResponse",
+    "StreamChunk",
+    "ToolCall",
+    "Usage",
+]
 
 
 class ModelGateway:
@@ -184,25 +115,21 @@ class ModelGateway:
 
                     logger.info(
                         "llm_completed",
-                        surface="operational",
-                        provider=provider_key,
-                        model=response.model,
-                        token_in=response.usage.tokens_in,
-                        token_out=response.usage.tokens_out,
-                        cost_usd=response.usage.cost_usd,
-                        latency_ms=response.latency_ms,
+                        **llm_completed_fields(
+                            provider=provider_key,
+                            model=response.model,
+                            usage=response.usage,
+                            latency_ms=response.latency_ms,
+                        ),
                     )
-
                     await self.event_bus.publish(
                         "model.request",
-                        {
-                            "provider": provider_key,
-                            "model": response.model,
-                            "tokens_in": response.usage.tokens_in,
-                            "tokens_out": response.usage.tokens_out,
-                            "cost_usd": response.usage.cost_usd,
-                            "latency_ms": response.latency_ms,
-                        },
+                        model_request_payload(
+                            provider=provider_key,
+                            model=response.model,
+                            usage=response.usage,
+                            latency_ms=response.latency_ms,
+                        ),
                     )
 
                     return response
@@ -271,26 +198,23 @@ class ModelGateway:
                                 provider_key,
                                 chunk.usage,
                             )
-                            await self.event_bus.publish(
-                                "model.request",
-                                {
-                                    "provider": provider_key,
-                                    "model": chunk.model,
-                                    "tokens_in": chunk.usage.tokens_in,
-                                    "tokens_out": chunk.usage.tokens_out,
-                                    "cost_usd": chunk.usage.cost_usd,
-                                    "latency_ms": latency_ms,
-                                },
-                            )
                             logger.info(
                                 "llm_completed",
-                                surface="operational",
-                                provider=provider_key,
-                                model=chunk.model,
-                                token_in=chunk.usage.tokens_in,
-                                token_out=chunk.usage.tokens_out,
-                                cost_usd=chunk.usage.cost_usd,
-                                latency_ms=latency_ms,
+                                **llm_completed_fields(
+                                    provider=provider_key,
+                                    model=chunk.model,
+                                    usage=chunk.usage,
+                                    latency_ms=latency_ms,
+                                ),
+                            )
+                            await self.event_bus.publish(
+                                "model.request",
+                                model_request_payload(
+                                    provider=provider_key,
+                                    model=chunk.model,
+                                    usage=chunk.usage,
+                                    latency_ms=latency_ms,
+                                ),
                             )
                         yield chunk
                     return  # noqa: B012 — stream consumed, done

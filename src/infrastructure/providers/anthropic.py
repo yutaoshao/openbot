@@ -13,6 +13,21 @@ if TYPE_CHECKING:
 from src.infrastructure.model_gateway import ModelResponse, StreamChunk, ToolCall, Usage
 
 
+def _usage_from_anthropic(raw_usage: Any | None) -> Usage:
+    if raw_usage is None:
+        return Usage()
+    return Usage(
+        tokens_in=int(getattr(raw_usage, "input_tokens", 0) or 0),
+        tokens_out=int(getattr(raw_usage, "output_tokens", 0) or 0),
+        cached_tokens=_anthropic_cache_read_tokens(raw_usage),
+    )
+
+
+def _anthropic_cache_read_tokens(raw_usage: Any) -> int | None:
+    value = getattr(raw_usage, "cache_read_input_tokens", None)
+    return int(value) if value is not None else None
+
+
 class ClaudeProvider:
     """Anthropic Claude API provider."""
 
@@ -122,10 +137,7 @@ class ClaudeProvider:
         return ModelResponse(
             text="\n".join(text_parts),
             tool_calls=tool_calls,
-            usage=Usage(
-                tokens_in=response.usage.input_tokens,
-                tokens_out=response.usage.output_tokens,
-            ),
+            usage=_usage_from_anthropic(response.usage),
             model=self.model,
             latency_ms=latency_ms,
         )
@@ -198,8 +210,7 @@ class ClaudeProvider:
         # Accumulate tool use blocks: block_index -> {id, name, input_json_str}
         tc_accum: dict[int, dict[str, str]] = {}
         current_block_idx = -1
-        tokens_in = 0
-        tokens_out = 0
+        usage = Usage()
 
         async with self.client.messages.stream(**call_kwargs) as stream:
             async for event in stream:
@@ -224,11 +235,13 @@ class ClaudeProvider:
 
                 elif event_type == "message_delta":
                     if hasattr(event, "usage") and event.usage:
-                        tokens_out = event.usage.output_tokens
+                        usage.tokens_out = event.usage.output_tokens
 
                 elif event_type == "message_start":
                     if hasattr(event, "message") and event.message.usage:
-                        tokens_in = event.message.usage.input_tokens
+                        start_usage = _usage_from_anthropic(event.message.usage)
+                        usage.tokens_in = start_usage.tokens_in
+                        usage.cached_tokens = start_usage.cached_tokens
 
         # Yield accumulated tool calls
         import json
@@ -246,6 +259,6 @@ class ClaudeProvider:
 
         yield StreamChunk(
             type="done",
-            usage=Usage(tokens_in=tokens_in, tokens_out=tokens_out),
+            usage=usage,
             model=self.model,
         )

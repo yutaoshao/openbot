@@ -3,6 +3,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 from src.agent.conversation import _WORKING_MEMORY_IDLE_TTL_SECONDS, ConversationManager
+from src.agent.conversation import prompt_builder as prompt_builder_module
 from src.core.user_scope import SINGLE_USER_ID
 
 
@@ -104,6 +105,27 @@ class _PromptContextTier(_NoopMemoryTier):
         return [{"category": "fact", "content": "shared context"}]
 
 
+class _FailingPromptTier(_NoopMemoryTier):
+    async def get_system_prompt_context(self, user_id: str) -> str:
+        raise RuntimeError("preference lookup failed")
+
+    async def recall(
+        self,
+        user_input: str,
+        user_id: str,
+        limit: int = 3,
+    ) -> list[dict[str, str]]:
+        raise RuntimeError("recall failed")
+
+
+class _WarningRecorder:
+    def __init__(self) -> None:
+        self.events: list[tuple[str, dict[str, object]]] = []
+
+    def warning(self, event: str, **fields: object) -> None:
+        self.events.append((event, fields))
+
+
 async def test_get_or_create_does_not_prune_idle_working_memories_inline() -> None:
     episodic = _NoopMemoryTier()
     storage = SimpleNamespace(
@@ -190,3 +212,41 @@ async def test_build_messages_uses_shared_cross_platform_timeline() -> None:
     assert "来自 Telegram 的消息" in rendered
     assert "来自微信的消息" in rendered
     assert "shared context" in rendered
+
+
+async def test_build_messages_logs_memory_context_failures(monkeypatch) -> None:
+    recorder = _WarningRecorder()
+    monkeypatch.setattr(prompt_builder_module, "logger", recorder, raising=False)
+    failing = _FailingPromptTier()
+    storage = SimpleNamespace(
+        conversations=_FakeConversationRepo(),
+        messages=_FakeMessageRepo(),
+    )
+    manager = ConversationManager(
+        storage=storage,
+        model_gateway=object(),
+        semantic_memory=failing,
+        episodic_memory=failing,
+        procedural_memory=failing,
+    )
+
+    await manager.get_or_create_conversation("conv-1", "web", SINGLE_USER_ID)
+    await manager.add_user_message("conv-1", "hello")
+    messages = await manager.build_messages(
+        "conv-1",
+        "system base",
+        "hello",
+        SINGLE_USER_ID,
+    )
+
+    assert messages[0]["content"] == "system base"
+    assert [event for event, _fields in recorder.events] == [
+        "conversation.prompt_context_failed",
+        "conversation.prompt_context_failed",
+        "conversation.prompt_context_failed",
+    ]
+    assert [fields["tier"] for _event, fields in recorder.events] == [
+        "procedural",
+        "semantic",
+        "episodic",
+    ]

@@ -41,6 +41,30 @@ def _merge_tool_name(existing: str, delta: str) -> str:
     return existing + delta
 
 
+def _usage_from_openai(raw_usage: Any | None) -> Usage:
+    """Convert OpenAI-compatible usage metadata into OpenBot usage fields."""
+    if raw_usage is None:
+        return Usage()
+    tokens_in = int(getattr(raw_usage, "prompt_tokens", 0) or 0)
+    tokens_out = int(getattr(raw_usage, "completion_tokens", 0) or 0)
+    return Usage(
+        tokens_in=tokens_in,
+        tokens_out=tokens_out,
+        cached_tokens=_cached_tokens_from_usage(raw_usage),
+    )
+
+
+def _cached_tokens_from_usage(raw_usage: Any) -> int | None:
+    details = getattr(raw_usage, "prompt_tokens_details", None)
+    if details is None:
+        return None
+    if isinstance(details, dict):
+        value = details.get("cached_tokens")
+    else:
+        value = getattr(details, "cached_tokens", None)
+    return int(value) if value is not None else None
+
+
 class OpenAICompatibleProvider:
     """Provider for any OpenAI-compatible API endpoint."""
 
@@ -122,14 +146,10 @@ class OpenAICompatibleProvider:
                     )
                 )
 
-        # Usage may not be present in all providers
-        tokens_in = response.usage.prompt_tokens if response.usage else 0
-        tokens_out = response.usage.completion_tokens if response.usage else 0
-
         return ModelResponse(
             text=text,
             tool_calls=tool_calls,
-            usage=Usage(tokens_in=tokens_in, tokens_out=tokens_out),
+            usage=_usage_from_openai(response.usage),
             model=self.model,
             latency_ms=latency_ms,
         )
@@ -172,15 +192,13 @@ class OpenAICompatibleProvider:
 
         # Accumulate tool call deltas (index -> {id, name, arguments_str})
         tc_accum: dict[int, dict[str, str]] = {}
-        tokens_in = 0
-        tokens_out = 0
+        usage = Usage()
         accumulated_text = ""
 
         async for event in stream:
             # Usage chunk (sent at stream end when include_usage=True)
             if event.usage:
-                tokens_in = event.usage.prompt_tokens or 0
-                tokens_out = event.usage.completion_tokens or 0
+                usage = _usage_from_openai(event.usage)
 
             if not event.choices:
                 continue
@@ -234,30 +252,34 @@ class OpenAICompatibleProvider:
         # Estimate tokens if the API didn't report usage
         latency_ms = int((time.monotonic() - start) * 1000)
 
-        if tokens_in == 0 and tokens_out == 0:
+        if usage.tokens_in == 0 and usage.tokens_out == 0:
             # Rough estimate: ~3 chars/token for mixed CJK/Latin
             input_chars = sum(len(str(m.get("content", ""))) for m in messages)
-            tokens_in = max(1, input_chars // 3)
             output_chars = len(accumulated_text)
             for acc in tc_accum.values():
                 output_chars += len(acc.get("arguments", ""))
-            tokens_out = max(1, output_chars // 3)
+            usage = Usage(
+                tokens_in=max(1, input_chars // 3),
+                tokens_out=max(1, output_chars // 3),
+            )
             logger.debug(
                 "openai_compat.usage_estimated",
-                tokens_in=tokens_in,
-                tokens_out=tokens_out,
+                tokens_in=usage.tokens_in,
+                tokens_out=usage.tokens_out,
             )
 
         yield StreamChunk(
             type="done",
-            usage=Usage(tokens_in=tokens_in, tokens_out=tokens_out),
+            usage=usage,
             model=self.model,
         )
 
         logger.debug(
             "openai_compat.stream_done",
             model=self.model,
-            tokens_in=tokens_in,
-            tokens_out=tokens_out,
+            tokens_in=usage.tokens_in,
+            tokens_out=usage.tokens_out,
+            cached_tokens=usage.cached_tokens,
+            cache_hit_ratio=usage.cache_hit_ratio,
             latency_ms=latency_ms,
         )
