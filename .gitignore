@@ -34,3 +34,4 @@ frontend/dist/
 /.claude/
 /.agents/
 /skills-lock.json
+.impeccable.md
