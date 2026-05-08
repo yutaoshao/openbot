@@ -9,6 +9,7 @@ from typing import Any
 from src.agent.verification import verify_final_response
 from src.core.logging import get_logger
 from src.infrastructure.model_gateway import StreamChunk, Usage
+from src.infrastructure.model_routing import RouteRequest
 
 from . import prompting
 from .finalize import finalize_agent_run
@@ -19,6 +20,7 @@ logger = get_logger(__name__)
 
 build_system_prompt = prompting.build_system_prompt
 prepare_agent_turn = prompting.prepare_agent_turn
+resolve_route_tool_names = prompting.resolve_route_tool_names
 resolve_tools = prompting.resolve_tools
 
 
@@ -38,6 +40,7 @@ async def run_stream_inner(
         platform,
         user_id,
     )
+    route_decision = _route_decision(agent, input_text, _task_state(agent, conversation_id))
     await agent.event_bus.publish(
         "agent.think.start",
         {"conversation_id": conversation_id, "input_length": len(input_text)},
@@ -74,7 +77,12 @@ async def run_stream_inner(
         )
 
         round_result = None
-        async for event in stream_model_round(agent, messages, current_tools):
+        async for event in stream_model_round(
+            agent,
+            messages,
+            current_tools,
+            route_decision=route_decision,
+        ):
             if isinstance(event, StreamChunk):
                 if event.type == "text" and event.text:
                     streamed_any_text = True
@@ -201,6 +209,14 @@ def _task_state(agent: Any, conversation_id: str) -> Any:
     if not agent.conversation_manager or not conversation_id:
         return None
     return agent.conversation_manager.get_task_state(conversation_id)
+
+
+def _route_decision(agent: Any, input_text: str, task_state: Any) -> Any:
+    decide_route = getattr(agent.model_gateway, "decide_route", None)
+    if not callable(decide_route):
+        return None
+    tool_names = resolve_route_tool_names(agent, input_text, task_state=task_state)
+    return decide_route(RouteRequest(input_text=input_text, tool_names=tool_names))
 
 
 def _timeout_text(agent: Any, task_start: float, iterations: int) -> str:

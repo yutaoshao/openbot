@@ -18,43 +18,36 @@ import yaml
 from dotenv import load_dotenv
 from pydantic import BaseModel, Field, field_validator
 
+from src.core.model_config import (
+    ModelConfig,
+    ModelProviderConfig,
+    ModelRoutingConfig,
+    ModelRoutingRulesConfig,
+)
+
+__all__ = [
+    "AgentConfig",
+    "ApiConfig",
+    "AppConfig",
+    "EmbeddingConfig",
+    "FeishuConfig",
+    "LogConfig",
+    "ModelConfig",
+    "ModelProviderConfig",
+    "ModelRoutingConfig",
+    "ModelRoutingRulesConfig",
+    "RerankerConfig",
+    "SchedulerConfig",
+    "StorageConfig",
+    "TelegramConfig",
+    "WeChatConfig",
+    "load_config",
+]
+
 
 def _expand_user_path(value: str) -> str:
     """Expand ``~`` and env vars while preserving relative paths."""
     return str(Path(os.path.expandvars(value)).expanduser())
-
-
-class ModelProviderConfig(BaseModel):
-    """Single model provider configuration."""
-
-    provider: Literal["anthropic", "openai_compatible"] = "anthropic"
-    model: str = "claude-sonnet-4-20250514"
-    base_url: str | None = None
-    max_tokens: int = 4096
-    temperature: float = 0.7
-    # Name of the environment variable that holds the API key
-    api_key_env: str = "ANTHROPIC_API_KEY"
-    pricing_input: float | None = None
-    pricing_output: float | None = None
-    # Connection timeout: max seconds to establish TCP connection (fast-fail)
-    connect_timeout: float = 30.0
-    # Read timeout: max seconds to wait for first token from model
-    # Set higher for slow-thinking models (DeepSeek R1, o1, etc.)
-    read_timeout: float = 300.0
-
-    @property
-    def api_key(self) -> str:
-        """Resolve API key from environment variable."""
-        return os.environ.get(self.api_key_env, "")
-
-
-class ModelConfig(BaseModel):
-    """Model gateway configuration."""
-
-    primary: ModelProviderConfig = Field(default_factory=ModelProviderConfig)
-    fallback: ModelProviderConfig | None = None
-    max_retries: int = 3
-    retry_base_delay: float = 1.0
 
 
 class TelegramConfig(BaseModel):
