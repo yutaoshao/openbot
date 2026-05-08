@@ -8,6 +8,7 @@ build/
 
 # Environment
 .env
+config.yaml
 
 # Database
 *.db
@@ -27,6 +28,7 @@ Thumbs.db
 # Node (frontend)
 node_modules/
 frontend/dist/
+*.tsbuildinfo
 
 # Misc
 *.log

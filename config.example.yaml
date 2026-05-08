@@ -1,0 +1,105 @@
+# OpenBot Example Configuration
+# Copy this file to config.yaml for local use.
+# Secrets (API keys, bot tokens) go in .env and are referenced here by env var name.
+
+model:
+  primary:
+    provider: openai_compatible
+    model: example-fast-model
+    base_url: https://api.example.com/v1
+    api_key_env: OPENBOT_MODEL_API_KEY
+    max_tokens: 4096
+    temperature: 0.7
+    pricing_input: 0.0                 # per 1M tokens
+    pricing_output: 0.0
+    connect_timeout: 30
+    read_timeout: 300
+  fallback: null
+  routing:
+    enabled: false
+    default_tier: complex
+    tiers:
+      simple:
+        provider: openai_compatible
+        model: example-fast-model
+        base_url: https://api.example.com/v1
+        api_key_env: OPENBOT_MODEL_API_KEY
+        max_tokens: 4096
+        temperature: 0.7
+        pricing_input: 0.0
+        pricing_output: 0.0
+        connect_timeout: 30
+        read_timeout: 300
+      complex:
+        provider: openai_compatible
+        model: example-reasoning-model
+        base_url: https://api.example.com/v1
+        api_key_env: OPENBOT_MODEL_API_KEY
+        max_tokens: 4096
+        temperature: 0.7
+        pricing_input: 0.0
+        pricing_output: 0.0
+        connect_timeout: 30
+        read_timeout: 600
+    rules:
+      simple_max_chars: 120
+      complex_min_chars: 600
+      tool_count_complex_threshold: 2
+      simple_keywords: ["翻译", "总结", "translate", "summarize", "explain"]
+      complex_keywords: ["调试", "实现", "重构", "debug", "implement", "refactor"]
+  max_retries: 3
+
+telegram:
+  enabled: false
+  mode: polling
+  bot_token_env: TELEGRAM_BOT_TOKEN
+  enable_streaming: true
+  allowed_user_ids: []
+
+feishu:
+  enabled: false
+  mode: long_connection
+  app_id_env: FEISHU_APP_ID
+  app_secret_env: FEISHU_APP_SECRET
+  verification_token_env: FEISHU_VERIFICATION_TOKEN
+  encrypt_key_env: FEISHU_ENCRYPT_KEY
+
+wechat:
+  enabled: false
+  mode: ilink_polling
+  state_path: data/wechat/ilink_state.json
+  api_base_url: https://ilinkai.weixin.qq.com
+  poll_interval: 2.0
+  max_backoff: 30.0
+
+storage:
+  db_path: data/openbot.db
+  workspace_path: data/workspace
+
+log:
+  level: INFO
+  format: console
+  file: null
+
+agent:
+  max_iterations: 50
+  task_timeout: 0
+  tool_timeout: 120
+  max_task_cost: 0
+  stuck_detection_threshold: 3
+  token_budget: 8000
+
+embedding:
+  enabled: false
+  provider: openai_compatible
+  model: example-embedding-model
+  base_url: https://api.example.com/v1
+  api_key_env: OPENBOT_EMBEDDING_API_KEY
+  dimensions: 1024
+
+reranker:
+  enabled: false
+  model: example-reranker-model
+  base_url: https://api.example.com/v1
+  api_key_env: OPENBOT_RERANKER_API_KEY
+  top_n: 5
