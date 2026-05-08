@@ -51,7 +51,12 @@ FEISHU_VERIFICATION_TOKEN=your_feishu_verification_token
 FEISHU_ENCRYPT_KEY=your_feishu_encrypt_key
 ```
 
-2. 编辑 `config.yaml` 配置非敏感项（模型、参数、适配器等）。
+2. 复制示例配置，再编辑本地非敏感项（模型、参数、适配器等）。
+   `config.yaml` 会被忽略，避免把本地 endpoint 和运行时选择提交到 GitHub。
+
+```bash
+cp config.example.yaml config.yaml
+```
 
 ```yaml
 telegram:
@@ -163,7 +168,7 @@ uv run python -m src.channels.adapters.wechat_login
 ```
 openbot/
 ├── main.py                          # 应用入口
-├── config.yaml                      # 非敏感配置
+├── config.example.yaml              # 示例配置；复制为本地 config.yaml 使用
 ├── src/
 │   ├── application/                 # 组合根与运行时编排
 │   │   ├── container.py             # Application 对象图
@@ -174,7 +179,8 @@ openbot/
 │   │   ├── event_bus.py             # 支持通配符的异步 pub/sub
 │   │   ├── database.py              # SQLite schema 与 migration
 │   │   ├── storage/                 # Repository 分包
-│   │   ├── model_gateway.py         # 多模型供应商网关（retry / fallback / streaming）
+│   │   ├── model_gateway.py         # 多模型供应商网关（routing / retry / fallback / streaming）
+│   │   ├── model_routing.py         # simple / complex 确定性路由分类器
 │   │   ├── embedding.py             # Embedding 服务（OpenAI-compatible + DashScope）
 │   │   ├── reranker.py              # Reranker 服务（SiliconFlow / Jina / Cohere）
 │   │   └── providers/
@@ -339,6 +345,10 @@ openbot/
 - 通过 Ollama / vLLM 运行的本地模型
 
 支持主模型 + 回退模型，并具备自动重试和指数退避。
+
+可选模型路由可以在每次 Agent 运行时，根据确定性的 prompt / tool 规则选择
+`simple` 或 `complex` 档位。路由负责先选哪个模型档位；fallback 仍只处理
+provider 失败后的回退。
 
 ## 测试
 

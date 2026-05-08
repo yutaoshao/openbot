@@ -51,7 +51,13 @@ FEISHU_VERIFICATION_TOKEN=your_feishu_verification_token
 FEISHU_ENCRYPT_KEY=your_feishu_encrypt_key
 ```
 
-2. Edit `config.yaml` for non-secret settings (model, parameters, adapters).
+2. Copy the example config, then edit local non-secret settings (model, parameters,
+   adapters). `config.yaml` is intentionally ignored so local endpoints and runtime
+   choices stay off GitHub.
+
+```bash
+cp config.example.yaml config.yaml
+```
 
 ```yaml
 telegram:
@@ -163,7 +169,7 @@ Manual validation checklist:
 ```
 openbot/
 ├── main.py                          # Application entrypoint
-├── config.yaml                      # Non-secret configuration
+├── config.example.yaml              # Example configuration; copy to local config.yaml
 ├── src/
 │   ├── application/                 # Composition root + runtime orchestration
 │   │   ├── container.py             # Application object graph
@@ -174,7 +180,8 @@ openbot/
 │   │   ├── event_bus.py             # Async pub/sub with wildcard matching
 │   │   ├── database.py              # SQLite schema and migrations
 │   │   ├── storage/                 # Repository layer packages
-│   │   ├── model_gateway.py         # Multi-provider LLM gateway (retry/fallback/streaming)
+│   │   ├── model_gateway.py         # Multi-provider LLM gateway (routing/retry/fallback/streaming)
+│   │   ├── model_routing.py         # Deterministic simple/complex route classifier
 │   │   ├── embedding.py             # Embedding service (OpenAI-compat + DashScope)
 │   │   ├── reranker.py              # Reranker service (SiliconFlow/Jina/Cohere)
 │   │   └── providers/
@@ -339,6 +346,10 @@ Any OpenAI-compatible API endpoint, including:
 - Local models via Ollama / vLLM
 
 Primary + fallback models with automatic retry and exponential backoff.
+
+Optional model routing can select a configured `simple` or `complex` tier per
+agent run using deterministic prompt/tool rules. Routing decides which model
+tier to try first; fallback still only handles provider failures.
 
 ## Testing
 
