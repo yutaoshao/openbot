@@ -90,7 +90,9 @@ class DashScopeEmbeddingProvider:
         self._model = config.model
         self._dimensions = config.dimensions
         self._api_key = config.api_key
-        self._is_multimodal = "vl" in config.model.lower()
+        self._is_multimodal = any(
+            kw in config.model.lower() for kw in ("vl", "vision")
+        )
 
         # Set API key for dashscope SDK
         dashscope.api_key = self._api_key

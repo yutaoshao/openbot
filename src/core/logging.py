@@ -243,7 +243,7 @@ def setup_logging(
     fmt: str = "console",
     log_file: str | None = None,
     max_bytes: int = 10 * 1024 * 1024,  # 10 MB
-    backup_count: int = 5,
+    backup_count: int = 10,
 ) -> None:
     """Initialize structlog with trace context injection and PII sanitization.
 
