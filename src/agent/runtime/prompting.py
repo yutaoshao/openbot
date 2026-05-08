@@ -97,3 +97,18 @@ def resolve_tools(
     if task_state is not None:
         active_names.update(task_state.activated_tools)
     return agent.tool_registry.get_schemas(active_names=active_names)
+
+
+def resolve_route_tool_names(
+    agent: Any,
+    input_text: str,
+    *,
+    task_state: Any = None,
+) -> tuple[str, ...]:
+    """Return tools that indicate user-requested extra capability."""
+    if not agent.tool_registry:
+        return ()
+    names = set(agent.tool_registry.match_deferred(input_text))
+    if task_state is not None:
+        names.update(task_state.activated_tools)
+    return tuple(sorted(names))

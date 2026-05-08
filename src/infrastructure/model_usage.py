@@ -14,8 +14,10 @@ def model_request_payload(
     model: str,
     usage: Usage,
     latency_ms: int,
+    route_tier: str | None = None,
+    route_reason: str | None = None,
 ) -> dict[str, Any]:
-    return {
+    payload = {
         "provider": provider,
         "model": model,
         "tokens_in": usage.tokens_in,
@@ -25,6 +27,11 @@ def model_request_payload(
         "cost_usd": usage.cost_usd,
         "latency_ms": latency_ms,
     }
+    if route_tier is not None:
+        payload["route_tier"] = route_tier
+    if route_reason is not None:
+        payload["route_reason"] = route_reason
+    return payload
 
 
 def llm_completed_fields(
@@ -33,8 +40,10 @@ def llm_completed_fields(
     model: str,
     usage: Usage,
     latency_ms: int,
+    route_tier: str | None = None,
+    route_reason: str | None = None,
 ) -> dict[str, Any]:
-    return {
+    fields = {
         "surface": "operational",
         "provider": provider,
         "model": model,
@@ -45,3 +54,8 @@ def llm_completed_fields(
         "cost_usd": usage.cost_usd,
         "latency_ms": latency_ms,
     }
+    if route_tier is not None:
+        fields["route_tier"] = route_tier
+    if route_reason is not None:
+        fields["route_reason"] = route_reason
+    return fields

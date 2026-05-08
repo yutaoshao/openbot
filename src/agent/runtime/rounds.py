@@ -23,6 +23,7 @@ async def stream_model_round(
     agent: Any,
     messages: list[dict[str, Any]],
     tools: list[dict[str, Any]] | None,
+    route_decision: Any = None,
 ):
     """Yield streamed text chunks, then a final ``ModelRoundResult`` event."""
     accumulated_text = ""
@@ -30,7 +31,11 @@ async def stream_model_round(
     iter_usage: Usage | None = None
     final_model = ""
 
-    async for chunk in agent.model_gateway.chat_stream(messages=messages, tools=tools):
+    async for chunk in agent.model_gateway.chat_stream(
+        messages=messages,
+        tools=tools,
+        **_route_kwargs(route_decision),
+    ):
         if chunk.type == "text":
             accumulated_text += chunk.text
             yield chunk
@@ -48,3 +53,12 @@ async def stream_model_round(
         usage=iter_usage,
         model=final_model,
     )
+
+
+def _route_kwargs(route_decision: Any) -> dict[str, str]:
+    if route_decision is None:
+        return {}
+    return {
+        "route_tier": route_decision.tier,
+        "route_reason": route_decision.reason,
+    }

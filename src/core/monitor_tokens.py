@@ -15,6 +15,7 @@ def aggregate_token_events(events: list[dict[str, Any]], period: str) -> dict[st
     cached_total = 0
     cache_observed_total = 0
     daily: dict[str, dict[str, int]] = defaultdict(_token_bucket)
+    by_route_tier: dict[str, dict[str, int]] = defaultdict(_token_bucket)
 
     for item in events:
         data = item.get("data") or {}
@@ -25,10 +26,17 @@ def aggregate_token_events(events: list[dict[str, Any]], period: str) -> dict[st
         day = _event_day(item.get("timestamp"))
         daily[day]["tokens_in"] += tokens_in
         daily[day]["tokens_out"] += tokens_out
+        route_tier = data.get("route_tier")
+        if isinstance(route_tier, str) and route_tier:
+            by_route_tier[route_tier]["tokens_in"] += tokens_in
+            by_route_tier[route_tier]["tokens_out"] += tokens_out
         cached_raw = data.get("cached_tokens")
         if cached_raw is not None:
-            cached_total += _add_cache_observation(daily[day], tokens_in, cached_raw)
+            cached_tokens = _add_cache_observation(daily[day], tokens_in, cached_raw)
+            cached_total += cached_tokens
             cache_observed_total += tokens_in
+            if isinstance(route_tier, str) and route_tier:
+                _add_cache_observation(by_route_tier[route_tier], tokens_in, cached_raw)
 
     return {
         "period": period,
@@ -40,6 +48,7 @@ def aggregate_token_events(events: list[dict[str, Any]], period: str) -> dict[st
         "avg_tokens_in_per_request": (total_in / len(events)) if events else 0.0,
         "avg_tokens_out_per_request": (total_out / len(events)) if events else 0.0,
         "daily": _daily_token_rows(daily),
+        "by_route_tier": _route_token_rows(by_route_tier),
     }
 
 
@@ -89,6 +98,22 @@ def _daily_token_rows(daily: dict[str, dict[str, int]]) -> list[dict[str, Any]]:
         rows.append(
             {
                 "date": date,
+                **value,
+                "cache_hit_ratio": _cache_hit_ratio(
+                    value["cached_tokens"],
+                    value["cache_observed_tokens_in"],
+                ),
+            }
+        )
+    return rows
+
+
+def _route_token_rows(by_route_tier: dict[str, dict[str, int]]) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for route_tier, value in sorted(by_route_tier.items(), key=lambda x: x[0]):
+        rows.append(
+            {
+                "route_tier": route_tier,
                 **value,
                 "cache_hit_ratio": _cache_hit_ratio(
                     value["cached_tokens"],

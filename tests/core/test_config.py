@@ -2,9 +2,13 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+from pydantic import ValidationError
+
 from src.core.config import (
     ApiConfig,
     FeishuConfig,
+    ModelConfig,
     ModelProviderConfig,
     StorageConfig,
     TelegramConfig,
@@ -76,3 +80,26 @@ def test_model_provider_accepts_pricing_metadata() -> None:
 
     assert config.pricing_input == 0.6
     assert config.pricing_output == 3.0
+
+
+def test_model_routing_disabled_accepts_legacy_model_config() -> None:
+    config = ModelConfig()
+
+    assert config.routing.enabled is False
+    assert config.routing.default_tier == "complex"
+    assert config.routing.tiers == {}
+
+
+def test_model_routing_enabled_requires_simple_and_complex_tiers() -> None:
+    with pytest.raises(ValidationError, match="simple.*complex"):
+        ModelConfig(
+            routing={
+                "enabled": True,
+                "tiers": {
+                    "simple": {
+                        "provider": "openai_compatible",
+                        "model": "fast-model",
+                    },
+                },
+            },
+        )

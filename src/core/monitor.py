@@ -203,6 +203,7 @@ class MetricsCollector:
         events = await self._query_period(period=period, event_name="model.request")
         total_cost = 0.0
         daily: dict[str, float] = defaultdict(float)
+        by_route_tier: dict[str, float] = defaultdict(float)
 
         for item in events:
             data = item.get("data") or {}
@@ -211,6 +212,9 @@ class MetricsCollector:
             ts = _parse_iso(item.get("timestamp"))
             day = ts.date().isoformat() if ts else "unknown"
             daily[day] += cost_usd
+            route_tier = data.get("route_tier")
+            if isinstance(route_tier, str) and route_tier:
+                by_route_tier[route_tier] += cost_usd
 
         return {
             "period": period,
@@ -219,6 +223,10 @@ class MetricsCollector:
             "daily": [
                 {"date": date, "cost_usd": round(value, 6)}
                 for date, value in sorted(daily.items(), key=lambda x: x[0])
+            ],
+            "by_route_tier": [
+                {"route_tier": route_tier, "cost_usd": round(value, 6)}
+                for route_tier, value in sorted(by_route_tier.items(), key=lambda x: x[0])
             ],
         }
 

@@ -7,6 +7,8 @@ from src.agent.agent import Agent
 from src.core.config import AgentConfig
 from src.core.trace import current_trace, trace_scope
 from src.infrastructure.model_gateway import StreamChunk, ToolCall, Usage
+from src.infrastructure.model_routing import RouteDecision, RouteRequest
+from src.tools.registry import CORE_VISIBILITY, ToolRegistry, ToolResult
 
 
 class FakeEventBus:
@@ -38,6 +40,73 @@ class FakeStreamingGateway:
             usage=Usage(tokens_in=12, tokens_out=8),
             model="fake-model",
         )
+
+
+class FakeRoutingGateway:
+    def __init__(self) -> None:
+        self.route_requests: list[RouteRequest] = []
+        self.route_kwargs: list[dict[str, Any]] = []
+
+    def decide_route(self, request: RouteRequest) -> RouteDecision:
+        self.route_requests.append(request)
+        return RouteDecision(
+            tier="simple",
+            reason="short_prompt",
+            matched_rules=("short_prompt",),
+        )
+
+    async def chat_stream(
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None = None,
+        **kwargs: Any,
+    ):
+        self.route_kwargs.append(kwargs)
+        if len(self.route_kwargs) == 1:
+            yield StreamChunk(
+                type="tool_call",
+                tool_call=ToolCall(
+                    id="tc-1",
+                    name="echo_tool",
+                    arguments={"value": "hello"},
+                ),
+            )
+            yield StreamChunk(
+                type="done",
+                usage=Usage(tokens_in=10, tokens_out=4),
+                model="simple-model",
+            )
+            return
+        yield StreamChunk(type="text", text="done")
+        yield StreamChunk(
+            type="done",
+            usage=Usage(tokens_in=7, tokens_out=3),
+            model="simple-model",
+        )
+
+
+class EchoTool:
+    @property
+    def name(self) -> str:
+        return "echo_tool"
+
+    @property
+    def description(self) -> str:
+        return "Echo a value"
+
+    @property
+    def parameters(self) -> dict[str, object]:
+        return {
+            "type": "object",
+            "properties": {"value": {"type": "string"}},
+        }
+
+    @property
+    def category(self) -> str:
+        return "test"
+
+    async def execute(self, args: dict[str, object]) -> ToolResult:
+        return ToolResult(content=str(args.get("value", "")))
 
 
 class FakeConversationManager:
@@ -128,6 +197,31 @@ async def test_run_stream_yields_text_then_done() -> None:
     assert chunks[-1].model == "fake-model"
     assert "agent.think.start" in [name for name, _ in bus.events]
     assert "agent.think.complete" in [name for name, _ in bus.events]
+
+
+async def test_run_reuses_one_route_decision_across_model_rounds() -> None:
+    gateway = FakeRoutingGateway()
+    bus = FakeEventBus()
+    registry = ToolRegistry()
+    registry.register(EchoTool(), visibility=CORE_VISIBILITY)
+    agent = Agent(
+        model_gateway=gateway,
+        event_bus=bus,
+        config=AgentConfig(max_iterations=3),
+        tool_registry=registry,
+        conversation_manager=None,
+    )
+
+    result = await agent.run("hello world")
+
+    assert result.content == "done"
+    assert len(gateway.route_requests) == 1
+    assert gateway.route_requests[0].input_text == "hello world"
+    assert [call["route_tier"] for call in gateway.route_kwargs] == ["simple", "simple"]
+    assert [call["route_reason"] for call in gateway.route_kwargs] == [
+        "short_prompt",
+        "short_prompt",
+    ]
 
 
 async def test_run_consumes_stream_and_returns_aggregated_response() -> None:
