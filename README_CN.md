@@ -90,6 +90,20 @@ uv run python main.py
 
 管理面板默认地址为 `http://127.0.0.1:8000/`。
 
+本地后端开发时，如果希望修改代码或本地配置后自动重启，可以先复制 watcher 模板，
+生成本地忽略的包装脚本：
+
+```bash
+cp scripts/openbot-watch.example.sh scripts/openbot-watch.sh
+chmod +x scripts/openbot-watch.sh
+scripts/openbot-watch.sh
+```
+
+watcher 会在 `main.py`、`src/`、`config.yaml`、`.env`、`pyproject.toml` 或
+`uv.lock` 变化时重启完整的 `main.py` 进程。它会忽略 `data/` 下的运行时数据和
+日志，避免日志写入导致循环重启。本地的 `scripts/openbot-watch.sh` 会被忽略，
+因为它可能包含机器相关路径或 launchd 设置。
+
 ### 飞书 Webhook 配置
 
 1. 在 `config.yaml` 中开启 `feishu.enabled`。

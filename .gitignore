@@ -32,6 +32,7 @@ frontend/dist/
 
 # Misc
 *.log
+scripts/openbot-watch.sh
 .superpowers/
 /.claude/
 /.agents/

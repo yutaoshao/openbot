@@ -91,6 +91,21 @@ uv run python main.py
 
 The dashboard is available at `http://127.0.0.1:8000/`.
 
+For local backend development with automatic restarts after code or local
+configuration changes, copy the watcher template to the local ignored wrapper:
+
+```bash
+cp scripts/openbot-watch.example.sh scripts/openbot-watch.sh
+chmod +x scripts/openbot-watch.sh
+scripts/openbot-watch.sh
+```
+
+The watcher restarts the full `main.py` process when `main.py`, `src/`,
+`config.yaml`, `.env`, `pyproject.toml`, or `uv.lock` changes. It ignores
+runtime data and logs under `data/` so log writes do not trigger restart loops.
+The local `scripts/openbot-watch.sh` file is ignored because it may contain
+machine-specific paths or launchd settings.
+
 ### Feishu Webhook Setup
 
 1. Enable the `feishu.enabled` switch in `config.yaml`.
