@@ -18,6 +18,32 @@ class _FakeScheduleRepo:
                 "status": "active",
             },
         }
+        self.created: dict[str, Any] | None = None
+
+    async def create(
+        self,
+        *,
+        name: str,
+        prompt: str,
+        cron: str,
+        target_platform: str | None = None,
+        target_id: str | None = None,
+        status: str = "active",
+        next_run_at: str | None = None,
+    ) -> dict[str, Any]:
+        item = {
+            "id": "sched-2",
+            "name": name,
+            "prompt": prompt,
+            "cron": cron,
+            "target_platform": target_platform,
+            "target_id": target_id,
+            "status": status,
+            "next_run_at": next_run_at,
+        }
+        self.created = item
+        self.items[item["id"]] = item
+        return item
 
     async def get(self, schedule_id: str) -> dict[str, Any] | None:
         return self.items.get(schedule_id)
@@ -83,3 +109,60 @@ async def test_wechat_schedule_delivery_is_explicitly_blocked() -> None:
             "success": False,
         },
     )
+
+
+async def test_create_schedule_rejects_wechat_target() -> None:
+    storage = _FakeStorage()
+    scheduler = AgentScheduler(
+        storage=storage,  # type: ignore[arg-type]
+        agent=_FakeAgent(),  # type: ignore[arg-type]
+        event_bus=_FakeEventBus(),  # type: ignore[arg-type]
+        msg_hub=_FakeMsgHub(),  # type: ignore[arg-type]
+    )
+
+    try:
+        await scheduler.create_schedule(
+            name="wechat-push",
+            prompt="hello",
+            cron="0 8 * * *",
+            target_platform="wechat",
+            target_id="wechat:acc-1:user-1",
+        )
+    except ValueError as exc:
+        assert "微信当前只能在你发来消息后回复" in str(exc)
+    else:
+        raise AssertionError("Expected WeChat schedule creation to fail")
+
+    assert storage.schedules.created is None
+
+
+async def test_update_schedule_rejects_wechat_target() -> None:
+    storage = _FakeStorage()
+    storage.schedules.items["sched-2"] = {
+        "id": "sched-2",
+        "name": "telegram-push",
+        "prompt": "hello",
+        "cron": "0 8 * * *",
+        "target_platform": "telegram",
+        "target_id": "chat-123",
+        "status": "active",
+    }
+    scheduler = AgentScheduler(
+        storage=storage,  # type: ignore[arg-type]
+        agent=_FakeAgent(),  # type: ignore[arg-type]
+        event_bus=_FakeEventBus(),  # type: ignore[arg-type]
+        msg_hub=_FakeMsgHub(),  # type: ignore[arg-type]
+    )
+
+    try:
+        await scheduler.update_schedule(
+            "sched-2",
+            target_platform="wechat",
+            target_id="wechat:acc-1:user-1",
+        )
+    except ValueError as exc:
+        assert "微信当前只能在你发来消息后回复" in str(exc)
+    else:
+        raise AssertionError("Expected WeChat schedule update to fail")
+
+    assert storage.schedules.items["sched-2"]["target_platform"] == "telegram"

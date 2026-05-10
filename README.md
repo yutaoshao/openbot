@@ -170,14 +170,14 @@ Current v1 limitations:
 - Inbound: direct-message text only
 - Outbound: replies inside active conversations only
 - Unsupported media types receive a fixed text notice
-- Scheduler and other background proactive sends to `target_platform="wechat"` fail explicitly
+- Schedules cannot target `target_platform="wechat"`; creation and updates are rejected before saving
 
 Manual validation checklist:
 
 - Run the login command and confirm `data/wechat/login.png` is generated
 - Send a text message from WeChat and verify OpenBot replies
 - Send a non-text message and verify WeChat receives the text-only warning
-- Create a schedule targeting WeChat and verify proactive send is reported as unsupported
+- Try to create a schedule targeting WeChat and verify the request is rejected before saving
 
 ## Project Structure
 
@@ -237,6 +237,9 @@ openbot/
 │   │   │   └── registry.py          # Skill registry + load_skill tool
 │   │   ├── scheduling/              # Scheduled execution domain
 │   │   │   ├── __init__.py          # Scheduler exports
+│   │   │   ├── cron.py              # Cron trigger and timezone helpers
+│   │   │   ├── delivery.py          # Scheduled result delivery
+│   │   │   ├── delivery_policy.py   # Scheduled delivery constraints
 │   │   │   └── scheduler.py         # APScheduler-based cron task execution
 │   │   ├── prompts/                 # Prompt assembly fragments
 │   │   │   ├── __init__.py          # Prompt exports

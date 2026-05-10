@@ -168,14 +168,14 @@ uv run python -m src.channels.adapters.wechat_login
 - 入站仅支持私聊文本
 - 出站仅支持基于活跃会话上下文的回复
 - 图片/语音/文件等非文本消息会收到固定提示
-- `target_platform="wechat"` 的定时任务或其他后台主动推送会显式失败
+- 定时任务不能投递到 `target_platform="wechat"`；创建和更新会在保存前被拒绝
 
 手工验证清单：
 
 - 运行登录命令后确认 `data/wechat/login.png` 已生成
 - 从微信发送一条文本消息，确认 OpenBot 能收到并回复
 - 发送一条非文本消息，确认微信侧收到“仅支持文本消息”的提示
-- 创建一个投递到微信的 schedule，确认系统明确提示不支持主动推送
+- 尝试创建一个投递到微信的 schedule，确认系统在保存前拒绝并提示不支持主动推送
 
 ## 项目结构
 
@@ -235,6 +235,9 @@ openbot/
 │   │   │   └── registry.py          # Skill registry 与 load_skill 工具
 │   │   ├── scheduling/              # 定时执行域
 │   │   │   ├── __init__.py          # Scheduler 导出
+│   │   │   ├── cron.py              # Cron trigger 与时区辅助
+│   │   │   ├── delivery.py          # 定时结果投递
+│   │   │   ├── delivery_policy.py   # 定时投递约束
 │   │   │   └── scheduler.py         # 基于 APScheduler 的定时任务执行
 │   │   ├── prompts/                 # Prompt 片段域
 │   │   │   ├── __init__.py          # Prompt 导出

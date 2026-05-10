@@ -10,11 +10,12 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
-from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from apscheduler.triggers.cron import CronTrigger
 
+from src.agent.scheduling.cron import build_cron_trigger, compute_next_run, resolve_timezone
+from src.agent.scheduling.delivery import deliver_schedule_result
+from src.agent.scheduling.delivery_policy import assert_supported_schedule_target
 from src.core.logging import get_logger
 
 if TYPE_CHECKING:
@@ -25,10 +26,6 @@ if TYPE_CHECKING:
     from src.infrastructure.storage import Storage
 
 logger = get_logger(__name__)
-
-_WECHAT_PROACTIVE_SEND_UNSUPPORTED = (
-    "个人微信 iLink 当前仅支持基于活跃会话上下文回复，暂不支持独立主动推送。"
-)
 
 
 class AgentScheduler:
@@ -51,19 +48,16 @@ class AgentScheduler:
         self._agent = agent
         self._event_bus = event_bus
         self._msg_hub = msg_hub
-        self._timezone = self._resolve_timezone(config.timezone if config else "")
+        self._timezone = resolve_timezone(config.timezone if config else "")
         self._scheduler = AsyncIOScheduler(timezone=self._timezone)
 
     @property
     def timezone_name(self) -> str:
         """Return a human-readable scheduler timezone label."""
-        if isinstance(self._timezone, ZoneInfo):
-            return self._timezone.key
+        key = getattr(self._timezone, "key", None)
+        if key:
+            return key
         return str(self._timezone)
-
-    # ------------------------------------------------------------------
-    # Lifecycle
-    # ------------------------------------------------------------------
 
     async def start(self) -> None:
         """Load active schedules from DB and start the scheduler."""
@@ -83,10 +77,6 @@ class AgentScheduler:
         self._scheduler.shutdown(wait=False)
         logger.info("scheduler.stopped")
 
-    # ------------------------------------------------------------------
-    # Runtime management (called by REST API / Application)
-    # ------------------------------------------------------------------
-
     async def create_schedule(
         self,
         name: str,
@@ -97,7 +87,8 @@ class AgentScheduler:
         status: str = "active",
     ) -> dict[str, Any]:
         """Create a new schedule, persist it, and register the job."""
-        next_run = self._compute_next_run(cron)
+        assert_supported_schedule_target(target_platform)
+        next_run = compute_next_run(cron, self._timezone)
         sched = await self._storage.schedules.create(
             name=name,
             prompt=prompt,
@@ -156,6 +147,8 @@ class AgentScheduler:
 
     async def update_schedule(self, schedule_id: str, **fields: Any) -> dict[str, Any] | None:
         """Update a schedule and keep the in-memory scheduler in sync."""
+        if "target_platform" in fields:
+            assert_supported_schedule_target(fields.get("target_platform"))
         existing = await self._storage.schedules.get(schedule_id)
         if existing is None:
             return None
@@ -163,7 +156,7 @@ class AgentScheduler:
         merged = {**existing, **fields}
         status = merged.get("status", existing["status"])
         cron = merged.get("cron", existing["cron"])
-        next_run_at = self._compute_next_run(cron) if status == "active" else None
+        next_run_at = compute_next_run(cron, self._timezone) if status == "active" else None
 
         update_fields = dict(fields)
         update_fields["next_run_at"] = next_run_at
@@ -232,26 +225,17 @@ class AgentScheduler:
             )
 
             # Deliver result to target platform if configured
-            if target_platform and target_id:
-                from src.channels.types import MessageContent
-
-                if target_platform == "wechat":
-                    logger.warning(
-                        "wechat.proactive_send_unsupported",
-                        schedule_id=schedule_id,
-                        target_id=target_id,
-                    )
-                    raise RuntimeError(_WECHAT_PROACTIVE_SEND_UNSUPPORTED)
-                adapter = self._msg_hub.get_adapter(target_platform)
-                if adapter:
-                    await adapter.send_message(
-                        target_id,
-                        MessageContent(text=result.content),
-                    )
+            await deliver_schedule_result(
+                self._msg_hub,
+                schedule_id=schedule_id,
+                target_platform=target_platform,
+                target_id=target_id,
+                content=result.content,
+            )
 
             # Update last_run and next_run
             now = datetime.now(UTC).isoformat()
-            next_run = self._compute_next_run(sched["cron"])
+            next_run = compute_next_run(sched["cron"], self._timezone)
             await self._storage.schedules.update(
                 schedule_id,
                 last_run_at=now,
@@ -297,7 +281,7 @@ class AgentScheduler:
         if self._scheduler.get_job(job_id):
             self._scheduler.remove_job(job_id)
 
-        trigger = CronTrigger.from_crontab(sched["cron"], timezone=self._timezone)
+        trigger = build_cron_trigger(sched["cron"], self._timezone)
         self._scheduler.add_job(
             self._execute_schedule,
             trigger=trigger,
@@ -312,27 +296,3 @@ class AgentScheduler:
         job_id = f"schedule_{schedule_id}"
         if self._scheduler.get_job(job_id):
             self._scheduler.remove_job(job_id)
-
-    def _compute_next_run(self, cron_expr: str) -> str | None:
-        """Compute the next fire time for a cron expression."""
-        try:
-            trigger = CronTrigger.from_crontab(cron_expr, timezone=self._timezone)
-            next_fire = trigger.get_next_fire_time(
-                None,
-                datetime.now(self._timezone),
-            )
-            return next_fire.isoformat() if next_fire else None
-        except Exception:
-            return None
-
-    @staticmethod
-    def _resolve_timezone(timezone_name: str):
-        """Resolve configured timezone, falling back to the host local timezone."""
-        if timezone_name:
-            try:
-                return ZoneInfo(timezone_name)
-            except ZoneInfoNotFoundError:
-                logger.warning("scheduler.invalid_timezone", timezone=timezone_name)
-
-        local_tz = datetime.now().astimezone().tzinfo
-        return local_tz or UTC

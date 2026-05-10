@@ -4,6 +4,11 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+from src.agent.scheduling.delivery_policy import (
+    WECHAT_SCHEDULE_CREATE_UNSUPPORTED,
+    WECHAT_SCHEDULE_UPDATE_UNSUPPORTED,
+    is_wechat_delivery_target,
+)
 from src.tools.registry import ToolResult
 from src.tools.runtime import get_tool_execution_context
 
@@ -35,11 +40,13 @@ class ScheduleManagerTool:
             else "the scheduler's configured timezone"
         )
         return (
-            "Create, inspect, update, pause, resume, or delete recurring tasks. "
-            "Use this whenever the user asks you to do something later or on a recurring schedule. "
-            f"Cron expressions use {timezone_name}. "
-            "If target_platform and target_id are omitted during chat, "
-            "the schedule will reply back to the current conversation when possible."
+            "Creates, inspects, updates, or deletes scheduled recurring tasks. "
+            "Use when the user asks for reminders, recurring checks, delayed work, "
+            f"or scheduled automation; cron expressions use {timezone_name}. "
+            "Do not use when the user only wants an immediate answer, has not expressed "
+            "a timing/schedule intent, or the requested follow-up cannot be represented "
+            "as a recurring schedule. WeChat cannot receive scheduled results proactively; "
+            "use Telegram for scheduled notifications."
         )
 
     @property
@@ -139,6 +146,12 @@ class ScheduleManagerTool:
             target_platform = target_platform or context.platform
             target_id = target_id or context.target_id
 
+        if is_wechat_delivery_target(target_platform):
+            return ToolResult(
+                content=WECHAT_SCHEDULE_CREATE_UNSUPPORTED,
+                is_error=True,
+            )
+
         schedule = await scheduler.create_schedule(
             name=name,
             prompt=prompt,
@@ -193,6 +206,11 @@ class ScheduleManagerTool:
         }
         if not fields:
             return ToolResult(content="No schedule fields were provided to update.", is_error=True)
+        if is_wechat_delivery_target(fields.get("target_platform")):
+            return ToolResult(
+                content=WECHAT_SCHEDULE_UPDATE_UNSUPPORTED,
+                is_error=True,
+            )
 
         updated = await scheduler.update_schedule(schedule_id, **fields)
         if updated is None:

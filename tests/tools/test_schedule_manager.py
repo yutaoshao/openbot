@@ -85,6 +85,73 @@ async def test_create_schedule_uses_current_conversation_as_default_target() -> 
     assert "Asia/Shanghai" in result.content
 
 
+async def test_create_schedule_rejects_wechat_default_target() -> None:
+    scheduler = _FakeScheduler()
+    tool = ScheduleManagerTool(lambda: scheduler)
+
+    with tool_execution_context(
+        ToolExecutionContext(conversation_id="wechat:acc-1:user-1", platform="wechat")
+    ):
+        result = await tool.execute(
+            {
+                "operation": "create",
+                "name": "Daily diary",
+                "prompt": "Write a diary entry",
+                "cron": "0 1 * * *",
+            }
+        )
+
+    assert result.is_error
+    assert scheduler.created is None
+    assert "微信当前只能在你发来消息后回复" in result.content
+    assert "Telegram" in result.content
+
+
+async def test_create_schedule_rejects_explicit_wechat_target() -> None:
+    scheduler = _FakeScheduler()
+    tool = ScheduleManagerTool(lambda: scheduler)
+
+    result = await tool.execute(
+        {
+            "operation": "create",
+            "name": "Daily diary",
+            "prompt": "Write a diary entry",
+            "cron": "0 1 * * *",
+            "target_platform": "wechat",
+            "target_id": "wechat:acc-1:user-1",
+        }
+    )
+
+    assert result.is_error
+    assert scheduler.created is None
+    assert "不能主动推送定时任务结果" in result.content
+
+
+async def test_update_schedule_rejects_wechat_target() -> None:
+    scheduler = _FakeScheduler()
+    tool = ScheduleManagerTool(lambda: scheduler)
+    await scheduler.create_schedule(
+        name="Daily review",
+        prompt="Check the codebase and report issues",
+        cron="0 8 * * *",
+        target_platform="telegram",
+        target_id="chat-123",
+    )
+
+    result = await tool.execute(
+        {
+            "operation": "update",
+            "schedule_id": "sched-1",
+            "target_platform": "wechat",
+            "target_id": "wechat:acc-1:user-1",
+        }
+    )
+
+    assert result.is_error
+    assert scheduler.items["sched-1"]["target_platform"] == "telegram"
+    assert "这个定时任务没有更新" in result.content
+
+
 async def test_list_schedule_reports_timezone() -> None:
     scheduler = _FakeScheduler()
     tool = ScheduleManagerTool(lambda: scheduler)
