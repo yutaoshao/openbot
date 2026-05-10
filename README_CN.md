@@ -221,6 +221,7 @@ openbot/
 │   │   │   └── task_state_store.py  # 单会话受保护状态
 │   │   ├── runtime/                 # Agent 执行期辅助模块
 │   │   │   ├── __init__.py          # Runtime 包导出
+│   │   │   ├── loop_helpers.py      # ReAct 循环辅助函数
 │   │   │   ├── stream.py            # 主 streamed ReAct 循环
 │   │   │   ├── finalize.py          # 回复后持久化与收尾
 │   │   │   └── tool_executor.py     # 工具调用与 hook 集成
@@ -247,10 +248,12 @@ openbot/
 │   │   │   └── execution.py         # 按用户串行执行协调
 │   │   ├── state/                   # Agent 任务状态域
 │   │   │   ├── __init__.py          # State 导出
+│   │   │   ├── task_contract.py     # 单轮预期结果契约
 │   │   │   └── task_state.py        # 结构化任务状态对象
 │   │   └── verification/            # 最终回复校验域
 │   │       ├── __init__.py          # Verification 导出
-│   │       └── responses.py         # 模糊回复重写辅助
+│   │       ├── responses.py         # 模糊回复的未完成提示
+│   │       └── stop.py              # 停止前契约与工具账本校验
 │   ├── memory/                      # 四层记忆系统
 │   │   ├── working.py               # 工作记忆与压缩
 │   │   ├── episodic/                # 对话归档与摘要
@@ -317,6 +320,7 @@ openbot/
 
 - ReAct 推理循环，支持多轮工具调用
 - 通过 `run_stream()` 异步生成器输出流式结果
+- 停止前回复校验：工具调用后的模糊完成会变成明确的未完成提示；文件写入类请求必须确认写入效果
 - 支持带 scoped tool registry 的子 Agent 委派与并行执行
 - 基于 cron 的定时任务调度，并持久化到数据库
 - 多轮深度研究与信息饱和检测

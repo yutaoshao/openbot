@@ -84,8 +84,9 @@ def test_verify_final_response_rewrites_vague_completion() -> None:
     )
 
     assert rewritten is True
-    assert "Objective:" in content
-    assert "Evidence:" in content
+    assert "本轮未完成" in content
+    assert "Objective:" not in content
+    assert "Evidence:" not in content
 
 
 async def test_user_execution_coordinator_serializes_same_user() -> None:

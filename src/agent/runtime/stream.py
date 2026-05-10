@@ -2,17 +2,26 @@
 
 from __future__ import annotations
 
-import json
 import time
 from typing import Any
 
+from src.agent.state.task_contract import build_task_contract
 from src.agent.verification import verify_final_response
+from src.agent.verification.stop import ledger_from_tool_calls, verify_stop
 from src.core.logging import get_logger
 from src.infrastructure.model_gateway import StreamChunk, Usage
 from src.infrastructure.model_routing import RouteRequest
 
 from . import prompting
 from .finalize import finalize_agent_run
+from .loop_helpers import (
+    accumulate_usage,
+    append_assistant_tool_calls,
+    cost_limit_text,
+    is_stuck,
+    reply_chunks,
+    timeout_text,
+)
 from .rounds import ModelRoundResult, stream_model_round
 from .tool_calls import ToolExecutionBatch, execute_tool_calls_for_round
 
@@ -53,17 +62,19 @@ async def run_stream_inner(
     all_tool_calls: list[dict[str, Any]] = []
     final_text = ""
     final_model = ""
+    pending_final_chunks: list[StreamChunk] = []
+    pending_final_text = ""
     task_start = time.monotonic()
     recent_tool_sigs: list[str] = []
     emit_final_text = False
-    streamed_any_text = False
+    contract = build_task_contract(input_text)
 
     while iterations < agent.max_iterations:
         current_task_state = _task_state(agent, conversation_id)
         current_tools = resolve_tools(agent, input_text, task_state=current_task_state)
-        timeout_text = _timeout_text(agent, task_start, iterations)
-        if timeout_text:
-            final_text = timeout_text
+        timeout_message = timeout_text(agent, task_start, iterations)
+        if timeout_message:
+            final_text = timeout_message
             emit_final_text = True
             break
 
@@ -77,6 +88,7 @@ async def run_stream_inner(
         )
 
         round_result = None
+        round_text_chunks: list[StreamChunk] = []
         async for event in stream_model_round(
             agent,
             messages,
@@ -84,14 +96,13 @@ async def run_stream_inner(
             route_decision=route_decision,
         ):
             if isinstance(event, StreamChunk):
-                if event.type == "text" and event.text:
-                    streamed_any_text = True
-                yield event
+                if event.type == "text":
+                    round_text_chunks.append(event)
             else:
                 round_result = event
         assert isinstance(round_result, ModelRoundResult)
         final_model = round_result.model or final_model
-        total_tokens_in, total_tokens_out, total_cost_usd = _accumulate_usage(
+        total_tokens_in, total_tokens_out, total_cost_usd = accumulate_usage(
             total_tokens_in,
             total_tokens_out,
             total_cost_usd,
@@ -106,11 +117,13 @@ async def run_stream_inner(
                 iteration=iterations,
             )
             final_text = round_result.accumulated_text
+            pending_final_text = final_text
+            pending_final_chunks = round_text_chunks
             break
 
-        cost_limit_text = _cost_limit_text(agent, total_cost_usd, iterations)
-        if cost_limit_text:
-            final_text = cost_limit_text
+        cost_limit_message = cost_limit_text(agent, total_cost_usd, iterations)
+        if cost_limit_message:
+            final_text = cost_limit_message
             emit_final_text = True
             break
 
@@ -122,7 +135,7 @@ async def run_stream_inner(
             tools=[tool_call.name for tool_call in round_result.collected_tool_calls],
             iteration=iterations,
         )
-        _append_assistant_tool_calls(
+        append_assistant_tool_calls(
             messages,
             accumulated_text=round_result.accumulated_text,
             collected_tool_calls=round_result.collected_tool_calls,
@@ -147,7 +160,7 @@ async def run_stream_inner(
         assert isinstance(batch, ToolExecutionBatch)
         all_tool_calls.extend(batch.executed_calls)
 
-        if _is_stuck(agent.config.stuck_detection_threshold, recent_tool_sigs, round_result):
+        if is_stuck(agent.config.stuck_detection_threshold, recent_tool_sigs, round_result):
             final_text = (
                 "Agent appears stuck — repeating the same tool calls. "
                 "Stopping to avoid wasting resources."
@@ -179,8 +192,17 @@ async def run_stream_inner(
         iterations=iterations,
         all_tool_calls=all_tool_calls,
     )
-    if final_text and (emit_final_text or not streamed_any_text):
-        yield StreamChunk(type="text", text=final_text)
+    stop_decision = verify_stop(contract, final_text, ledger_from_tool_calls(all_tool_calls))
+    if not stop_decision.allow:
+        final_text = stop_decision.message
+        emit_final_text = True
+    for chunk in reply_chunks(
+        final_text,
+        pending_final_text=pending_final_text,
+        pending_final_chunks=pending_final_chunks,
+        force_single_chunk=emit_final_text,
+    ):
+        yield chunk
     await finalize_agent_run(
         agent,
         conversation_id=conversation_id,
@@ -217,93 +239,6 @@ def _route_decision(agent: Any, input_text: str, task_state: Any) -> Any:
         return None
     tool_names = resolve_route_tool_names(agent, input_text, task_state=task_state)
     return decide_route(RouteRequest(input_text=input_text, tool_names=tool_names))
-
-
-def _timeout_text(agent: Any, task_start: float, iterations: int) -> str:
-    task_timeout = agent.config.task_timeout
-    if task_timeout <= 0:
-        return ""
-    elapsed = time.monotonic() - task_start
-    if elapsed < task_timeout:
-        return ""
-    logger.warning(
-        "task_failed",
-        surface="operational",
-        reason="task_timeout",
-        elapsed_s=int(elapsed),
-        iterations=iterations,
-    )
-    return f"Task exceeded time limit ({task_timeout}s). Completed {iterations} iterations."
-
-
-def _accumulate_usage(
-    tokens_in: int,
-    tokens_out: int,
-    cost_usd: float,
-    usage: Usage | None,
-) -> tuple[int, int, float]:
-    if usage is None:
-        return tokens_in, tokens_out, cost_usd
-    return (
-        tokens_in + usage.tokens_in,
-        tokens_out + usage.tokens_out,
-        cost_usd + usage.cost_usd,
-    )
-
-
-def _cost_limit_text(agent: Any, total_cost_usd: float, iterations: int) -> str:
-    max_task_cost = agent.config.max_task_cost
-    if max_task_cost <= 0 or total_cost_usd < max_task_cost:
-        return ""
-    logger.warning(
-        "task_failed",
-        surface="operational",
-        reason="task_cost_limit",
-        total_cost_usd=round(total_cost_usd, 6),
-        max_task_cost=max_task_cost,
-        iterations=iterations,
-    )
-    return f"Task exceeded cost limit (${max_task_cost:.2f}). Current spend: ${total_cost_usd:.4f}."
-
-
-def _append_assistant_tool_calls(
-    messages: list[dict[str, Any]],
-    *,
-    accumulated_text: str,
-    collected_tool_calls: list[Any],
-) -> None:
-    assistant_msg: dict[str, Any] = {"role": "assistant"}
-    if accumulated_text:
-        assistant_msg["content"] = accumulated_text
-    assistant_msg["tool_calls"] = [
-        {
-            "id": tool_call.id,
-            "type": "function",
-            "function": {
-                "name": tool_call.name,
-                "arguments": json.dumps(tool_call.arguments, ensure_ascii=False),
-            },
-        }
-        for tool_call in collected_tool_calls
-    ]
-    messages.append(assistant_msg)
-
-
-def _is_stuck(
-    threshold: int,
-    recent_tool_sigs: list[str],
-    round_result: ModelRoundResult,
-) -> bool:
-    if threshold <= 0:
-        return False
-    signature = "|".join(
-        f"{tool_call.name}:{json.dumps(tool_call.arguments, sort_keys=True)}"
-        for tool_call in round_result.collected_tool_calls
-    )
-    recent_tool_sigs.append(signature)
-    if len(recent_tool_sigs) > threshold:
-        recent_tool_sigs.pop(0)
-    return len(recent_tool_sigs) >= threshold and len(set(recent_tool_sigs)) == 1
 
 
 async def _finalize_text(

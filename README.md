@@ -223,6 +223,7 @@ openbot/
 │   │   │   └── task_state_store.py  # Per-conversation protected state
 │   │   ├── runtime/                 # Agent turn execution helpers
 │   │   │   ├── __init__.py          # Runtime package exports
+│   │   │   ├── loop_helpers.py      # ReAct loop helper functions
 │   │   │   ├── stream.py            # Main streamed ReAct loop
 │   │   │   ├── finalize.py          # Post-response persistence/finalization
 │   │   │   └── tool_executor.py     # Tool invocation + hook integration
@@ -249,10 +250,12 @@ openbot/
 │   │   │   └── execution.py         # Per-user execution serialization
 │   │   ├── state/                   # Agent task state domain
 │   │   │   ├── __init__.py          # State exports
+│   │   │   ├── task_contract.py     # Per-turn expected outcome contract
 │   │   │   └── task_state.py        # Structured task state objects
 │   │   └── verification/            # Final-response verification
 │   │       ├── __init__.py          # Verification exports
-│   │       └── responses.py         # Vague-response rewriting helpers
+│   │       ├── responses.py         # Vague-response incomplete-turn messages
+│   │       └── stop.py              # Stop-time contract and tool-ledger checks
 │   ├── memory/                      # 4-Tier Memory System
 │   │   ├── working.py               # Working memory + compression
 │   │   ├── episodic/                # Conversation archival + summaries
@@ -319,6 +322,7 @@ openbot/
 
 - ReAct reasoning loop with multi-turn tool calling
 - Streaming output via `run_stream()` async generator
+- Stop-time reply verification: vague post-tool completions become explicit incomplete-turn messages, and file-write requests require a confirmed write effect
 - Sub-agent delegation with scoped tool registries and parallel execution
 - Cron-based task scheduler with DB persistence
 - Multi-round deep research with saturation detection

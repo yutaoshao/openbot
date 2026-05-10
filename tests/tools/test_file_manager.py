@@ -25,6 +25,24 @@ def test_list_directory_reports_workspace_root_for_empty_directory(tmp_path: Pat
     assert "(empty directory)" in result.content
 
 
+async def test_write_file_reports_structured_write_effect(tmp_path: Path) -> None:
+    tool = FileManagerTool(workspace=tmp_path)
+
+    result = await tool.execute(
+        {
+            "operation": "write_file",
+            "path": "notes/example.md",
+            "content": "hello",
+        }
+    )
+
+    assert not result.is_error
+    assert result.metadata["operation"] == "write_file"
+    assert result.metadata["path"] == "notes/example.md"
+    assert result.metadata["effect"] == "written"
+    assert result.metadata["status"] == "completed"
+
+
 def test_resolve_safe_path_rejects_prefix_bypass(tmp_path: Path) -> None:
     tool = FileManagerTool(workspace=tmp_path / "workspace")
 

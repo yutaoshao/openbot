@@ -13,6 +13,11 @@ DEFAULT_WORKSPACE = Path("data/workspace")
 MAX_READ_SIZE = 50000
 # Safety: maximum file size to write
 MAX_WRITE_SIZE = 50000
+STATUS_COMPLETED = "completed"
+STATUS_ERROR = "error"
+EFFECT_NONE = "none"
+EFFECT_READ = "read"
+EFFECT_WRITTEN = "written"
 
 
 class FileManagerTool:
@@ -109,57 +114,93 @@ class FileManagerTool:
     def _read_file(self, args: dict[str, Any]) -> ToolResult:
         path = args.get("path", "")
         if not path:
-            return ToolResult(content="Path is required for read_file", is_error=True)
+            return ToolResult(
+                content="Path is required for read_file",
+                is_error=True,
+                metadata=_metadata("read_file", path, STATUS_ERROR, EFFECT_NONE),
+            )
 
         target = self._resolve_safe_path(path)
         if target is None:
-            return ToolResult(content="Invalid path: outside workspace boundary", is_error=True)
+            return ToolResult(
+                content="Invalid path: outside workspace boundary",
+                is_error=True,
+                metadata=_metadata("read_file", path, STATUS_ERROR, EFFECT_NONE),
+            )
 
         if not target.is_file():
-            return ToolResult(content=f"File not found: {path}", is_error=True)
+            return ToolResult(
+                content=f"File not found: {path}",
+                is_error=True,
+                metadata=_metadata("read_file", path, STATUS_ERROR, EFFECT_NONE),
+            )
 
         size = target.stat().st_size
         if size > MAX_READ_SIZE:
             return ToolResult(
                 content=f"File too large: {size} bytes (max: {MAX_READ_SIZE})",
                 is_error=True,
+                metadata=_metadata("read_file", path, STATUS_ERROR, EFFECT_NONE),
             )
 
         try:
             content = target.read_text(encoding="utf-8")
             return ToolResult(
                 content=content,
-                metadata={"path": path, "size": size},
+                metadata={
+                    **_metadata("read_file", path, STATUS_COMPLETED, EFFECT_READ),
+                    "size": size,
+                },
             )
         except UnicodeDecodeError:
-            return ToolResult(content=f"Cannot read binary file: {path}", is_error=True)
+            return ToolResult(
+                content=f"Cannot read binary file: {path}",
+                is_error=True,
+                metadata=_metadata("read_file", path, STATUS_ERROR, EFFECT_NONE),
+            )
 
     def _write_file(self, args: dict[str, Any]) -> ToolResult:
         path = args.get("path", "")
         content = args.get("content", "")
 
         if not path:
-            return ToolResult(content="Path is required for write_file", is_error=True)
+            return ToolResult(
+                content="Path is required for write_file",
+                is_error=True,
+                metadata=_metadata("write_file", path, STATUS_ERROR, EFFECT_NONE),
+            )
 
         if len(content) > MAX_WRITE_SIZE:
             return ToolResult(
                 content=f"Content too large: {len(content)} chars (max: {MAX_WRITE_SIZE})",
                 is_error=True,
+                metadata=_metadata("write_file", path, STATUS_ERROR, EFFECT_NONE),
             )
 
         target = self._resolve_safe_path(path)
         if target is None:
-            return ToolResult(content="Invalid path: outside workspace boundary", is_error=True)
+            return ToolResult(
+                content="Invalid path: outside workspace boundary",
+                is_error=True,
+                metadata=_metadata("write_file", path, STATUS_ERROR, EFFECT_NONE),
+            )
 
         try:
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_text(content, encoding="utf-8")
             return ToolResult(
                 content=f"Written {len(content)} chars to {path}",
-                metadata={"path": path, "size": len(content)},
+                metadata={
+                    **_metadata("write_file", path, STATUS_COMPLETED, EFFECT_WRITTEN),
+                    "size": len(content),
+                },
             )
         except OSError as e:
-            return ToolResult(content=f"Write failed: {e}", is_error=True)
+            return ToolResult(
+                content=f"Write failed: {e}",
+                is_error=True,
+                metadata=_metadata("write_file", path, STATUS_ERROR, EFFECT_NONE),
+            )
 
     def _list_directory(self, args: dict[str, Any]) -> ToolResult:
         path = args.get("path", ".")
@@ -198,3 +239,12 @@ class FileManagerTool:
             )
         except OSError as e:
             return ToolResult(content=f"List failed: {e}", is_error=True)
+
+
+def _metadata(operation: str, path: str, status: str, effect: str) -> dict[str, Any]:
+    return {
+        "operation": operation,
+        "path": path,
+        "status": status,
+        "effect": effect,
+    }

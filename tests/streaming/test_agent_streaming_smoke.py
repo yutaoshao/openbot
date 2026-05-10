@@ -77,7 +77,7 @@ class FakeRoutingGateway:
                 model="simple-model",
             )
             return
-        yield StreamChunk(type="text", text="done")
+        yield StreamChunk(type="text", text="Tool result handled.")
         yield StreamChunk(
             type="done",
             usage=Usage(tokens_in=7, tokens_out=3),
@@ -214,7 +214,7 @@ async def test_run_reuses_one_route_decision_across_model_rounds() -> None:
 
     result = await agent.run("hello world")
 
-    assert result.content == "done"
+    assert result.content == "Tool result handled."
     assert len(gateway.route_requests) == 1
     assert gateway.route_requests[0].input_text == "hello world"
     assert [call["route_tier"] for call in gateway.route_kwargs] == ["simple", "simple"]

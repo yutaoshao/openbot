@@ -104,6 +104,7 @@ async def _execute_tool_call(
         "arguments": tool_call.arguments,
         "result_preview": tool_result.content[:200],
         "is_error": tool_result.is_error,
+        "metadata": dict(tool_result.metadata),
         "tool_latency": tool_latency,
     }
 

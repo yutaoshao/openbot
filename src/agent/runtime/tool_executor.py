@@ -93,6 +93,7 @@ async def execute_tool_call(
         return ToolResult(
             content=f"Tool '{name}' timed out after {effective_timeout:.2f}s",
             is_error=True,
+            metadata={"status": "timeout", "effect": "none"},
         )
     except Exception as exc:
         logger.exception(
@@ -102,4 +103,8 @@ async def execute_tool_call(
             status="exception",
             error=str(exc),
         )
-        return ToolResult(content=f"Tool error: {exc}", is_error=True)
+        return ToolResult(
+            content=f"Tool error: {exc}",
+            is_error=True,
+            metadata={"status": "exception", "effect": "none"},
+        )
