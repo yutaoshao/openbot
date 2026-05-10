@@ -20,8 +20,12 @@ class WebSearchTool:
     @property
     def description(self) -> str:
         return (
-            "Search the web for current information. "
-            "Returns relevant results with titles, URLs, and snippets."
+            "Searches the web for current or external information and returns "
+            "titles, URLs, snippets, and an optional summary. "
+            "Use when you need recent facts, source discovery, news, or web references "
+            "before deciding which pages to read. "
+            "Do not use when the user already provided a specific URL to read, the answer "
+            "should come from local files, or the task needs deep multi-round research."
         )
 
     @property

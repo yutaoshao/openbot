@@ -39,9 +39,11 @@ class FileManagerTool:
     @property
     def description(self) -> str:
         return (
-            f"Read, write, and list files in the workspace rooted at {self.workspace_root}. "
-            "Supports operations: read_file, write_file, list_directory. "
-            "All paths are relative to that workspace root."
+            f"Reads, writes, and lists files under workspace root {self.workspace_root}. "
+            "Use when the task involves workspace documents, skill reference files, or "
+            "small file reads/writes relative to that workspace root. "
+            "Do not use when the path is outside the workspace, the file is too large, "
+            "or the task needs codebase-wide search, shell commands, or incremental edits."
         )
 
     @property

@@ -26,9 +26,12 @@ class CodeExecutorTool:
     @property
     def description(self) -> str:
         return (
-            "Execute Python code and return the output. "
-            "Code runs in an isolated subprocess with a timeout. "
-            "Use for calculations, data processing, or testing logic."
+            "Executes short Python code in an isolated subprocess and returns "
+            "stdout, stderr, and exit status. "
+            "Use when you need calculations, data transformation, parsing, or a quick "
+            "logic check that Python can answer deterministically. "
+            "Do not use when the task needs shell commands, git/system operations, "
+            "long-running services, network credentials, or workspace file editing."
         )
 
     @property

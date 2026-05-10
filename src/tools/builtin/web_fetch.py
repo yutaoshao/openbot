@@ -20,8 +20,11 @@ class WebFetchTool:
     @property
     def description(self) -> str:
         return (
-            "Fetch a web page and extract its main text content. "
-            "Useful for reading articles, documentation, and other web pages."
+            "Fetches one web page and extracts its main readable text content. "
+            "Use when the user provides a URL, or a previous search result needs to be "
+            "read, summarized, cited, or checked in detail. "
+            "Do not use when you still need to discover sources, compare many pages, "
+            "or read local workspace files."
         )
 
     @property

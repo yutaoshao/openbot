@@ -27,12 +27,12 @@ class DeepResearchTool:
     @property
     def description(self) -> str:
         return (
-            "Perform deep, multi-round research on a topic. "
-            "Automatically plans search angles, executes multiple rounds "
-            "of web search and content extraction, detects when new "
-            "information is exhausted, and synthesizes a structured report. "
-            "Use this for complex research tasks that need thorough investigation "
-            "from multiple angles. Returns a comprehensive markdown report."
+            "Performs deep, multi-round research with planned search angles, "
+            "content extraction, saturation detection, and a structured markdown report. "
+            "Use when the user asks for thorough investigation, multi-source analysis, "
+            "or research that clearly needs more than one search/fetch cycle. "
+            "Do not use when a quick web search, a single URL fetch, or a direct answer "
+            "is enough."
         )
 
     @property

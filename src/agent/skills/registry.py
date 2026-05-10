@@ -256,10 +256,11 @@ class LoadSkillTool:
     @property
     def description(self) -> str:
         return (
-            "Load a specialized skill's full instructions into context. "
-            "Call this when the current task matches an available skill "
-            "listed in the system prompt. The skill will provide detailed "
-            "workflow guidance for the task."
+            "Loads one specialized skill's full SKILL.md instructions into context. "
+            "Use when the current task matches an available skill listed in the system "
+            "prompt and that skill's workflow would guide the answer or tool use. "
+            "Do not use when a direct answer or visible tool is sufficient, or no listed "
+            "skill clearly matches the task."
         )
 
     @property

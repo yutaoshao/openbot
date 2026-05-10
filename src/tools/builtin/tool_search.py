@@ -23,8 +23,11 @@ class ToolSearchTool:
     @property
     def description(self) -> str:
         return (
-            "Search deferred tools that are not always visible. "
-            "Use when you suspect another tool may better fit the task."
+            "Searches deferred tools that are registered but not currently visible. "
+            "Use when the task may need a capability outside the visible tool list, or "
+            "the user mentions a workflow/tool category that is not available yet. "
+            "Do not use when the currently visible tools already satisfy the task, or "
+            "there is no concrete capability to search for."
         )
 
     @property
