@@ -273,6 +273,7 @@ openbot/
 │   │   ├── hub.py                   # Message routing hub
 │   │   ├── types.py                 # UnifiedMessage, MessageContent, StreamingAdapter
 │   │   ├── markdown.py              # Markdown to Telegram HTML converter
+│   │   ├── table_format.py          # Telegram-friendly Markdown table rendering
 │   │   └── adapters/
 │   │       ├── telegram.py          # Telegram (polling + webhook + streaming draft)
 │   │       ├── feishu.py            # Feishu/Lark (webhook + interactive card)
@@ -344,10 +345,12 @@ openbot/
 
 | Platform | Mode | Features |
 |----------|------|----------|
-| Telegram | Polling / Webhook | Streaming draft, Markdown-to-HTML, access control |
+| Telegram | Polling / Webhook | Streaming draft, Markdown-to-HTML, adaptive table rendering, access control |
 | Feishu | Webhook | Encrypted callback validation, interactive card messages, auto token refresh |
 | WeChat | iLink polling | QR login, long-poll text chats, context-token replies |
 | Web | WebSocket | Streaming chat, REST fallback |
+
+Telegram Markdown tables render as aligned `<pre>` blocks when they are narrow. Wide or long-text tables render as field lists for better mobile readability.
 
 ### Dashboard
 

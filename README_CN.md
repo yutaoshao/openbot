@@ -271,6 +271,7 @@ openbot/
 │   │   ├── hub.py                   # 消息路由中心
 │   │   ├── types.py                 # UnifiedMessage、MessageContent、StreamingAdapter
 │   │   ├── markdown.py              # Markdown 转 Telegram HTML
+│   │   ├── table_format.py          # 适合 Telegram 的 Markdown 表格渲染
 │   │   └── adapters/
 │   │       ├── telegram.py          # Telegram（polling + webhook + streaming draft）
 │   │       ├── feishu.py            # 飞书 / Lark（webhook + interactive card）
@@ -342,10 +343,12 @@ openbot/
 
 | 平台 | 模式 | 特性 |
 |------|------|------|
-| Telegram | Polling / Webhook | Streaming draft、Markdown-to-HTML、访问控制 |
+| Telegram | Polling / Webhook | Streaming draft、Markdown-to-HTML、自适应表格渲染、访问控制 |
 | Feishu | Webhook | 加密回调校验、interactive card、自动刷新 token |
 | WeChat | iLink 轮询 | 二维码登录、长轮询文本会话、基于 context token 回复 |
 | Web | WebSocket | 流式聊天、REST fallback |
+
+Telegram Markdown 表格较窄时会渲染为对齐的 `<pre>` 代码块；宽表或长文本表格会渲染为字段列表，提升移动端可读性。
 
 ### Dashboard
 

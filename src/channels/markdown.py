@@ -12,6 +12,8 @@ from __future__ import annotations
 import re
 from html import escape as html_escape
 
+from src.channels.table_format import render_markdown_table
+
 
 def md_to_telegram_html(text: str, *, partial: bool = False) -> str:
     """Convert Markdown text to Telegram-compatible HTML.
@@ -50,9 +52,6 @@ _BLOCKQUOTE_PREFIX = re.compile(r"^>\s?(.*)")
 
 # Header pattern
 _HEADER = re.compile(r"^(#{1,6})\s+(.*)")
-
-# Table separator row (e.g. |---|---|)
-_TABLE_SEP = re.compile(r"^\|[\s:]*-{2,}[\s:]*(\|[\s:]*-{2,}[\s:]*)*\|?\s*$")
 
 # Table row (starts and optionally ends with |)
 _TABLE_ROW = re.compile(r"^\|(.+)")
@@ -172,54 +171,12 @@ def _flush_blockquote(lines: list[str], output: list[str]) -> None:
 
 
 def _flush_table(rows: list[str], output: list[str]) -> None:
-    """Render accumulated table rows as a ``<pre>`` block.
-
-    Telegram HTML does not support ``<table>``, so we render tables as
-    monospaced pre-formatted text with aligned columns.
-    Markdown formatting markers (``**``, ``~~``) are stripped since they
-    cannot render inside ``<pre>`` and would break column alignment.
-    """
+    """Render accumulated table rows for Telegram HTML."""
     if not rows:
         return
-
-    # Parse cells from each row, strip markdown markers for <pre> display
-    parsed: list[list[str]] = []
-    for row in rows:
-        # Skip separator rows (|---|---|)
-        if _TABLE_SEP.match(row):
-            continue
-        cells = [_strip_md_markers(c.strip()) for c in row.strip().strip("|").split("|")]
-        parsed.append(cells)
-
-    if not parsed:
-        rows.clear()
-        return
-
-    # Compute column widths (use display width for CJK support)
-    n_cols = max(len(r) for r in parsed)
-    col_widths = [0] * n_cols
-    for row_cells in parsed:
-        for i, cell in enumerate(row_cells):
-            if i < n_cols:
-                col_widths[i] = max(col_widths[i], _display_width(cell))
-
-    # Render aligned rows
-    rendered: list[str] = []
-    for idx, row_cells in enumerate(parsed):
-        parts = []
-        for i in range(n_cols):
-            cell = row_cells[i] if i < len(row_cells) else ""
-            pad = col_widths[i] - _display_width(cell)
-            parts.append(cell + " " * max(0, pad))
-        rendered.append("  ".join(parts))
-
-        # Add separator after header row
-        if idx == 0 and len(parsed) > 1:
-            sep_parts = ["-" * w for w in col_widths]
-            rendered.append("  ".join(sep_parts))
-
-    escaped = html_escape("\n".join(rendered))
-    output.append(f"<pre>{escaped}</pre>")
+    rendered = render_markdown_table(rows, _convert_inline)
+    if rendered:
+        output.append(rendered)
     rows.clear()
 
 
@@ -294,38 +251,3 @@ def _force_close_inline(html: str) -> str:
             html += f"</{tag}>"
 
     return html
-
-
-# ---------------------------------------------------------------------------
-# Table helpers
-# ---------------------------------------------------------------------------
-
-# Markdown formatting markers to strip in <pre> table cells
-_MD_MARKERS = re.compile(r"\*\*|~~|__")
-
-
-def _strip_md_markers(text: str) -> str:
-    """Remove Markdown formatting markers (**, ~~, __) from text."""
-    return _MD_MARKERS.sub("", text)
-
-
-def _display_width(text: str) -> int:
-    """Approximate display width accounting for CJK double-width chars."""
-    width = 0
-    for ch in text:
-        cp = ord(ch)
-        # CJK Unified Ideographs, CJK Compat, Fullwidth forms, etc.
-        if (
-            0x1100 <= cp <= 0x115F  # Hangul Jamo
-            or 0x2E80 <= cp <= 0x9FFF  # CJK radicals through Unified Ideographs
-            or 0xAC00 <= cp <= 0xD7AF  # Hangul syllables
-            or 0xF900 <= cp <= 0xFAFF  # CJK Compat Ideographs
-            or 0xFE10 <= cp <= 0xFE6F  # CJK Compat Forms + Small Forms
-            or 0xFF01 <= cp <= 0xFF60  # Fullwidth ASCII
-            or 0xFFE0 <= cp <= 0xFFE6  # Fullwidth signs
-            or 0x20000 <= cp <= 0x2FA1F  # CJK Extension B-F
-        ):
-            width += 2
-        else:
-            width += 1
-    return width
