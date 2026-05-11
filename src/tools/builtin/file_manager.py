@@ -128,6 +128,16 @@ class FileManagerTool:
                 metadata=_metadata("read_file", path, STATUS_ERROR, EFFECT_NONE),
             )
 
+        if target.is_dir():
+            return ToolResult(
+                content=(
+                    f"Path is a directory: {path}. Use list_directory to inspect it, "
+                    "or read_file with a concrete file path."
+                ),
+                is_error=True,
+                metadata=_metadata("read_file", path, STATUS_ERROR, EFFECT_NONE),
+            )
+
         if not target.is_file():
             return ToolResult(
                 content=f"File not found: {path}",

@@ -23,6 +23,13 @@ Guidelines:
 - Always explain what you found after using a tool
 """
 
+_CONTEXT_METADATA_GUIDANCE = (
+    "Conversation context may contain internal message timestamp metadata in prefixes "
+    "like [YYYY-MM-DD HH:MM]. Use those timestamps only to interpret chronology and "
+    "relative dates. Do not copy or imitate timestamp prefixes in user-facing replies "
+    "unless the user explicitly asks for them."
+)
+
 
 def build_system_prompt(
     agent: Any,
@@ -33,6 +40,7 @@ def build_system_prompt(
     """Build the dynamic system prompt for the current turn."""
     template = agent.config.system_prompt or DEFAULT_SYSTEM_PROMPT
     prompt = template.format(date=datetime.now(UTC).strftime("%Y-%m-%d"))
+    prompt += "\n\n" + _CONTEXT_METADATA_GUIDANCE
 
     fragments = build_prompt_fragments(input_text, task_state)
     if fragments:

@@ -25,6 +25,18 @@ def test_list_directory_reports_workspace_root_for_empty_directory(tmp_path: Pat
     assert "(empty directory)" in result.content
 
 
+def test_read_file_reports_directory_paths_explicitly(tmp_path: Path) -> None:
+    (tmp_path / "src/agent/conversation").mkdir(parents=True)
+    tool = FileManagerTool(workspace=tmp_path)
+
+    result = tool._read_file({"path": "src/agent/conversation"})
+
+    assert result.is_error
+    assert "Path is a directory: src/agent/conversation" in result.content
+    assert "list_directory" in result.content
+    assert result.metadata["status"] == "error"
+
+
 async def test_write_file_reports_structured_write_effect(tmp_path: Path) -> None:
     tool = FileManagerTool(workspace=tmp_path)
 

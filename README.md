@@ -345,9 +345,7 @@ openbot/
 | Procedural | User preferences + behavior patterns | Persistent |
 
 Stored chat messages keep both event time (`timestamp`) and database write time
-(`created_at`). The agent renders recent user and assistant messages with
-compact time prefixes, so relative-date references like "today" and "yesterday"
-survive cross-platform context assembly without changing the raw message text.
+(`created_at`) without changing raw message text.
 
 ### Tools
 
