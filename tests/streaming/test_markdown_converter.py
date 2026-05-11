@@ -57,12 +57,12 @@ def test_table_followed_by_text() -> None:
 
 def test_long_telegram_table_renders_as_field_list() -> None:
     text = (
-        '| 层次 | 机制 | 能 |\n'
-        '|---|---|---|\n'
+        "| 层次 | 机制 | 能 |\n"
+        "|---|---|---|\n"
         '| 记住"不喜欢emoji"吗 | Working Memory、`pin()` 和 `set_protected()` | '
-        '只在当前会话有效，会话结束就丢了 |\n'
-        '| 压缩前提取 | 压缩时 LLM 提取关键信息到 semantic_memory，但提取是随机的 | '
-        '取决于 LLM 觉不觉得“不喜欢 emoji”是需要记住的 |'
+        "只在当前会话有效，会话结束就丢了 |\n"
+        "| 压缩前提取 | 压缩时 LLM 提取关键信息到 semantic_memory，但提取是随机的 | "
+        "取决于 LLM 觉不觉得“不喜欢 emoji”是需要记住的 |"
     )
 
     html = md_to_telegram_html(text, partial=False)

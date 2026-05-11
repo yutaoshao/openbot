@@ -5,9 +5,7 @@ from __future__ import annotations
 WECHAT_PLATFORM = "wechat"
 TELEGRAM_PLATFORM = "telegram"
 
-WECHAT_PROACTIVE_SEND_UNSUPPORTED = (
-    "微信当前只能在你发来消息后回复，不能主动推送定时任务结果。"
-)
+WECHAT_PROACTIVE_SEND_UNSUPPORTED = "微信当前只能在你发来消息后回复，不能主动推送定时任务结果。"
 TELEGRAM_TARGET_ID_INVALID = (
     "Telegram target_id must be the numeric chat id, not the platform name. "
     "Omit target_id to use the current Telegram conversation, or pass the real chat id."
@@ -18,8 +16,7 @@ WECHAT_SCHEDULE_CREATE_UNSUPPORTED = (
     "或指定 Telegram 作为通知目标。"
 )
 WECHAT_SCHEDULE_UPDATE_UNSUPPORTED = (
-    f"{WECHAT_PROACTIVE_SEND_UNSUPPORTED}\n\n"
-    "这个定时任务没有更新。请改用 Telegram 作为通知目标。"
+    f"{WECHAT_PROACTIVE_SEND_UNSUPPORTED}\n\n这个定时任务没有更新。请改用 Telegram 作为通知目标。"
 )
 
 

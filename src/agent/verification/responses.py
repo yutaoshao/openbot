@@ -58,6 +58,4 @@ def _tool_call_lines(tool_calls_made: list[dict[str, object]]) -> list[str]:
 
 
 def _is_internal_summary(text: str) -> bool:
-    return text.startswith(_INTERNAL_PREFIX) and (
-        "Evidence:" in text or "Completed:" in text
-    )
+    return text.startswith(_INTERNAL_PREFIX) and ("Evidence:" in text or "Completed:" in text)

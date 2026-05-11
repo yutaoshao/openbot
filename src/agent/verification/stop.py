@@ -117,9 +117,7 @@ def _is_vague(text: str) -> bool:
 
 
 def _is_internal_summary(text: str) -> bool:
-    return text.startswith(_INTERNAL_PREFIX) and (
-        "Evidence:" in text or "Completed:" in text
-    )
+    return text.startswith(_INTERNAL_PREFIX) and ("Evidence:" in text or "Completed:" in text)
 
 
 def _mentions_problem(text: str) -> bool:
