@@ -387,6 +387,24 @@ def test_schedules_crud() -> None:
     assert deleted.status_code == 200
 
 
+def test_schedules_reject_invalid_telegram_target_id() -> None:
+    client = _client()
+
+    response = client.post(
+        "/api/schedules",
+        json={
+            "name": "daily",
+            "prompt": "summary",
+            "cron": "0 8 * * *",
+            "target_platform": "telegram",
+            "target_id": "telegram",
+        },
+    )
+
+    assert response.status_code == 400
+    assert "Telegram target_id" in response.json()["detail"]
+
+
 def test_schedules_routes_sync_runtime_scheduler() -> None:
     storage = _FakeStorage()
     scheduler = _FakeRuntimeScheduler(storage)

@@ -41,8 +41,9 @@ cp .env.example .env
 ```
 
 ```env
-ARK_API_KEY=your_volcengine_api_key
-DASHSCOPE_API_KEY=your_dashscope_api_key
+OPENBOT_MODEL_API_KEY=your_model_provider_api_key
+OPENBOT_EMBEDDING_API_KEY=your_embedding_provider_api_key
+OPENBOT_RERANKER_API_KEY=your_reranker_provider_api_key
 TELEGRAM_BOT_TOKEN=your_telegram_bot_token
 TAVILY_API_KEY=your_tavily_api_key
 FEISHU_APP_ID=your_feishu_app_id
@@ -139,13 +140,6 @@ Current long-connection support:
 - Incoming messages still limited to text-only
 - Outgoing messages still use the same text / interactive card sender
 
-Manual validation checklist:
-
-- Use Feishu's URL verification flow and confirm the callback succeeds
-- Send a text message to the bot and verify OpenBot receives and replies
-- Ask for a markdown-heavy answer and verify Feishu receives an interactive card
-- Deliberately misconfigure the token or encrypt key and verify the webhook is rejected
-
 ### WeChat Personal Account (iLink) Setup
 
 The built-in WeChat adapter currently targets the personal-account iLink route:
@@ -172,12 +166,13 @@ Current v1 limitations:
 - Unsupported media types receive a fixed text notice
 - Schedules cannot target `target_platform="wechat"`; creation and updates are rejected before saving
 
-Manual validation checklist:
+### Scheduled Delivery
 
-- Run the login command and confirm `data/wechat/login.png` is generated
-- Send a text message from WeChat and verify OpenBot replies
-- Send a non-text message and verify WeChat receives the text-only warning
-- Try to create a schedule targeting WeChat and verify the request is rejected before saving
+- WeChat cannot receive proactive scheduled-task results; schedules targeting
+  `target_platform="wechat"` are rejected before saving.
+- Telegram schedule targets require the real numeric chat id in `target_id`.
+  When a schedule is created from a Telegram conversation, OpenBot can use the
+  current chat id automatically.
 
 ## Project Structure
 
@@ -212,7 +207,10 @@ openbot/
 │   │       ├── web_search.py        # Tavily web search
 │   │       ├── web_fetch.py         # Web page fetch + content extraction
 │   │       ├── code_executor.py     # Sandboxed Python execution
-│   │       └── file_manager.py      # Workspace file operations
+│   │       ├── file_manager.py      # Workspace file operations
+│   │       ├── schedule_manager.py  # Recurring schedule management
+│   │       ├── deep_research.py     # Deferred multi-round research tool
+│   │       └── tool_search.py       # Deferred tool discovery
 │   ├── agent/                       # Agent Core
 │   │   ├── agent.py                 # ReAct reasoning loop (streaming + non-streaming)
 │   │   ├── conversation/            # Conversation assembly package
@@ -280,14 +278,20 @@ openbot/
 │   │   └── adapters/
 │   │       ├── telegram.py          # Telegram (polling + webhook + streaming draft)
 │   │       ├── feishu.py            # Feishu/Lark (webhook + interactive card)
+│   │       ├── feishu_long_connection.py # Feishu SDK long-connection mode
+│   │       ├── wechat.py            # WeChat iLink personal-account adapter
 │   │       └── web.py               # WebSocket adapter for frontend
 │   └── api/                         # REST API
 │       ├── app.py                   # FastAPI app factory
+│       ├── local_access.py          # Local-only API guard
+│       ├── runtime_status.py        # Adapter runtime status reporting
 │       ├── websocket.py             # WebSocket streaming chat handler
 │       └── routes/
 │           ├── chat.py              # POST /api/chat
 │           ├── conversations.py     # CRUD /api/conversations
+│           ├── identities.py        # Account identity binding
 │           ├── knowledge.py         # CRUD /api/knowledge + semantic search
+│           ├── logs.py              # Runtime logs endpoint
 │           ├── tools.py             # GET/PUT /api/tools
 │           ├── schedules.py         # CRUD /api/schedules
 │           ├── metrics.py           # GET /api/metrics/*
@@ -307,12 +311,14 @@ openbot/
         │   └── TopbarQuickSearch.tsx # Global workspace search
         └── pages/
             ├── dashboard.tsx        # Metrics overview + charts
-            ├── chat.tsx             # Chat interface (DeepSeek-style)
+            ├── chat.tsx             # Streaming chat interface
             ├── conversations.tsx    # Conversation history browser
             ├── memory.tsx           # Knowledge base CRUD
             ├── tools.tsx            # Tool status + config
             ├── scheduler.tsx        # Scheduled task management
             ├── monitoring.tsx       # Latency/token/cost charts
+            ├── logs.tsx             # Runtime log viewer
+            ├── help.tsx             # In-app help
             └── settings.tsx         # Runtime configuration
 ```
 
@@ -322,7 +328,7 @@ openbot/
 
 - ReAct reasoning loop with multi-turn tool calling
 - Streaming output via `run_stream()` async generator
-- Stop-time reply verification: vague post-tool completions become explicit incomplete-turn messages, and file-write requests require a confirmed write effect
+- Stop-time reply verification: vague post-tool completions become explicit incomplete-turn messages, and file-write requests retry the same turn until a confirmed write effect is observed or the task remains explicitly incomplete
 - Sub-agent delegation with scoped tool registries and parallel execution
 - Cron-based task scheduler with DB persistence
 - Multi-round deep research with saturation detection
@@ -344,13 +350,16 @@ openbot/
 | `web_fetch` | Fetch and extract content from web pages |
 | `code_executor` | Execute Python code in sandboxed subprocess |
 | `file_manager` | Read, write, and list files in workspace |
+| `schedule_manager` | Create, list, update, and delete recurring schedules |
+| `deep_research` | Run multi-round research when explicitly activated |
+| `load_skill` | Load project or user skills when explicitly activated |
 
 ### Platform Adapters
 
 | Platform | Mode | Features |
 |----------|------|----------|
 | Telegram | Polling / Webhook | Streaming draft, Markdown-to-HTML, adaptive table rendering, access control |
-| Feishu | Webhook | Encrypted callback validation, interactive card messages, auto token refresh |
+| Feishu | Webhook / Long connection | Encrypted callback validation, interactive card messages, auto token refresh |
 | WeChat | iLink polling | QR login, long-poll text chats, context-token replies |
 | Web | WebSocket | Streaming chat, REST fallback |
 
@@ -358,7 +367,7 @@ Telegram Markdown tables render as aligned `<pre>` blocks when they are narrow. 
 
 ### Dashboard
 
-Light/dark theme, 8 pages: Dashboard, Chat, Conversations, Memory, Tools, Scheduler, Monitoring, Settings.
+Light/dark theme, 10 pages: Dashboard, Chat, Conversations, Memory, Tools, Scheduler, Monitoring, Logs, Help, Settings.
 
 ### Model Support
 

@@ -41,8 +41,9 @@ cp .env.example .env
 ```
 
 ```env
-ARK_API_KEY=your_volcengine_api_key
-DASHSCOPE_API_KEY=your_dashscope_api_key
+OPENBOT_MODEL_API_KEY=your_model_provider_api_key
+OPENBOT_EMBEDDING_API_KEY=your_embedding_provider_api_key
+OPENBOT_RERANKER_API_KEY=your_reranker_provider_api_key
 TELEGRAM_BOT_TOKEN=your_telegram_bot_token
 TAVILY_API_KEY=your_tavily_api_key
 FEISHU_APP_ID=your_feishu_app_id
@@ -137,13 +138,6 @@ watcher 会在 `main.py`、`src/`、`config.yaml`、`.env`、`pyproject.toml` �
 - 入站消息仍然仅支持文本
 - 出站仍然复用当前的文本 / interactive card 发送逻辑
 
-手工验证清单：
-
-- 使用飞书的 URL 验证流程，确认回调验证成功
-- 给 Bot 发送一条文本消息，确认 OpenBot 能收到并回复
-- 请求一条 markdown 较重的回复，确认飞书侧收到 interactive card
-- 故意配置错误的 token 或 encrypt key，确认 webhook 会被拒绝
-
 ### 微信个人号（iLink）配置
 
 内置微信适配器当前面向个人号 iLink 路线，首版范围固定为：
@@ -170,12 +164,12 @@ uv run python -m src.channels.adapters.wechat_login
 - 图片/语音/文件等非文本消息会收到固定提示
 - 定时任务不能投递到 `target_platform="wechat"`；创建和更新会在保存前被拒绝
 
-手工验证清单：
+### 定时任务投递
 
-- 运行登录命令后确认 `data/wechat/login.png` 已生成
-- 从微信发送一条文本消息，确认 OpenBot 能收到并回复
-- 发送一条非文本消息，确认微信侧收到“仅支持文本消息”的提示
-- 尝试创建一个投递到微信的 schedule，确认系统在保存前拒绝并提示不支持主动推送
+- 微信不能接收主动定时任务结果；投递到 `target_platform="wechat"` 的
+  schedule 会在保存前被拒绝。
+- Telegram 定时任务的 `target_id` 必须是真实数字 chat id。从 Telegram
+  对话里创建 schedule 时，OpenBot 可以自动使用当前 chat id。
 
 ## 项目结构
 
@@ -210,7 +204,10 @@ openbot/
 │   │       ├── web_search.py        # Tavily Web 搜索
 │   │       ├── web_fetch.py         # 网页抓取与正文提取
 │   │       ├── code_executor.py     # 沙箱 Python 执行
-│   │       └── file_manager.py      # Workspace 文件操作
+│   │       ├── file_manager.py      # Workspace 文件操作
+│   │       ├── schedule_manager.py  # 定时任务管理
+│   │       ├── deep_research.py     # 延迟激活的多轮研究工具
+│   │       └── tool_search.py       # 延迟工具发现
 │   ├── agent/                       # Agent Core
 │   │   ├── agent.py                 # ReAct 推理主循环（streaming + non-streaming）
 │   │   ├── conversation/            # 会话编排分包
@@ -278,14 +275,20 @@ openbot/
 │   │   └── adapters/
 │   │       ├── telegram.py          # Telegram（polling + webhook + streaming draft）
 │   │       ├── feishu.py            # 飞书 / Lark（webhook + interactive card）
+│   │       ├── feishu_long_connection.py # 飞书 SDK 长连接模式
+│   │       ├── wechat.py            # 微信 iLink 个人号适配器
 │   │       └── web.py               # 前端 WebSocket 适配器
 │   └── api/                         # REST API
 │       ├── app.py                   # FastAPI app factory
+│       ├── local_access.py          # 本机访问限制
+│       ├── runtime_status.py        # 适配器运行状态
 │       ├── websocket.py             # WebSocket streaming chat handler
 │       └── routes/
 │           ├── chat.py              # POST /api/chat
 │           ├── conversations.py     # CRUD /api/conversations
+│           ├── identities.py        # 账号身份绑定
 │           ├── knowledge.py         # CRUD /api/knowledge + semantic search
+│           ├── logs.py              # 运行日志接口
 │           ├── tools.py             # GET/PUT /api/tools
 │           ├── schedules.py         # CRUD /api/schedules
 │           ├── metrics.py           # GET /api/metrics/*
@@ -305,12 +308,14 @@ openbot/
         │   └── TopbarQuickSearch.tsx # 全局工作区搜索
         └── pages/
             ├── dashboard.tsx        # 指标总览与图表
-            ├── chat.tsx             # Chat 界面（DeepSeek 风格）
+            ├── chat.tsx             # 流式 Chat 界面
             ├── conversations.tsx    # 会话历史浏览
             ├── memory.tsx           # 知识库 CRUD
             ├── tools.tsx            # 工具状态与配置
             ├── scheduler.tsx        # 定时任务管理
             ├── monitoring.tsx       # 延迟 / token / 成本图表
+            ├── logs.tsx             # 运行日志查看
+            ├── help.tsx             # 应用内帮助
             └── settings.tsx         # 运行时配置
 ```
 
@@ -320,7 +325,7 @@ openbot/
 
 - ReAct 推理循环，支持多轮工具调用
 - 通过 `run_stream()` 异步生成器输出流式结果
-- 停止前回复校验：工具调用后的模糊完成会变成明确的未完成提示；文件写入类请求必须确认写入效果
+- 停止前回复校验：工具调用后的模糊完成会变成明确的未完成提示；文件写入类请求会在同一轮继续尝试，直到确认写入效果或明确暴露未完成状态
 - 支持带 scoped tool registry 的子 Agent 委派与并行执行
 - 基于 cron 的定时任务调度，并持久化到数据库
 - 多轮深度研究与信息饱和检测
@@ -342,13 +347,16 @@ openbot/
 | `web_fetch` | 抓取网页并提取正文 |
 | `code_executor` | 在沙箱子进程中执行 Python |
 | `file_manager` | 读取、写入、列出 workspace 文件 |
+| `schedule_manager` | 创建、列出、更新、删除定时任务 |
+| `deep_research` | 显式激活后执行多轮深度研究 |
+| `load_skill` | 显式激活后加载项目或用户技能 |
 
 ### 平台适配器
 
 | 平台 | 模式 | 特性 |
 |------|------|------|
 | Telegram | Polling / Webhook | Streaming draft、Markdown-to-HTML、自适应表格渲染、访问控制 |
-| Feishu | Webhook | 加密回调校验、interactive card、自动刷新 token |
+| Feishu | Webhook / 长连接 | 加密回调校验、interactive card、自动刷新 token |
 | WeChat | iLink 轮询 | 二维码登录、长轮询文本会话、基于 context token 回复 |
 | Web | WebSocket | 流式聊天、REST fallback |
 
@@ -356,7 +364,7 @@ Telegram Markdown 表格较窄时会渲染为对齐的 `<pre>` 代码块；宽�
 
 ### Dashboard
 
-支持亮色 / 暗色主题，共 8 个页面：Dashboard、Chat、Conversations、Memory、Tools、Scheduler、Monitoring、Settings。
+支持亮色 / 暗色主题，共 10 个页面：Dashboard、Chat、Conversations、Memory、Tools、Scheduler、Monitoring、Logs、Help、Settings。
 
 ### 模型支持
 

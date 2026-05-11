@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, Query, Request
 
+from src.agent.scheduling.delivery_policy import assert_supported_schedule_target
 from src.api.schemas import ScheduleCreateRequest, ScheduleItem, ScheduleUpdateRequest
 
 router = APIRouter(prefix="/api/schedules", tags=["schedules"])
@@ -21,6 +22,16 @@ def _get_storage(request: Request):
 
 def _get_scheduler(request: Request):
     return getattr(request.app.state, "scheduler", None)
+
+
+def _validate_schedule_target(
+    target_platform: str | None,
+    target_id: str | None,
+) -> None:
+    try:
+        assert_supported_schedule_target(target_platform, target_id=target_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.get("", response_model=list[ScheduleItem])
@@ -46,6 +57,7 @@ async def create_schedule(
 ) -> ScheduleItem:
     storage = _get_storage(request)
     scheduler = _get_scheduler(request)
+    _validate_schedule_target(payload.target_platform, payload.target_id)
     if scheduler is not None:
         item = await scheduler.create_schedule(
             name=payload.name,
@@ -80,15 +92,20 @@ async def update_schedule(
     if existing is None:
         raise HTTPException(status_code=404, detail="Schedule not found")
 
+    fields = payload.model_dump(exclude_none=True)
+    _validate_schedule_target(
+        fields.get("target_platform", existing.get("target_platform")),
+        fields.get("target_id", existing.get("target_id")),
+    )
     if scheduler is not None:
         updated = await scheduler.update_schedule(
             schedule_id,
-            **payload.model_dump(exclude_none=True),
+            **fields,
         )
     else:
         updated = await storage.schedules.update(
             schedule_id,
-            **payload.model_dump(exclude_none=True),
+            **fields,
         )
     if updated is None:
         raise HTTPException(status_code=500, detail="Failed to update schedule")

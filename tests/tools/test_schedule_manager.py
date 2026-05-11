@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from src.agent.scheduling.delivery_policy import assert_supported_schedule_target
 from src.tools.builtin.schedule_manager import ScheduleManagerTool
 from src.tools.runtime import ToolExecutionContext, tool_execution_context
 
@@ -22,6 +23,7 @@ class _FakeScheduler:
         target_id: str | None = None,
         status: str = "active",
     ) -> dict[str, Any]:
+        assert_supported_schedule_target(target_platform, target_id=target_id)
         item = {
             "id": "sched-1",
             "name": name,
@@ -55,6 +57,9 @@ class _FakeScheduler:
         item = self.items.get(schedule_id)
         if item is None:
             return None
+        target_platform = fields.get("target_platform", item.get("target_platform"))
+        target_id = fields.get("target_id", item.get("target_id"))
+        assert_supported_schedule_target(target_platform, target_id=target_id)
         item.update(fields)
         return item
 
@@ -67,7 +72,7 @@ async def test_create_schedule_uses_current_conversation_as_default_target() -> 
     tool = ScheduleManagerTool(lambda: scheduler)
 
     with tool_execution_context(
-        ToolExecutionContext(conversation_id="chat-123", platform="telegram")
+        ToolExecutionContext(conversation_id="8058699462", platform="telegram")
     ):
         result = await tool.execute(
             {
@@ -81,7 +86,7 @@ async def test_create_schedule_uses_current_conversation_as_default_target() -> 
     assert not result.is_error
     assert scheduler.created is not None
     assert scheduler.created["target_platform"] == "telegram"
-    assert scheduler.created["target_id"] == "chat-123"
+    assert scheduler.created["target_id"] == "8058699462"
     assert "Asia/Shanghai" in result.content
 
 
@@ -127,6 +132,29 @@ async def test_create_schedule_rejects_explicit_wechat_target() -> None:
     assert "不能主动推送定时任务结果" in result.content
 
 
+async def test_create_schedule_rejects_invalid_explicit_telegram_target_id() -> None:
+    scheduler = _FakeScheduler()
+    tool = ScheduleManagerTool(lambda: scheduler)
+
+    with tool_execution_context(
+        ToolExecutionContext(conversation_id="8058699462", platform="telegram")
+    ):
+        result = await tool.execute(
+            {
+                "operation": "create",
+                "name": "Daily diary",
+                "prompt": "Write a diary entry",
+                "cron": "0 1 * * *",
+                "target_platform": "telegram",
+                "target_id": "telegram",
+            }
+        )
+
+    assert result.is_error
+    assert scheduler.created is None
+    assert "Telegram target_id" in result.content
+
+
 async def test_update_schedule_rejects_wechat_target() -> None:
     scheduler = _FakeScheduler()
     tool = ScheduleManagerTool(lambda: scheduler)
@@ -135,7 +163,7 @@ async def test_update_schedule_rejects_wechat_target() -> None:
         prompt="Check the codebase and report issues",
         cron="0 8 * * *",
         target_platform="telegram",
-        target_id="chat-123",
+        target_id="8058699462",
     )
 
     result = await tool.execute(

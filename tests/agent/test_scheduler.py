@@ -136,6 +136,31 @@ async def test_create_schedule_rejects_wechat_target() -> None:
     assert storage.schedules.created is None
 
 
+async def test_create_schedule_rejects_invalid_telegram_target_id() -> None:
+    storage = _FakeStorage()
+    scheduler = AgentScheduler(
+        storage=storage,  # type: ignore[arg-type]
+        agent=_FakeAgent(),  # type: ignore[arg-type]
+        event_bus=_FakeEventBus(),  # type: ignore[arg-type]
+        msg_hub=_FakeMsgHub(),  # type: ignore[arg-type]
+    )
+
+    try:
+        await scheduler.create_schedule(
+            name="telegram-push",
+            prompt="hello",
+            cron="0 8 * * *",
+            target_platform="telegram",
+            target_id="telegram",
+        )
+    except ValueError as exc:
+        assert "Telegram target_id" in str(exc)
+    else:
+        raise AssertionError("Expected invalid Telegram target_id to fail")
+
+    assert storage.schedules.created is None
+
+
 async def test_update_schedule_rejects_wechat_target() -> None:
     storage = _FakeStorage()
     storage.schedules.items["sched-2"] = {
@@ -144,7 +169,7 @@ async def test_update_schedule_rejects_wechat_target() -> None:
         "prompt": "hello",
         "cron": "0 8 * * *",
         "target_platform": "telegram",
-        "target_id": "chat-123",
+        "target_id": "8058699462",
         "status": "active",
     }
     scheduler = AgentScheduler(

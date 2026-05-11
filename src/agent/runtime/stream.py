@@ -26,6 +26,12 @@ from .rounds import ModelRoundResult, stream_model_round
 from .tool_calls import ToolExecutionBatch, execute_tool_calls_for_round
 
 logger = get_logger(__name__)
+_FILE_WRITE_RETRY_PROMPT = (
+    "The previous answer did not confirm the required file write. "
+    "Use an available filesystem tool to write the requested file now, "
+    "then reply with the saved path. Do not claim the file is saved without "
+    "a successful write tool result."
+)
 
 build_system_prompt = prompting.build_system_prompt
 prepare_agent_turn = prompting.prepare_agent_turn
@@ -116,6 +122,9 @@ async def run_stream_inner(
                 decision="final_reply",
                 iteration=iterations,
             )
+            if _needs_file_write_retry(contract, all_tool_calls):
+                _append_file_write_retry(messages, round_result.accumulated_text)
+                continue
             final_text = round_result.accumulated_text
             pending_final_text = final_text
             pending_final_chunks = round_text_chunks
@@ -239,6 +248,19 @@ def _route_decision(agent: Any, input_text: str, task_state: Any) -> Any:
         return None
     tool_names = resolve_route_tool_names(agent, input_text, task_state=task_state)
     return decide_route(RouteRequest(input_text=input_text, tool_names=tool_names))
+
+
+def _needs_file_write_retry(contract: Any, all_tool_calls: list[dict[str, Any]]) -> bool:
+    if not contract.requires_file_write:
+        return False
+    ledger = ledger_from_tool_calls(all_tool_calls)
+    return not ledger.has_confirmed_write(contract.target_paths)
+
+
+def _append_file_write_retry(messages: list[dict[str, Any]], final_text: str) -> None:
+    if final_text.strip():
+        messages.append({"role": "assistant", "content": final_text})
+    messages.append({"role": "user", "content": _FILE_WRITE_RETRY_PROMPT})
 
 
 async def _finalize_text(

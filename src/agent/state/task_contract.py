@@ -36,6 +36,7 @@ _VERIFICATION_KEYWORDS = (
     "verify",
 )
 _PATH_PATTERN = re.compile(r"`([^`]+)`|([\w./~-]+\.[A-Za-z0-9_]+)")
+_TEMPLATE_PATH_PATTERN = re.compile(r"(Y{2,4}|M{2}|D{2})")
 
 
 @dataclass(frozen=True)
@@ -77,6 +78,10 @@ def _extract_target_paths(text: str) -> tuple[str, ...]:
     paths = []
     for match in _PATH_PATTERN.finditer(text):
         path = (match.group(1) or match.group(2) or "").strip()
-        if path:
+        if path and not _is_template_path(path):
             paths.append(path)
     return tuple(dict.fromkeys(paths))
+
+
+def _is_template_path(path: str) -> bool:
+    return bool(_TEMPLATE_PATH_PATTERN.search(path))

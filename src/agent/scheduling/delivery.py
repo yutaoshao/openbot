@@ -23,7 +23,7 @@ async def deliver_schedule_result(
     if not target_platform or not target_id:
         return
 
-    assert_supported_schedule_target(target_platform)
+    assert_supported_schedule_target(target_platform, target_id=target_id)
     adapter = msg_hub.get_adapter(target_platform)
     if adapter:
         await adapter.send_message(target_id, MessageContent(text=content))

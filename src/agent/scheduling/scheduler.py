@@ -87,7 +87,7 @@ class AgentScheduler:
         status: str = "active",
     ) -> dict[str, Any]:
         """Create a new schedule, persist it, and register the job."""
-        assert_supported_schedule_target(target_platform)
+        assert_supported_schedule_target(target_platform, target_id=target_id)
         next_run = compute_next_run(cron, self._timezone)
         sched = await self._storage.schedules.create(
             name=name,
@@ -147,13 +147,15 @@ class AgentScheduler:
 
     async def update_schedule(self, schedule_id: str, **fields: Any) -> dict[str, Any] | None:
         """Update a schedule and keep the in-memory scheduler in sync."""
-        if "target_platform" in fields:
-            assert_supported_schedule_target(fields.get("target_platform"))
         existing = await self._storage.schedules.get(schedule_id)
         if existing is None:
             return None
 
         merged = {**existing, **fields}
+        assert_supported_schedule_target(
+            merged.get("target_platform"),
+            target_id=merged.get("target_id"),
+        )
         status = merged.get("status", existing["status"])
         cron = merged.get("cron", existing["cron"])
         next_run_at = compute_next_run(cron, self._timezone) if status == "active" else None

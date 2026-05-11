@@ -51,3 +51,23 @@ def test_stop_verifier_allows_analysis_after_read_only_tool_use() -> None:
     )
 
     assert decision.allow
+
+
+def test_stop_verifier_allows_concrete_write_for_template_path() -> None:
+    contract = build_task_contract("保存到文件 data/diaries/YYYY-MM-DD.md")
+    ledger = ToolLedger(
+        (
+            ToolEvent(
+                name="file_manager",
+                operation="write_file",
+                path="data/diaries/2026-05-10.md",
+                status="completed",
+                effect="written",
+                summary="Written diary",
+            ),
+        )
+    )
+
+    decision = verify_stop(contract, "已保存到 data/diaries/2026-05-10.md。", ledger)
+
+    assert decision.allow

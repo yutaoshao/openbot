@@ -152,14 +152,17 @@ class ScheduleManagerTool:
                 is_error=True,
             )
 
-        schedule = await scheduler.create_schedule(
-            name=name,
-            prompt=prompt,
-            cron=cron,
-            target_platform=target_platform,
-            target_id=target_id,
-            status=status,
-        )
+        try:
+            schedule = await scheduler.create_schedule(
+                name=name,
+                prompt=prompt,
+                cron=cron,
+                target_platform=target_platform,
+                target_id=target_id,
+                status=status,
+            )
+        except ValueError as exc:
+            return ToolResult(content=str(exc), is_error=True)
         return ToolResult(
             content=(
                 f"Created schedule {schedule['id']} named '{schedule['name']}' "
@@ -212,7 +215,10 @@ class ScheduleManagerTool:
                 is_error=True,
             )
 
-        updated = await scheduler.update_schedule(schedule_id, **fields)
+        try:
+            updated = await scheduler.update_schedule(schedule_id, **fields)
+        except ValueError as exc:
+            return ToolResult(content=str(exc), is_error=True)
         if updated is None:
             return ToolResult(content=f"Schedule not found: {schedule_id}", is_error=True)
 
