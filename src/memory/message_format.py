@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from datetime import UTC, datetime, tzinfo
 from typing import TYPE_CHECKING, Any
 
@@ -9,6 +10,9 @@ if TYPE_CHECKING:
     from collections.abc import Mapping
 
 _TIMESTAMPED_ROLES = {"user", "assistant"}
+_INTERNAL_TIMESTAMP_PREFIX = re.compile(
+    r"^(?:\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}\]\s*)+"
+)
 
 
 def render_llm_message(message: Mapping[str, Any]) -> dict[str, Any]:
@@ -22,11 +26,19 @@ def render_llm_message(message: Mapping[str, Any]) -> dict[str, Any]:
 
 def timestamped_content(message: Mapping[str, Any]) -> str:
     """Render chat content with its message event timestamp."""
+    role = str(message.get("role", ""))
     content = str(message.get("content") or "")
+    if role == "assistant":
+        content = strip_internal_timestamp_prefixes(content)
     timestamp = message.get("timestamp")
     if timestamp is None or timestamp == "":
         raise ValueError("message timestamp is required")
     return f"[{format_message_timestamp(timestamp)}] {content}"
+
+
+def strip_internal_timestamp_prefixes(content: str) -> str:
+    """Remove LLM-copied internal timestamp prefixes from assistant replies."""
+    return _INTERNAL_TIMESTAMP_PREFIX.sub("", content)
 
 
 def format_message_timestamp(value: datetime | str) -> str:

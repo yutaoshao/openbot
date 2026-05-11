@@ -86,6 +86,22 @@ class FakeRoutingGateway:
         )
 
 
+class TimestampPrefixedGateway:
+    async def chat_stream(
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None = None,
+        **_: Any,
+    ):
+        yield StreamChunk(type="text", text="[2026-05-11 19:50] ")
+        yield StreamChunk(type="text", text="抱歉，你说过了。")
+        yield StreamChunk(
+            type="done",
+            usage=Usage(tokens_in=12, tokens_out=8),
+            model="fake-model",
+        )
+
+
 class EchoTool:
     @property
     def name(self) -> str:
@@ -248,6 +264,21 @@ async def test_run_consumes_stream_and_returns_aggregated_response() -> None:
     assert result.model == "fake-model"
     assert result.tokens_in == 12
     assert result.tokens_out == 8
+
+
+async def test_run_removes_internal_timestamp_from_visible_reply() -> None:
+    bus = FakeEventBus()
+    agent = Agent(
+        model_gateway=TimestampPrefixedGateway(),
+        event_bus=bus,
+        config=AgentConfig(max_iterations=3),
+        tool_registry=None,
+        conversation_manager=None,
+    )
+
+    result = await agent.run("hello world")
+
+    assert result.content == "抱歉，你说过了。"
 
 
 async def test_run_returns_before_background_memory_finalize_completes() -> None:

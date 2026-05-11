@@ -11,6 +11,7 @@ from src.agent.verification.stop import ledger_from_tool_calls, verify_stop
 from src.core.logging import get_logger
 from src.infrastructure.model_gateway import StreamChunk, Usage
 from src.infrastructure.model_routing import RouteRequest
+from src.memory.message_format import strip_internal_timestamp_prefixes
 
 from . import prompting
 from .finalize import finalize_agent_run
@@ -207,10 +208,12 @@ async def run_stream_inner(
         iterations=iterations,
         all_tool_calls=all_tool_calls,
     )
+    final_text = strip_internal_timestamp_prefixes(final_text)
     stop_decision = verify_stop(contract, final_text, ledger_from_tool_calls(all_tool_calls))
     if not stop_decision.allow:
         final_text = stop_decision.message
         emit_final_text = True
+    final_text = strip_internal_timestamp_prefixes(final_text)
     for chunk in reply_chunks(
         final_text,
         pending_final_text=pending_final_text,

@@ -268,6 +268,30 @@ async def test_build_messages_preserves_loaded_history_timestamps() -> None:
     assert "[2026-" in rendered
 
 
+async def test_add_assistant_message_removes_internal_timestamp_from_stored_content() -> None:
+    storage = SimpleNamespace(
+        conversations=_FakeConversationRepo(),
+        messages=_FakeMessageRepo(),
+    )
+    manager = ConversationManager(
+        storage=storage,
+        model_gateway=object(),
+        semantic_memory=_NoopMemoryTier(),
+        episodic_memory=_NoopMemoryTier(),
+        procedural_memory=_NoopMemoryTier(),
+    )
+
+    await manager.get_or_create_conversation("web-conv", "web", SINGLE_USER_ID)
+    await manager.add_assistant_message(
+        "web-conv",
+        "[2026-05-01 08:30] [2026-05-01 08:30] saved reply",
+        timestamp=FIRST_TS,
+    )
+
+    stored = await storage.messages.get_by_conversation("web-conv")
+    assert stored[0]["content"] == "saved reply"
+
+
 async def test_build_messages_logs_memory_context_failures(monkeypatch) -> None:
     recorder = _WarningRecorder()
     monkeypatch.setattr(prompt_builder_module, "logger", recorder, raising=False)
