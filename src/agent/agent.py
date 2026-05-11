@@ -6,6 +6,7 @@ import asyncio
 import time
 from contextlib import nullcontext
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 from src.agent.runtime import execute_tool_call, run_stream_inner
@@ -65,6 +66,8 @@ class Agent:
         conversation_id: str = "",
         platform: str = "unknown",
         user_id: str = "",
+        *,
+        message_timestamp: datetime | None = None,
     ) -> AgentResponse:
         """Execute the agent ReAct loop (non-streaming)."""
         start = time.monotonic()
@@ -75,7 +78,13 @@ class Agent:
         tool_calls_made: list[dict[str, Any]] = []
         iterations = 0
 
-        async for chunk in self.run_stream(input_text, conversation_id, platform, user_id):
+        async for chunk in self.run_stream(
+            input_text,
+            conversation_id,
+            platform,
+            user_id,
+            message_timestamp=message_timestamp,
+        ):
             if chunk.type == "text":
                 content += chunk.text
             elif chunk.type == "tool_status":
@@ -103,8 +112,11 @@ class Agent:
         conversation_id: str = "",
         platform: str = "unknown",
         user_id: str = "",
+        *,
+        message_timestamp: datetime | None = None,
     ) -> AsyncIterator[StreamChunk]:
         """Execute the agent ReAct loop, yielding StreamChunks."""
+        resolved_timestamp = _resolve_message_timestamp(message_timestamp)
         active_trace = current_trace()
         ctx = active_trace or TraceContext(
             interaction_id=conversation_id,
@@ -121,6 +133,7 @@ class Agent:
                     platform,
                     user_id,
                     ctx,
+                    message_timestamp=resolved_timestamp,
                 ):
                     yield chunk
             finally:
@@ -146,3 +159,11 @@ class Agent:
             task_state=task_state,
             timeout_override=timeout_override,
         )
+
+
+def _resolve_message_timestamp(message_timestamp: datetime | None) -> datetime:
+    if message_timestamp is None:
+        return datetime.now(UTC)
+    if message_timestamp.tzinfo is None or message_timestamp.utcoffset() is None:
+        raise ValueError("message timestamp must be timezone-aware")
+    return message_timestamp

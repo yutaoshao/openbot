@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from src.core.trace import TraceContext
+from src.memory.message_format import render_llm_message
 
 
 async def conversation_platform(storage: Any, conversation_id: str) -> str:
@@ -34,7 +35,13 @@ async def conversation_llm_messages(
 
 def llm_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return [
-        {"role": item["role"], "content": item["content"]}
+        render_llm_message(
+            {
+                "role": item["role"],
+                "content": item["content"],
+                "timestamp": item["timestamp"],
+            }
+        )
         for item in messages
         if item.get("content")
     ]

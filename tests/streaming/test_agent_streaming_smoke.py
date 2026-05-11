@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import UTC, datetime
 from typing import Any
 
 from src.agent.agent import Agent
@@ -118,6 +119,8 @@ class FakeConversationManager:
         self.sync_trace_ids: list[str] = []
         self.sync_interaction_ids: list[str] = []
         self.sync_triggers: list[str] = []
+        self.user_timestamps: list[datetime] = []
+        self.assistant_timestamps: list[datetime] = []
 
     async def get_or_create_conversation(
         self,
@@ -132,7 +135,10 @@ class FakeConversationManager:
         self,
         conversation_id: str,
         content: str,
+        *,
+        timestamp: datetime,
     ) -> None:
+        self.user_timestamps.append(timestamp)
         return None
 
     async def build_messages(
@@ -150,7 +156,8 @@ class FakeConversationManager:
     def get_task_state(self, conversation_id: str) -> None:
         return None
 
-    async def add_assistant_message(self, conversation_id: str, **_: Any) -> None:
+    async def add_assistant_message(self, conversation_id: str, **kwargs: Any) -> None:
+        self.assistant_timestamps.append(kwargs["timestamp"])
         return None
 
     async def maybe_compress(self, conversation_id: str) -> None:
@@ -265,6 +272,8 @@ async def test_run_returns_before_background_memory_finalize_completes() -> None
     )
 
     assert result.content == "Hello streaming"
+    assert conversation_manager.user_timestamps
+    assert conversation_manager.assistant_timestamps
 
     await asyncio.sleep(0)
     assert conversation_manager.compress_started.is_set()
@@ -277,6 +286,34 @@ async def test_run_returns_before_background_memory_finalize_completes() -> None
 
     assert conversation_manager.compress_calls == ["conv-1"]
     assert conversation_manager.sync_calls == ["conv-1"]
+
+
+async def test_run_passes_explicit_message_timestamp_to_conversation_manager() -> None:
+    gateway = FakeStreamingGateway()
+    bus = FakeEventBus()
+    conversation_manager = FakeConversationManager()
+    agent = Agent(
+        model_gateway=gateway,
+        event_bus=bus,
+        config=AgentConfig(max_iterations=3),
+        tool_registry=None,
+        conversation_manager=conversation_manager,
+    )
+    timestamp = datetime(2026, 5, 1, 8, 30, tzinfo=UTC)
+
+    result = await agent.run(
+        "hello world",
+        conversation_id="conv-1",
+        platform="telegram",
+        message_timestamp=timestamp,
+    )
+
+    assert result.content == "Hello streaming"
+    assert conversation_manager.user_timestamps == [timestamp]
+
+    background_task = agent._memory_finalize_tasks["conv-1"]
+    conversation_manager.release_background.set()
+    await asyncio.wait_for(background_task, timeout=0.5)
 
 
 class FakeCostLimitedGateway:

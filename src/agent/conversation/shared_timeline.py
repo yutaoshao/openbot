@@ -40,7 +40,13 @@ class SharedTimelineMemory:
             user_id=SINGLE_USER_ID,
         )
         for item in recent:
-            self._memory.add({"role": item["role"], "content": item["content"]})
+            self._memory.add(
+                {
+                    "role": item["role"],
+                    "content": item["content"],
+                    "timestamp": item["timestamp"],
+                }
+            )
         self._loaded = True
 
     def add(self, message: dict[str, Any]) -> None:

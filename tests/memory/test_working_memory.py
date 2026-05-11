@@ -1,7 +1,14 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 from src.infrastructure.model_gateway import ModelResponse
 from src.memory.working import WorkingMemory
+
+TS1 = datetime(2026, 5, 1, 8, 30, tzinfo=UTC)
+TS2 = datetime(2026, 5, 1, 8, 31, tzinfo=UTC)
+TS3 = datetime(2026, 5, 1, 8, 32, tzinfo=UTC)
+TS4 = datetime(2026, 5, 1, 8, 33, tzinfo=UTC)
 
 
 class FakeModelGateway:
@@ -14,14 +21,18 @@ class FakeModelGateway:
         return ModelResponse(text=self._responses.pop(0))
 
 
+def _message(role: str, content: str, timestamp: datetime) -> dict[str, object]:
+    return {"role": role, "content": content, "timestamp": timestamp}
+
+
 async def test_working_memory_compress_replaces_older_half_with_summary() -> None:
     gateway = FakeModelGateway(["summary: keep key facts"])
     wm = WorkingMemory(conversation_id="conv-1", token_budget=1)
 
-    wm.add({"role": "user", "content": "old user"})
-    wm.add({"role": "assistant", "content": "old assistant"})
-    wm.add({"role": "user", "content": "recent user"})
-    wm.add({"role": "assistant", "content": "recent assistant"})
+    wm.add(_message("user", "old user", TS1))
+    wm.add(_message("assistant", "old assistant", TS2))
+    wm.add(_message("user", "recent user", TS3))
+    wm.add(_message("assistant", "recent assistant", TS4))
 
     summary = await wm.compress(gateway)
     assembled = wm.get_messages()
@@ -29,10 +40,11 @@ async def test_working_memory_compress_replaces_older_half_with_summary() -> Non
     assert summary == "summary: keep key facts"
     assert assembled[0]["role"] == "system"
     assert "Summary of earlier conversation" in assembled[0]["content"]
-    assert assembled[1:] == [
-        {"role": "user", "content": "recent user"},
-        {"role": "assistant", "content": "recent assistant"},
-    ]
+    assert assembled[1]["role"] == "user"
+    assert assembled[2]["role"] == "assistant"
+    assert "recent user" in assembled[1]["content"]
+    assert "recent assistant" in assembled[2]["content"]
+    assert "[2026-" in assembled[1]["content"]
 
 
 async def test_extract_before_compression_filters_invalid_items() -> None:
@@ -44,10 +56,10 @@ async def test_extract_before_compression_filters_invalid_items() -> None:
     gateway = FakeModelGateway([raw])
     wm = WorkingMemory(conversation_id="conv-2", token_budget=1)
 
-    wm.add({"role": "user", "content": "message 1"})
-    wm.add({"role": "assistant", "content": "message 2"})
-    wm.add({"role": "user", "content": "message 3"})
-    wm.add({"role": "assistant", "content": "message 4"})
+    wm.add(_message("user", "message 1", TS1))
+    wm.add(_message("assistant", "message 2", TS2))
+    wm.add(_message("user", "message 3", TS3))
+    wm.add(_message("assistant", "message 4", TS4))
 
     items = await wm.extract_before_compression(gateway)
 
@@ -69,10 +81,10 @@ async def test_extract_before_compression_accepts_wrapped_json_array() -> None:
     )
     wm = WorkingMemory(conversation_id="conv-3", token_budget=1)
 
-    wm.add({"role": "user", "content": "message 1"})
-    wm.add({"role": "assistant", "content": "message 2"})
-    wm.add({"role": "user", "content": "message 3"})
-    wm.add({"role": "assistant", "content": "message 4"})
+    wm.add(_message("user", "message 1", TS1))
+    wm.add(_message("assistant", "message 2", TS2))
+    wm.add(_message("user", "message 3", TS3))
+    wm.add(_message("assistant", "message 4", TS4))
 
     items = await wm.extract_before_compression(gateway)
 
@@ -91,10 +103,10 @@ async def test_extract_before_compression_accepts_fenced_json_array() -> None:
     )
     wm = WorkingMemory(conversation_id="conv-4", token_budget=1)
 
-    wm.add({"role": "user", "content": "message 1"})
-    wm.add({"role": "assistant", "content": "message 2"})
-    wm.add({"role": "user", "content": "message 3"})
-    wm.add({"role": "assistant", "content": "message 4"})
+    wm.add(_message("user", "message 1", TS1))
+    wm.add(_message("assistant", "message 2", TS2))
+    wm.add(_message("user", "message 3", TS3))
+    wm.add(_message("assistant", "message 4", TS4))
 
     items = await wm.extract_before_compression(gateway)
 
@@ -113,10 +125,10 @@ async def test_extract_before_compression_ignores_tool_call_wrappers() -> None:
     )
     wm = WorkingMemory(conversation_id="conv-5", token_budget=1)
 
-    wm.add({"role": "user", "content": "message 1"})
-    wm.add({"role": "assistant", "content": "message 2"})
-    wm.add({"role": "user", "content": "message 3"})
-    wm.add({"role": "assistant", "content": "message 4"})
+    wm.add(_message("user", "message 1", TS1))
+    wm.add(_message("assistant", "message 2", TS2))
+    wm.add(_message("user", "message 3", TS3))
+    wm.add(_message("assistant", "message 4", TS4))
 
     items = await wm.extract_before_compression(gateway)
 

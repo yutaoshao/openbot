@@ -26,6 +26,7 @@ CREATE TABLE IF NOT EXISTS messages (
     conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
     role TEXT NOT NULL,
     content TEXT NOT NULL,
+    timestamp TEXT NOT NULL,
     model TEXT,
     tokens_in INTEGER DEFAULT 0,
     tokens_out INTEGER DEFAULT 0,
@@ -39,7 +40,6 @@ CREATE INDEX IF NOT EXISTS idx_messages_conversation_id
     ON messages(conversation_id);
 CREATE INDEX IF NOT EXISTS idx_messages_created_at
     ON messages(created_at);
-
 -- Knowledge
 CREATE TABLE IF NOT EXISTS knowledge (
     id TEXT PRIMARY KEY,

@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
-import uuid
 from typing import TYPE_CHECKING, Any
 
 from src.core.logging import get_logger
-from src.core.user_scope import CHAT_MEMORY_PLATFORMS, SINGLE_USER_ID
+from src.core.user_scope import SINGLE_USER_ID
 
 from .archive_helpers import (
     background_trace_scope,
@@ -15,11 +14,14 @@ from .archive_helpers import (
     pending_llm_messages,
 )
 from .compression import maybe_compress_shared_timeline
+from .message_flow import MessageWriteContext, store_assistant_message, store_user_message
 from .prompt_builder import PromptBuilder
 from .shared_timeline import SharedTimelineMemory
 from .task_state_store import TaskStateStore
 
 if TYPE_CHECKING:
+    from datetime import datetime
+
     from src.agent.state import TaskState
     from src.infrastructure.model_gateway import ModelGateway
     from src.infrastructure.storage import Storage
@@ -91,43 +93,44 @@ class ConversationManager:
         messages.extend(self._shared_timeline.get_messages())
         return messages
 
-    async def add_user_message(self, conversation_id: str, content: str) -> None:
-        message_id = uuid.uuid4().hex
-        self._task_store.note_user_input(conversation_id, content)
-        await self._append_to_shared_timeline(conversation_id, {"role": "user", "content": content})
-        await self._storage.messages.add(
-            id=message_id,
+    async def add_user_message(
+        self,
+        conversation_id: str,
+        content: str,
+        *,
+        timestamp: datetime,
+    ) -> None:
+        await store_user_message(
+            self._message_write_context(),
             conversation_id=conversation_id,
-            role="user",
             content=content,
+            timestamp=timestamp,
         )
 
     async def add_assistant_message(
         self,
         conversation_id: str,
         content: str,
+        *,
+        timestamp: datetime,
         model: str = "",
         tokens_in: int = 0,
         tokens_out: int = 0,
         latency_ms: int = 0,
         tool_calls: list[dict[str, Any]] | None = None,
     ) -> None:
-        message_id = uuid.uuid4().hex
-        self._task_store.note_assistant_reply(conversation_id, content)
-        await self._append_to_shared_timeline(
-            conversation_id,
-            {"role": "assistant", "content": content},
-        )
-        await self._storage.messages.add(
-            id=message_id,
+        await store_assistant_message(
+            self._message_write_context(),
             conversation_id=conversation_id,
-            role="assistant",
             content=content,
-            model=model,
-            tokens_in=tokens_in,
-            tokens_out=tokens_out,
-            latency_ms=latency_ms,
-            tool_calls=tool_calls,
+            timestamp=timestamp,
+            metadata={
+                "model": model,
+                "tokens_in": tokens_in,
+                "tokens_out": tokens_out,
+                "latency_ms": latency_ms,
+                "tool_calls": tool_calls,
+            },
         )
 
     async def maybe_compress(self, conversation_id: str) -> None:
@@ -260,18 +263,6 @@ class ConversationManager:
     ) -> None:
         self._task_store.set_protected(conversation_id, key, content)
 
-    async def _append_to_shared_timeline(
-        self,
-        conversation_id: str,
-        message: dict[str, Any],
-    ) -> None:
-        if self._shared_timeline is None:
-            return
-        conversation = await self._storage.conversations.get(conversation_id)
-        platform = str(conversation.get("platform", "")) if conversation else ""
-        if platform in CHAT_MEMORY_PLATFORMS:
-            self._shared_timeline.add(message)
-
     async def _ensure_conversation_record(
         self,
         conversation_id: str,
@@ -293,6 +284,13 @@ class ConversationManager:
             return
         if existing.get("user_id") != user_id:
             await self._storage.conversations.update(conversation_id, user_id=user_id)
+
+    def _message_write_context(self) -> MessageWriteContext:
+        return MessageWriteContext(
+            storage=self._storage,
+            task_store=self._task_store,
+            shared_timeline=self._shared_timeline,
+        )
 
     def _clear_task_state(self, conversation_id: str, clear_working_memory: bool) -> None:
         if clear_working_memory:

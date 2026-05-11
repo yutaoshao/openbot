@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import time
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from src.agent.state.task_contract import build_task_contract
 from src.agent.verification import verify_final_response
@@ -33,6 +33,9 @@ _FILE_WRITE_RETRY_PROMPT = (
     "a successful write tool result."
 )
 
+if TYPE_CHECKING:
+    from datetime import datetime
+
 build_system_prompt = prompting.build_system_prompt
 prepare_agent_turn = prompting.prepare_agent_turn
 resolve_route_tool_names = prompting.resolve_route_tool_names
@@ -46,6 +49,8 @@ async def run_stream_inner(
     platform: str,
     user_id: str,
     ctx: Any,
+    *,
+    message_timestamp: datetime,
 ):
     """Inner streaming loop with trace context active."""
     messages, _ = await prepare_agent_turn(
@@ -54,6 +59,7 @@ async def run_stream_inner(
         conversation_id,
         platform,
         user_id,
+        message_timestamp,
     )
     route_decision = _route_decision(agent, input_text, _task_state(agent, conversation_id))
     await agent.event_bus.publish(

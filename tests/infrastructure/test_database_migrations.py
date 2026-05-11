@@ -210,3 +210,143 @@ async def test_migrate_to_v7_collapses_history_into_single_user_scope(tmp_path) 
     assert [tuple(row) for row in preference_rows] == [
         (SINGLE_USER_ID, "communication", "reply_language", "Chinese", 0.9)
     ]
+
+
+async def test_migrate_to_v8_adds_message_timestamp_from_created_at(tmp_path) -> None:
+    db_path = tmp_path / "openbot.db"
+    conn = sqlite3.connect(db_path)
+    conn.executescript(
+        """
+        CREATE TABLE schema_version (
+            version INTEGER NOT NULL,
+            applied_at TEXT NOT NULL
+        );
+        INSERT INTO schema_version (version, applied_at)
+        VALUES (7, '2026-05-01T00:00:00+00:00');
+
+        CREATE TABLE conversations (
+            id TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL DEFAULT '',
+            title TEXT,
+            summary TEXT,
+            platform TEXT NOT NULL DEFAULT 'unknown',
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+
+        CREATE TABLE messages (
+            id TEXT PRIMARY KEY,
+            conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+            role TEXT NOT NULL,
+            content TEXT NOT NULL,
+            model TEXT,
+            tokens_in INTEGER DEFAULT 0,
+            tokens_out INTEGER DEFAULT 0,
+            latency_ms INTEGER DEFAULT 0,
+            tool_calls TEXT,
+            metadata TEXT,
+            created_at TEXT NOT NULL
+        );
+
+        INSERT INTO conversations
+            (id, user_id, title, summary, platform, created_at, updated_at)
+        VALUES
+            ('conv-1', 'openbot-local-user', 't', 's', 'web',
+             '2026-05-01T00:00:00+00:00', '2026-05-01T00:00:00+00:00');
+
+        INSERT INTO messages
+            (id, conversation_id, role, content, model, tokens_in, tokens_out,
+             latency_ms, tool_calls, metadata, created_at)
+        VALUES
+            ('msg-1', 'conv-1', 'user', 'hello', NULL, 0, 0, 0,
+             NULL, NULL, '2026-05-01T08:30:00+00:00');
+        """
+    )
+    conn.commit()
+    conn.close()
+
+    db = Database(StorageConfig(db_path=str(db_path)))
+    await db.initialize()
+
+    async with db.get_connection() as migrated:
+        columns = await migrated.execute_fetchall("PRAGMA table_info(messages)")
+        rows = await migrated.execute_fetchall(
+            "SELECT timestamp, created_at FROM messages WHERE id = 'msg-1'"
+        )
+        indexes = await migrated.execute_fetchall("PRAGMA index_list(messages)")
+
+    await db.close()
+
+    column_names = [row[1] for row in columns]
+    index_names = [row[1] for row in indexes]
+    assert "timestamp" in column_names
+    assert rows[0][0] == "2026-05-01T08:30:00+00:00"
+    assert rows[0][1] == "2026-05-01T08:30:00+00:00"
+    assert "idx_messages_timestamp" in index_names
+
+
+async def test_schema_v8_repairs_missing_message_timestamp_column(tmp_path) -> None:
+    db_path = tmp_path / "openbot.db"
+    conn = sqlite3.connect(db_path)
+    conn.executescript(
+        """
+        CREATE TABLE schema_version (
+            version INTEGER NOT NULL,
+            applied_at TEXT NOT NULL
+        );
+        INSERT INTO schema_version (version, applied_at)
+        VALUES (8, '2026-05-10T14:17:06+00:00');
+
+        CREATE TABLE conversations (
+            id TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL DEFAULT 'openbot-local-user',
+            title TEXT,
+            summary TEXT,
+            platform TEXT NOT NULL DEFAULT 'unknown',
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+
+        CREATE TABLE messages (
+            id TEXT PRIMARY KEY,
+            conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+            role TEXT NOT NULL,
+            content TEXT NOT NULL,
+            model TEXT,
+            tokens_in INTEGER DEFAULT 0,
+            tokens_out INTEGER DEFAULT 0,
+            latency_ms INTEGER DEFAULT 0,
+            tool_calls TEXT,
+            metadata TEXT,
+            created_at TEXT NOT NULL
+        );
+
+        INSERT INTO conversations
+            (id, user_id, title, summary, platform, created_at, updated_at)
+        VALUES
+            ('conv-1', 'openbot-local-user', 't', 's', 'web',
+             '2026-05-10T14:00:00+00:00', '2026-05-10T14:00:00+00:00');
+
+        INSERT INTO messages
+            (id, conversation_id, role, content, created_at)
+        VALUES
+            ('msg-1', 'conv-1', 'user', 'hello',
+             '2026-05-10T14:10:00+00:00');
+        """
+    )
+    conn.commit()
+    conn.close()
+
+    db = Database(StorageConfig(db_path=str(db_path)))
+    await db.initialize()
+
+    async with db.get_connection() as migrated:
+        columns = await migrated.execute_fetchall("PRAGMA table_info(messages)")
+        rows = await migrated.execute_fetchall(
+            "SELECT timestamp, created_at FROM messages WHERE id = 'msg-1'"
+        )
+
+    await db.close()
+
+    assert "timestamp" in [row[1] for row in columns]
+    assert rows[0][0] == "2026-05-10T14:10:00+00:00"

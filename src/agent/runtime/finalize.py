@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Any
 
 from src.core.logging import get_logger
@@ -31,6 +32,7 @@ async def finalize_agent_run(
     latency_ms: int,
     iterations: int,
     all_tool_calls: list[dict[str, Any]],
+    assistant_timestamp: datetime | None = None,
 ) -> None:
     """Persist the assistant reply and kick off deferred memory work."""
     await agent.event_bus.publish(
@@ -46,9 +48,11 @@ async def finalize_agent_run(
     )
 
     if agent.conversation_manager and conversation_id:
+        timestamp = assistant_timestamp or datetime.now(UTC)
         await agent.conversation_manager.add_assistant_message(
             conversation_id,
             content=content,
+            timestamp=timestamp,
             model=model,
             tokens_in=tokens_in,
             tokens_out=tokens_out,

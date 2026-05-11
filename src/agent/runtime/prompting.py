@@ -7,6 +7,7 @@ from typing import Any
 
 from src.agent.prompts import build_prompt_fragments
 from src.core.user_scope import SINGLE_USER_ID
+from src.memory.message_format import render_llm_message
 
 DEFAULT_SYSTEM_PROMPT = """You are OpenBot, a helpful personal AI assistant.
 
@@ -51,6 +52,7 @@ async def prepare_agent_turn(
     conversation_id: str,
     platform: str,
     user_id: str,
+    message_timestamp: datetime,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]] | None]:
     """Build messages and tool schemas for the current turn."""
     resolved_user_id = user_id or SINGLE_USER_ID
@@ -61,7 +63,11 @@ async def prepare_agent_turn(
             resolved_user_id,
             agent.config.token_budget,
         )
-        await agent.conversation_manager.add_user_message(conversation_id, input_text)
+        await agent.conversation_manager.add_user_message(
+            conversation_id,
+            input_text,
+            timestamp=message_timestamp,
+        )
         task_state = agent.conversation_manager.get_task_state(conversation_id)
         messages = await agent.conversation_manager.build_messages(
             conversation_id,
@@ -76,7 +82,9 @@ async def prepare_agent_turn(
                 "role": "system",
                 "content": build_system_prompt(agent, input_text=input_text, task_state=task_state),
             },
-            {"role": "user", "content": input_text},
+            render_llm_message(
+                {"role": "user", "content": input_text, "timestamp": message_timestamp}
+            ),
         ]
 
     tools = resolve_tools(agent, input_text, task_state=task_state)

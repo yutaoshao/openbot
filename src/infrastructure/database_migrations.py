@@ -21,6 +21,8 @@ class DatabaseMigrationMixin:
             await self._migrate_to_v6()
         if current_version < 7:
             await self._migrate_to_v7()
+        if current_version < 8:
+            await self._migrate_to_v8()
 
     async def _migrate_to_v5(self) -> None:
         await self._ensure_column(
@@ -119,12 +121,17 @@ class DatabaseMigrationMixin:
         statements = [
             "CREATE INDEX IF NOT EXISTS idx_messages_conversation_id ON messages(conversation_id)",
             "CREATE INDEX IF NOT EXISTS idx_messages_created_at ON messages(created_at)",
+            "CREATE INDEX IF NOT EXISTS idx_messages_timestamp ON messages(timestamp)",
             "CREATE INDEX IF NOT EXISTS idx_conversations_user_id ON conversations(user_id)",
             "CREATE INDEX IF NOT EXISTS idx_knowledge_user_id ON knowledge(user_id)",
             "CREATE INDEX IF NOT EXISTS idx_preferences_user_id ON preferences(user_id)",
         ]
         for statement in statements:
             await self.connection.execute(statement)
+
+    async def _ensure_current_schema(self) -> None:
+        await self._ensure_message_timestamp()
+        await self.connection.commit()
 
     async def _migrate_to_v7(self) -> None:
         await self.connection.execute(
@@ -188,4 +195,25 @@ class DatabaseMigrationMixin:
             DROP TABLE preferences;
             ALTER TABLE preferences_v7 RENAME TO preferences;
             """
+        )
+
+    async def _migrate_to_v8(self) -> None:
+        await self._ensure_message_timestamp()
+        await self.connection.commit()
+
+    async def _ensure_message_timestamp(self) -> None:
+        await self._ensure_column(
+            "messages",
+            "timestamp",
+            "TEXT NOT NULL DEFAULT ''",
+        )
+        await self.connection.execute(
+            """
+            UPDATE messages
+            SET timestamp = created_at
+            WHERE timestamp = '' OR timestamp IS NULL
+            """
+        )
+        await self.connection.execute(
+            "CREATE INDEX IF NOT EXISTS idx_messages_timestamp ON messages(timestamp)"
         )

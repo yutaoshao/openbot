@@ -22,7 +22,7 @@ if TYPE_CHECKING:
 
 logger = get_logger(__name__)
 
-SCHEMA_VERSION = 7
+SCHEMA_VERSION = 8
 
 
 class Database(DatabaseMigrationMixin):
@@ -86,6 +86,7 @@ class Database(DatabaseMigrationMixin):
         conn = self.connection
         current_version = await self._get_schema_version()
         if current_version >= SCHEMA_VERSION:
+            await self._ensure_current_schema()
             logger.debug("database.schema_up_to_date", version=current_version)
             return
 

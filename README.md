@@ -216,6 +216,7 @@ openbot/
 │   │   ├── conversation/            # Conversation assembly package
 │   │   │   ├── __init__.py          # Conversation package exports
 │   │   │   ├── manager.py           # Conversation manager (context assembly)
+│   │   │   ├── message_flow.py      # Message persistence flow helpers
 │   │   │   ├── prompt_builder.py    # Memory-enriched prompt assembly
 │   │   │   ├── shared_timeline.py   # Cross-platform recent timeline
 │   │   │   └── task_state_store.py  # Per-conversation protected state
@@ -255,6 +256,7 @@ openbot/
 │   │       ├── responses.py         # Vague-response incomplete-turn messages
 │   │       └── stop.py              # Stop-time contract and tool-ledger checks
 │   ├── memory/                      # 4-Tier Memory System
+│   │   ├── message_format.py        # LLM-visible timestamped message rendering
 │   │   ├── working.py               # Working memory + compression
 │   │   ├── episodic/                # Conversation archival + summaries
 │   │   │   ├── __init__.py          # Episodic facade exports
@@ -341,6 +343,11 @@ openbot/
 | Episodic | Conversation summaries + embeddings | Persistent |
 | Semantic | Extracted knowledge with vector search | Persistent (TTL) |
 | Procedural | User preferences + behavior patterns | Persistent |
+
+Stored chat messages keep both event time (`timestamp`) and database write time
+(`created_at`). The agent renders recent user and assistant messages with
+compact time prefixes, so relative-date references like "today" and "yesterday"
+survive cross-platform context assembly without changing the raw message text.
 
 ### Tools
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
 from ._base import CHARS_PER_TOKEN, json_dumps, now_utc, row_to_dict
@@ -14,6 +15,7 @@ MESSAGE_COLUMNS = [
     "conversation_id",
     "role",
     "content",
+    "timestamp",
     "model",
     "tokens_in",
     "tokens_out",
@@ -37,6 +39,7 @@ class MessageRepo:
         conversation_id: str,
         role: str,
         content: str,
+        timestamp: datetime | str,
         model: str | None = None,
         tokens_in: int | None = None,
         tokens_out: int | None = None,
@@ -48,16 +51,17 @@ class MessageRepo:
             await conn.execute(
                 """
                 INSERT INTO messages
-                    (id, conversation_id, role, content, model,
+                    (id, conversation_id, role, content, timestamp, model,
                      tokens_in, tokens_out, latency_ms,
                      tool_calls, metadata, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     id,
                     conversation_id,
                     role,
                     content,
+                    _timestamp_text(timestamp),
                     model,
                     tokens_in,
                     tokens_out,
@@ -78,7 +82,7 @@ class MessageRepo:
         sql = f"""
             SELECT {", ".join(MESSAGE_COLUMNS)} FROM messages
             WHERE conversation_id = ?
-            ORDER BY created_at ASC
+            ORDER BY timestamp ASC, created_at ASC
         """
         params: list[Any] = [conversation_id]
         if limit is not None:
@@ -99,7 +103,7 @@ class MessageRepo:
                 f"""
                 SELECT {", ".join(MESSAGE_COLUMNS)} FROM messages
                 WHERE conversation_id = ?
-                ORDER BY created_at DESC
+                ORDER BY timestamp DESC, created_at DESC
                 """,
                 (conversation_id,),
             )
@@ -124,7 +128,7 @@ class MessageRepo:
                 FROM messages AS m
                 JOIN conversations AS c ON c.id = m.conversation_id
                 WHERE c.platform IN ({placeholders}) AND c.user_id = ?
-                ORDER BY m.created_at DESC
+                ORDER BY m.timestamp DESC, m.created_at DESC
                 """,
                 params,
             )
@@ -172,3 +176,13 @@ class MessageRepo:
             used += content_chars
         selected.reverse()
         return [row_to_dict(row, MESSAGE_COLUMNS, MESSAGE_JSON_FIELDS) for row in selected]
+
+
+def _timestamp_text(value: datetime | str) -> str:
+    if isinstance(value, datetime):
+        if value.tzinfo is None or value.utcoffset() is None:
+            raise ValueError("message timestamp must be timezone-aware")
+        return value.isoformat()
+    if isinstance(value, str) and value.strip():
+        return value
+    raise ValueError("message timestamp is required")

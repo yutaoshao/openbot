@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from types import SimpleNamespace
 
 from src.agent.conversation import _WORKING_MEMORY_IDLE_TTL_SECONDS, ConversationManager
 from src.agent.conversation import prompt_builder as prompt_builder_module
 from src.core.user_scope import SINGLE_USER_ID
+
+FIRST_TS = datetime(2026, 5, 1, 8, 30, tzinfo=UTC)
+SECOND_TS = datetime(2026, 5, 1, 8, 31, tzinfo=UTC)
 
 
 class _FakeConversationRepo:
@@ -43,11 +47,29 @@ class _FakeMessageRepo:
             {
                 "role": str(kwargs["role"]),
                 "content": str(kwargs["content"]),
+                "timestamp": str(kwargs["timestamp"]),
             }
         )
 
     async def get_by_conversation(self, conversation_id: str) -> list[dict[str, str]]:
         return list(self._messages.get(conversation_id, []))
+
+
+class _HistoryMessageRepo(_FakeMessageRepo):
+    async def get_recent_global(
+        self,
+        token_budget: int,
+        include_platforms: tuple[str, ...],
+        *,
+        user_id: str,
+    ) -> list[dict[str, str]]:
+        return [
+            {
+                "role": "user",
+                "content": "stored history",
+                "timestamp": FIRST_TS.isoformat(),
+            }
+        ]
 
 
 class _NoopMemoryTier:
@@ -141,7 +163,7 @@ async def test_get_or_create_does_not_prune_idle_working_memories_inline() -> No
     )
 
     await manager.get_or_create_conversation("stale-conv", "web", "user-stale")
-    await manager.add_user_message("stale-conv", "remember this")
+    await manager.add_user_message("stale-conv", "remember this", timestamp=FIRST_TS)
     manager._task_store._last_active["stale-conv"] -= _WORKING_MEMORY_IDLE_TTL_SECONDS + 1  # noqa: SLF001
 
     await manager.get_or_create_conversation("fresh-conv", "web", "user-fresh")
@@ -168,11 +190,11 @@ async def test_prune_idle_conversations_archives_stale_working_memories() -> Non
     )
 
     await manager.get_or_create_conversation("stale-conv", "web", "user-stale")
-    await manager.add_user_message("stale-conv", "remember this")
+    await manager.add_user_message("stale-conv", "remember this", timestamp=FIRST_TS)
     manager._task_store._last_active["stale-conv"] -= _WORKING_MEMORY_IDLE_TTL_SECONDS + 1  # noqa: SLF001
 
     await manager.get_or_create_conversation("fresh-conv", "web", "user-fresh")
-    await manager.add_user_message("fresh-conv", "still active")
+    await manager.add_user_message("fresh-conv", "still active", timestamp=SECOND_TS)
 
     await manager.prune_idle_conversations()
 
@@ -197,9 +219,13 @@ async def test_build_messages_uses_shared_cross_platform_timeline() -> None:
     )
 
     await manager.get_or_create_conversation("telegram-conv", "telegram", SINGLE_USER_ID)
-    await manager.add_user_message("telegram-conv", "来自 Telegram 的消息")
+    await manager.add_user_message(
+        "telegram-conv",
+        "来自 Telegram 的消息",
+        timestamp=FIRST_TS,
+    )
     await manager.get_or_create_conversation("wechat-conv", "wechat", SINGLE_USER_ID)
-    await manager.add_user_message("wechat-conv", "来自微信的消息")
+    await manager.add_user_message("wechat-conv", "来自微信的消息", timestamp=SECOND_TS)
 
     messages = await manager.build_messages(
         "wechat-conv",
@@ -211,7 +237,35 @@ async def test_build_messages_uses_shared_cross_platform_timeline() -> None:
     rendered = "\n".join(str(item.get("content", "")) for item in messages)
     assert "来自 Telegram 的消息" in rendered
     assert "来自微信的消息" in rendered
+    assert "[2026-" in rendered
     assert "shared context" in rendered
+
+
+async def test_build_messages_preserves_loaded_history_timestamps() -> None:
+    storage = SimpleNamespace(
+        conversations=_FakeConversationRepo(),
+        messages=_HistoryMessageRepo(),
+    )
+    manager = ConversationManager(
+        storage=storage,
+        model_gateway=object(),
+        semantic_memory=_NoopMemoryTier(),
+        episodic_memory=_NoopMemoryTier(),
+        procedural_memory=_NoopMemoryTier(),
+    )
+
+    await manager.get_or_create_conversation("web-conv", "web", SINGLE_USER_ID)
+
+    messages = await manager.build_messages(
+        "web-conv",
+        "system base",
+        "continue",
+        SINGLE_USER_ID,
+    )
+
+    rendered = "\n".join(str(item.get("content", "")) for item in messages)
+    assert "stored history" in rendered
+    assert "[2026-" in rendered
 
 
 async def test_build_messages_logs_memory_context_failures(monkeypatch) -> None:
@@ -231,7 +285,7 @@ async def test_build_messages_logs_memory_context_failures(monkeypatch) -> None:
     )
 
     await manager.get_or_create_conversation("conv-1", "web", SINGLE_USER_ID)
-    await manager.add_user_message("conv-1", "hello")
+    await manager.add_user_message("conv-1", "hello", timestamp=FIRST_TS)
     messages = await manager.build_messages(
         "conv-1",
         "system base",

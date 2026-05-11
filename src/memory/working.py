@@ -12,6 +12,7 @@ from collections import OrderedDict
 from typing import TYPE_CHECKING, Any
 
 from src.core.logging import get_logger
+from src.memory.message_format import render_llm_message
 from src.memory.structured_json import parse_json_array_response
 
 if TYPE_CHECKING:
@@ -67,7 +68,7 @@ def _format_messages(messages: list[dict[str, Any]]) -> str:
     parts: list[str] = []
     for msg in messages:
         role = msg.get("role", "unknown")
-        content = msg.get("content", "")
+        content = render_llm_message(msg).get("content", "")
         parts.append(f"[{role}] {content}")
     return "\n".join(parts)
 
@@ -93,6 +94,7 @@ class WorkingMemory:
 
     def add(self, message: dict[str, Any]) -> None:
         """Add a message (role, content) to working memory."""
+        _validate_message_timestamp(message)
         self._messages.append(message)
         logger.debug(
             "working_memory.add",
@@ -148,7 +150,7 @@ class WorkingMemory:
                 }
             )
 
-        result.extend(self._messages)
+        result.extend(render_llm_message(message) for message in self._messages)
         return result
 
     def estimate_tokens(self) -> int:
@@ -161,7 +163,7 @@ class WorkingMemory:
         if self._summary is not None:
             total_chars += len(self._summary)
         for msg in self._messages:
-            total_chars += len(msg.get("content", ""))
+            total_chars += len(str(render_llm_message(msg).get("content", "")))
         return total_chars // CHARS_PER_TOKEN
 
     def needs_compression(self) -> bool:
@@ -284,3 +286,8 @@ class WorkingMemory:
         )
 
         return valid
+
+
+def _validate_message_timestamp(message: dict[str, Any]) -> None:
+    if message.get("role") in {"user", "assistant"}:
+        render_llm_message(message)

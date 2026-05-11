@@ -213,6 +213,7 @@ openbot/
 │   │   ├── conversation/            # 会话编排分包
 │   │   │   ├── __init__.py          # 会话包导出
 │   │   │   ├── manager.py           # 会话管理（上下文组装）
+│   │   │   ├── message_flow.py      # 消息持久化流程辅助
 │   │   │   ├── prompt_builder.py    # 结合记忆的 prompt 组装
 │   │   │   ├── shared_timeline.py   # 跨平台最近消息时间线
 │   │   │   └── task_state_store.py  # 单会话受保护状态
@@ -252,6 +253,7 @@ openbot/
 │   │       ├── responses.py         # 模糊回复的未完成提示
 │   │       └── stop.py              # 停止前契约与工具账本校验
 │   ├── memory/                      # 四层记忆系统
+│   │   ├── message_format.py        # 面向 LLM 的带时间消息渲染
 │   │   ├── working.py               # 工作记忆与压缩
 │   │   ├── episodic/                # 对话归档与摘要
 │   │   │   ├── __init__.py          # Episodic facade 导出
@@ -338,6 +340,10 @@ openbot/
 | Episodic | 对话摘要与向量 | 持久化 |
 | Semantic | 提取出的知识与向量检索 | 持久化（TTL） |
 | Procedural | 用户偏好与行为模式 | 持久化 |
+
+聊天消息会同时保留事件发生时间（`timestamp`）和数据库写入时间
+（`created_at`）。Agent 组装最近用户/助手消息时会渲染紧凑的时间前缀，
+让“今天”“昨天”等相对时间在跨平台上下文中保持清晰，同时不改写原始消息正文。
 
 ### Tools
 
