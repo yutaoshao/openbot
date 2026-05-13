@@ -86,7 +86,7 @@ def register_builtin_tools(app: Any) -> None:
         keywords=["run code", "python", "calculate", "计算"],
     )
     app.tool_registry.register(
-        FileManagerTool(workspace=Path(app.config.storage.workspace_path)),
+        FileManagerTool(root=Path(".")),
         visibility=CORE_VISIBILITY,
         keywords=["file", "workspace", "read file", "write file", "文件"],
     )

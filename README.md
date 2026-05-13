@@ -207,7 +207,7 @@ openbot/
 │   │       ├── web_search.py        # Tavily web search
 │   │       ├── web_fetch.py         # Web page fetch + content extraction
 │   │       ├── code_executor.py     # Sandboxed Python execution
-│   │       ├── file_manager.py      # Workspace file operations
+│   │       ├── file_manager.py      # Project-root file operations
 │   │       ├── schedule_manager.py  # Recurring schedule management
 │   │       ├── deep_research.py     # Deferred multi-round research tool
 │   │       └── tool_search.py       # Deferred tool discovery
@@ -347,6 +347,12 @@ openbot/
 Stored chat messages keep both event time (`timestamp`) and database write time
 (`created_at`) without changing raw message text.
 
+Each new user and assistant message is also appended to local-date JSONL files
+under `data/conversations/YYYY/MM/DD.jsonl`, using the message event timestamp
+as the date source. When working memory compression summarizes older context,
+the summary includes references to those JSONL files so the agent can reload
+details on demand.
+
 ### Tools
 
 | Tool | Description |
@@ -354,10 +360,14 @@ Stored chat messages keep both event time (`timestamp`) and database write time
 | `web_search` | Search the web via Tavily API |
 | `web_fetch` | Fetch and extract content from web pages |
 | `code_executor` | Execute Python code in sandboxed subprocess |
-| `file_manager` | Read, write, and list files in workspace |
+| `file_manager` | Read, write, and list complete text files under the project root |
 | `schedule_manager` | Create, list, update, and delete recurring schedules |
 | `deep_research` | Run multi-round research when explicitly activated |
 | `load_skill` | Load project or user skills when explicitly activated |
+
+Tool results longer than 10,000 characters are written to
+`data/tool_outputs/YYYY/MM/DD/`. The model receives a compact file reference,
+line count, character count, and preview instead of the full output.
 
 ### Platform Adapters
 

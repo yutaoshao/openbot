@@ -8,26 +8,26 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 
-def test_file_manager_description_includes_workspace_root(tmp_path: Path) -> None:
-    tool = FileManagerTool(workspace=tmp_path)
+def test_file_manager_description_includes_project_root(tmp_path: Path) -> None:
+    tool = FileManagerTool(root=tmp_path)
 
     assert str(tmp_path.resolve()) in tool.description
 
 
-def test_list_directory_reports_workspace_root_for_empty_directory(tmp_path: Path) -> None:
-    tool = FileManagerTool(workspace=tmp_path)
+def test_list_directory_reports_project_root_for_empty_directory(tmp_path: Path) -> None:
+    tool = FileManagerTool(root=tmp_path)
 
     result = tool._list_directory({"path": "."})
 
     assert not result.is_error
-    assert f"Workspace root: {tmp_path.resolve()}" in result.content
+    assert f"Project root: {tmp_path.resolve()}" in result.content
     assert "Path: ." in result.content
     assert "(empty directory)" in result.content
 
 
 def test_read_file_reports_directory_paths_explicitly(tmp_path: Path) -> None:
     (tmp_path / "src/agent/conversation").mkdir(parents=True)
-    tool = FileManagerTool(workspace=tmp_path)
+    tool = FileManagerTool(root=tmp_path)
 
     result = tool._read_file({"path": "src/agent/conversation"})
 
@@ -38,7 +38,7 @@ def test_read_file_reports_directory_paths_explicitly(tmp_path: Path) -> None:
 
 
 async def test_write_file_reports_structured_write_effect(tmp_path: Path) -> None:
-    tool = FileManagerTool(workspace=tmp_path)
+    tool = FileManagerTool(root=tmp_path)
 
     result = await tool.execute(
         {
@@ -55,8 +55,19 @@ async def test_write_file_reports_structured_write_effect(tmp_path: Path) -> Non
     assert result.metadata["status"] == "completed"
 
 
+def test_file_manager_reads_large_files_without_internal_truncation(tmp_path: Path) -> None:
+    content = "x" * 12000
+    (tmp_path / "large.txt").write_text(content, encoding="utf-8")
+    tool = FileManagerTool(root=tmp_path)
+
+    result = tool._read_file({"path": "large.txt"})
+
+    assert not result.is_error
+    assert result.content == content
+
+
 def test_resolve_safe_path_rejects_prefix_bypass(tmp_path: Path) -> None:
-    tool = FileManagerTool(workspace=tmp_path / "workspace")
+    tool = FileManagerTool(root=tmp_path / "workspace")
 
     target = tool._resolve_safe_path("../workspace2/escape.txt")
 
@@ -64,7 +75,7 @@ def test_resolve_safe_path_rejects_prefix_bypass(tmp_path: Path) -> None:
 
 
 def test_resolve_safe_path_rejects_parent_escape(tmp_path: Path) -> None:
-    tool = FileManagerTool(workspace=tmp_path / "workspace")
+    tool = FileManagerTool(root=tmp_path / "workspace")
 
     target = tool._resolve_safe_path("../../etc/passwd")
 

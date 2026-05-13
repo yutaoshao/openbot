@@ -81,6 +81,8 @@ async def handle_streaming(app: Any, message: Any, adapter: StreamingAdapter) ->
         platform=message.platform,
         user_id=message.user_id or "",
         message_timestamp=message.timestamp,
+        source_message_id=message.id,
+        platform_user_id=message.sender_id,
     )
     await adapter.send_streaming(message.conversation_id, stream)
     latency_ms = int((time.monotonic() - start) * 1000)
@@ -108,6 +110,8 @@ async def handle_non_streaming(app: Any, message: Any) -> None:
         platform=message.platform,
         user_id=message.user_id or "",
         message_timestamp=message.timestamp,
+        source_message_id=message.id,
+        platform_user_id=message.sender_id,
     )
     await app.event_bus.publish(
         "agent.response",

@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Any
 
+from src.agent.conversation.message_flow import UserMessageArchiveMetadata
 from src.agent.prompts import build_prompt_fragments
 from src.core.user_scope import SINGLE_USER_ID
 from src.memory.message_format import render_llm_message
@@ -61,6 +62,8 @@ async def prepare_agent_turn(
     platform: str,
     user_id: str,
     message_timestamp: datetime,
+    source_message_id: str = "",
+    platform_user_id: str = "",
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]] | None]:
     """Build messages and tool schemas for the current turn."""
     resolved_user_id = user_id or SINGLE_USER_ID
@@ -75,6 +78,11 @@ async def prepare_agent_turn(
             conversation_id,
             input_text,
             timestamp=message_timestamp,
+            archive_metadata=UserMessageArchiveMetadata(
+                source_message_id=source_message_id,
+                platform_user_id=platform_user_id,
+                user_id=resolved_user_id,
+            ),
         )
         task_state = agent.conversation_manager.get_task_state(conversation_id)
         messages = await agent.conversation_manager.build_messages(

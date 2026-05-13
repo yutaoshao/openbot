@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any
 from src.core.logging import get_logger
 from src.core.user_scope import SINGLE_USER_ID
 
+from . import message_flow as flow
 from .archive_helpers import (
     background_trace_scope,
     conversation_llm_messages,
@@ -14,7 +15,6 @@ from .archive_helpers import (
     pending_llm_messages,
 )
 from .compression import maybe_compress_shared_timeline
-from .message_flow import MessageWriteContext, store_assistant_message, store_user_message
 from .prompt_builder import PromptBuilder
 from .shared_timeline import SharedTimelineMemory
 from .task_state_store import TaskStateStore
@@ -22,6 +22,7 @@ from .task_state_store import TaskStateStore
 if TYPE_CHECKING:
     from datetime import datetime
 
+    from src.agent.conversation.journal import ConversationJournal
     from src.agent.state import TaskState
     from src.infrastructure.model_gateway import ModelGateway
     from src.infrastructure.storage import Storage
@@ -44,6 +45,7 @@ class ConversationManager:
         semantic_memory: SemanticMemory,
         episodic_memory: EpisodicMemory,
         procedural_memory: ProceduralMemory,
+        conversation_journal: ConversationJournal | None = None,
     ) -> None:
         self._storage = storage
         self._gateway = model_gateway
@@ -52,13 +54,10 @@ class ConversationManager:
         self._procedural = procedural_memory
         self._task_store = TaskStateStore()
         self._shared_timeline: SharedTimelineMemory | None = None
+        self._journal = conversation_journal
         self._last_memory_sync_count: dict[str, int] = {}
         self._last_archive_count: dict[str, int] = {}
-        self._prompt_builder = PromptBuilder(
-            semantic_memory,
-            episodic_memory,
-            procedural_memory,
-        )
+        self._prompt_builder = PromptBuilder(semantic_memory, episodic_memory, procedural_memory)
 
     async def get_or_create_conversation(
         self,
@@ -99,12 +98,14 @@ class ConversationManager:
         content: str,
         *,
         timestamp: datetime,
+        archive_metadata: flow.UserMessageArchiveMetadata | None = None,
     ) -> None:
-        await store_user_message(
+        await flow.store_user_message(
             self._message_write_context(),
             conversation_id=conversation_id,
             content=content,
             timestamp=timestamp,
+            archive_metadata=archive_metadata,
         )
 
     async def add_assistant_message(
@@ -119,7 +120,7 @@ class ConversationManager:
         latency_ms: int = 0,
         tool_calls: list[dict[str, Any]] | None = None,
     ) -> None:
-        await store_assistant_message(
+        await flow.store_assistant_message(
             self._message_write_context(),
             conversation_id=conversation_id,
             content=content,
@@ -285,11 +286,12 @@ class ConversationManager:
         if existing.get("user_id") != user_id:
             await self._storage.conversations.update(conversation_id, user_id=user_id)
 
-    def _message_write_context(self) -> MessageWriteContext:
-        return MessageWriteContext(
+    def _message_write_context(self) -> flow.MessageWriteContext:
+        return flow.MessageWriteContext(
             storage=self._storage,
             task_store=self._task_store,
             shared_timeline=self._shared_timeline,
+            journal=self._journal,
         )
 
     def _clear_task_state(self, conversation_id: str, clear_working_memory: bool) -> None:

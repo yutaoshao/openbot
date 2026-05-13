@@ -7,12 +7,8 @@ from typing import Any
 
 from src.tools.registry import ToolResult
 
-# Workspace root for file operations (project data directory)
-DEFAULT_WORKSPACE = Path("data/workspace")
-# Safety: maximum file size to read
-MAX_READ_SIZE = 50000
-# Safety: maximum file size to write
-MAX_WRITE_SIZE = 50000
+# Project root for file operations
+DEFAULT_PROJECT_ROOT = Path(".")
 STATUS_COMPLETED = "completed"
 STATUS_ERROR = "error"
 EFFECT_NONE = "none"
@@ -21,34 +17,33 @@ EFFECT_WRITTEN = "written"
 
 
 class FileManagerTool:
-    """Manage files within the workspace directory."""
+    """Manage files within the project root."""
 
-    def __init__(self, workspace: Path | None = None) -> None:
-        self._workspace = workspace or DEFAULT_WORKSPACE
+    def __init__(self, root: Path | None = None) -> None:
+        self._root = root or DEFAULT_PROJECT_ROOT
 
     @property
-    def workspace(self) -> Path:
-        """Ensure workspace exists and return it."""
-        self._workspace.mkdir(parents=True, exist_ok=True)
-        return self._workspace.resolve()
+    def project_root(self) -> Path:
+        """Return the resolved project root."""
+        return self._root.resolve()
 
     @property
     def name(self) -> str:
         return "file_manager"
 
     @property
-    def workspace_root(self) -> str:
-        """Return the resolved workspace root as a string."""
-        return str(self.workspace)
+    def project_root_text(self) -> str:
+        """Return the resolved project root as a string."""
+        return str(self.project_root)
 
     @property
     def description(self) -> str:
         return (
-            f"Reads, writes, and lists files under workspace root {self.workspace_root}. "
-            "Use when the task involves workspace documents, skill reference files, or "
-            "small file reads/writes relative to that workspace root. "
-            "Do not use when the path is outside the workspace, the file is too large, "
-            "or the task needs codebase-wide search, shell commands, or incremental edits."
+            f"Reads, writes, and lists complete files under project root {self.project_root_text}. "
+            "Use when the task involves project files, runtime data files, skill reference "
+            "files, or saved tool outputs relative to that project root. "
+            "Do not use when the path is outside the project root, the file is binary, "
+            "or the task needs shell commands, codebase-wide search, or incremental edits."
         )
 
     @property
@@ -64,8 +59,8 @@ class FileManagerTool:
                 "path": {
                     "type": "string",
                     "description": (
-                        "Relative path within workspace root "
-                        f"{self.workspace_root} (default: '.' for list)"
+                        "Relative path within project root "
+                        f"{self.project_root_text} (default: '.' for list)"
                     ),
                     "default": ".",
                 },
@@ -82,11 +77,11 @@ class FileManagerTool:
         return "filesystem"
 
     def _resolve_safe_path(self, relative: str) -> Path | None:
-        """Resolve path and verify it stays within workspace."""
-        workspace_root = self.workspace
+        """Resolve path and verify it stays within project root."""
+        project_root = self.project_root
         try:
-            target = (workspace_root / relative).resolve()
-            if not target.is_relative_to(workspace_root):
+            target = (project_root / relative).resolve()
+            if not target.is_relative_to(project_root):
                 return None
             return target
         except (OSError, RuntimeError):
@@ -123,7 +118,7 @@ class FileManagerTool:
         target = self._resolve_safe_path(path)
         if target is None:
             return ToolResult(
-                content="Invalid path: outside workspace boundary",
+                content="Invalid path: outside project root",
                 is_error=True,
                 metadata=_metadata("read_file", path, STATUS_ERROR, EFFECT_NONE),
             )
@@ -145,15 +140,8 @@ class FileManagerTool:
                 metadata=_metadata("read_file", path, STATUS_ERROR, EFFECT_NONE),
             )
 
-        size = target.stat().st_size
-        if size > MAX_READ_SIZE:
-            return ToolResult(
-                content=f"File too large: {size} bytes (max: {MAX_READ_SIZE})",
-                is_error=True,
-                metadata=_metadata("read_file", path, STATUS_ERROR, EFFECT_NONE),
-            )
-
         try:
+            size = target.stat().st_size
             content = target.read_text(encoding="utf-8")
             return ToolResult(
                 content=content,
@@ -180,17 +168,10 @@ class FileManagerTool:
                 metadata=_metadata("write_file", path, STATUS_ERROR, EFFECT_NONE),
             )
 
-        if len(content) > MAX_WRITE_SIZE:
-            return ToolResult(
-                content=f"Content too large: {len(content)} chars (max: {MAX_WRITE_SIZE})",
-                is_error=True,
-                metadata=_metadata("write_file", path, STATUS_ERROR, EFFECT_NONE),
-            )
-
         target = self._resolve_safe_path(path)
         if target is None:
             return ToolResult(
-                content="Invalid path: outside workspace boundary",
+                content="Invalid path: outside project root",
                 is_error=True,
                 metadata=_metadata("write_file", path, STATUS_ERROR, EFFECT_NONE),
             )
@@ -217,7 +198,7 @@ class FileManagerTool:
 
         target = self._resolve_safe_path(path)
         if target is None:
-            return ToolResult(content="Invalid path: outside workspace boundary", is_error=True)
+            return ToolResult(content="Invalid path: outside project root", is_error=True)
 
         if not target.is_dir():
             return ToolResult(content=f"Not a directory: {path}", is_error=True)
@@ -226,25 +207,25 @@ class FileManagerTool:
             entries = sorted(target.iterdir(), key=lambda p: (not p.is_dir(), p.name))
             lines = []
             for entry in entries:
-                rel = entry.relative_to(self.workspace)
+                rel = entry.relative_to(self.project_root)
                 suffix = "/" if entry.is_dir() else f"  ({entry.stat().st_size} bytes)"
                 lines.append(f"  {rel}{suffix}")
 
             if not lines:
                 return ToolResult(
                     content=(
-                        f"Workspace root: {self.workspace_root}\nPath: {path}\n(empty directory)"
+                        f"Project root: {self.project_root_text}\nPath: {path}\n(empty directory)"
                     ),
-                    metadata={"path": path, "workspace_root": self.workspace_root},
+                    metadata={"path": path, "project_root": self.project_root_text},
                 )
 
-            header = f"Workspace root: {self.workspace_root}\nPath: {path}\n"
+            header = f"Project root: {self.project_root_text}\nPath: {path}\n"
             return ToolResult(
                 content=header + "\n".join(lines),
                 metadata={
                     "path": path,
                     "count": len(lines),
-                    "workspace_root": self.workspace_root,
+                    "project_root": self.project_root_text,
                 },
             )
         except OSError as e:

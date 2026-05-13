@@ -204,7 +204,7 @@ openbot/
 │   │       ├── web_search.py        # Tavily Web 搜索
 │   │       ├── web_fetch.py         # 网页抓取与正文提取
 │   │       ├── code_executor.py     # 沙箱 Python 执行
-│   │       ├── file_manager.py      # Workspace 文件操作
+│   │       ├── file_manager.py      # 项目根目录文件操作
 │   │       ├── schedule_manager.py  # 定时任务管理
 │   │       ├── deep_research.py     # 延迟激活的多轮研究工具
 │   │       └── tool_search.py       # 延迟工具发现
@@ -344,6 +344,11 @@ openbot/
 聊天消息会同时保留事件发生时间（`timestamp`）和数据库写入时间
 （`created_at`），同时不改写原始消息正文。
 
+新的用户与助手消息也会按本地日期追加到
+`data/conversations/YYYY/MM/DD.jsonl`，日期来源是消息自身的事件时间。
+当工作记忆压缩较早上下文时，摘要会附带这些 JSONL 文件引用，方便 Agent
+按需重新读取完整细节。
+
 ### Tools
 
 | 工具 | 说明 |
@@ -351,10 +356,14 @@ openbot/
 | `web_search` | 通过 Tavily 进行网页搜索 |
 | `web_fetch` | 抓取网页并提取正文 |
 | `code_executor` | 在沙箱子进程中执行 Python |
-| `file_manager` | 读取、写入、列出 workspace 文件 |
+| `file_manager` | 读取、写入、列出项目根目录下的完整文本文件 |
 | `schedule_manager` | 创建、列出、更新、删除定时任务 |
 | `deep_research` | 显式激活后执行多轮深度研究 |
 | `load_skill` | 显式激活后加载项目或用户技能 |
+
+超过 10,000 字符的工具结果会写入
+`data/tool_outputs/YYYY/MM/DD/`。模型上下文只接收文件路径、行数、字符数和
+预览，而不是完整长输出。
 
 ### 平台适配器
 

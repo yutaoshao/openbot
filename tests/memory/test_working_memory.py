@@ -37,7 +37,7 @@ async def test_working_memory_compress_replaces_older_half_with_summary() -> Non
     summary = await wm.compress(gateway)
     assembled = wm.get_messages()
 
-    assert summary == "summary: keep key facts"
+    assert summary.startswith("summary: keep key facts")
     assert assembled[0]["role"] == "system"
     assert "Summary of earlier conversation" in assembled[0]["content"]
     assert assembled[1]["role"] == "user"
@@ -45,6 +45,23 @@ async def test_working_memory_compress_replaces_older_half_with_summary() -> Non
     assert "recent user" in assembled[1]["content"]
     assert "recent assistant" in assembled[2]["content"]
     assert "[2026-" in assembled[1]["content"]
+
+
+async def test_working_memory_compress_appends_history_file_references(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr("src.memory.message_format._local_timezone", lambda: UTC)
+    gateway = FakeModelGateway(["summary: keep key facts"])
+    wm = WorkingMemory(conversation_id="conv-refs", token_budget=1)
+
+    wm.add(_message("user", "old user", TS1))
+    wm.add(_message("assistant", "old assistant", TS2))
+    wm.add(_message("user", "recent user", TS3))
+    wm.add(_message("assistant", "recent assistant", TS4))
+
+    summary = await wm.compress(gateway)
+
+    assert "完整历史见 data/conversations/2026/05/01.jsonl" in summary
 
 
 async def test_extract_before_compression_filters_invalid_items() -> None:

@@ -121,9 +121,8 @@ class StorageConfig(BaseModel):
     """Database storage configuration."""
 
     db_path: str = "data/openbot.db"
-    workspace_path: str = "data/workspace"
 
-    @field_validator("db_path", "workspace_path", mode="before")
+    @field_validator("db_path", mode="before")
     @classmethod
     def _expand_path(cls, value: str) -> str:
         if not isinstance(value, str):

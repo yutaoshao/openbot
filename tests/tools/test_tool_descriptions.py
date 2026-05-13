@@ -27,7 +27,7 @@ def test_builtin_tool_descriptions_use_three_part_contract(tmp_path: Path) -> No
         WebSearchTool(),
         WebFetchTool(),
         CodeExecutorTool(),
-        FileManagerTool(workspace=tmp_path),
+        FileManagerTool(root=tmp_path),
         ScheduleManagerTool(lambda: None),
         DeepResearchTool(object()),
         LoadSkillTool(SkillRegistry(skills_dirs=[tmp_path])),

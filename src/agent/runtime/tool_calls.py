@@ -10,6 +10,7 @@ from src.core.logging import get_logger
 from src.infrastructure.model_gateway import StreamChunk
 
 from .tool_executor import execute_tool_call, summarize_tool_result
+from .tool_output_store import offload_tool_output_if_needed
 
 logger = get_logger(__name__)
 
@@ -73,6 +74,11 @@ async def _execute_tool_call(
         platform=platform,
         task_state=task_state,
         timeout_override=_timeout_override(task_timeout, task_start),
+    )
+    tool_result = offload_tool_output_if_needed(
+        tool_result,
+        tool_name=tool_call.name,
+        tool_call_id=tool_call.id,
     )
     tool_latency = int((time.monotonic() - tool_start) * 1000)
     _record_tool_context(

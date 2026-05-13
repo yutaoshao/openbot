@@ -74,7 +74,6 @@ wechat:
 
 storage:
   db_path: data/openbot.db
-  workspace_path: data/workspace
 
 log:
   level: INFO

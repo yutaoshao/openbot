@@ -16,10 +16,10 @@ from src.core.config import (
 )
 
 
-def test_storage_config_expands_user_in_workspace_path() -> None:
-    config = StorageConfig(workspace_path="~/Project/openbot")
+def test_storage_config_expands_user_in_db_path() -> None:
+    config = StorageConfig(db_path="~/Project/openbot/openbot.db")
 
-    assert config.workspace_path == str(Path("~/Project/openbot").expanduser())
+    assert config.db_path == str(Path("~/Project/openbot/openbot.db").expanduser())
 
 
 def test_wechat_config_expands_user_in_state_path() -> None:

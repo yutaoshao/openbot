@@ -36,11 +36,6 @@ class WebFetchTool:
                     "type": "string",
                     "description": "The URL to fetch",
                 },
-                "max_length": {
-                    "type": "integer",
-                    "description": "Maximum content length in characters (default: 5000)",
-                    "default": 5000,
-                },
             },
             "required": ["url"],
         }
@@ -51,7 +46,6 @@ class WebFetchTool:
 
     async def execute(self, args: dict[str, Any]) -> ToolResult:
         url = args.get("url", "")
-        max_length = args.get("max_length", 5000)
 
         if not url:
             return ToolResult(content="URL is required", is_error=True)
@@ -79,15 +73,8 @@ class WebFetchTool:
                     metadata={"url": url},
                 )
 
-            # Truncate if needed
-            content = extracted[:max_length]
-            if len(extracted) > max_length:
-                content += (
-                    f"\n\n[Truncated: {len(extracted)} total chars, showing first {max_length}]"
-                )
-
             return ToolResult(
-                content=content,
+                content=extracted,
                 metadata={"url": url, "length": len(extracted)},
             )
 

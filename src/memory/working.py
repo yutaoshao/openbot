@@ -12,6 +12,7 @@ from collections import OrderedDict
 from typing import TYPE_CHECKING, Any
 
 from src.core.logging import get_logger
+from src.memory.history_references import history_file_references
 from src.memory.message_format import render_llm_message
 from src.memory.structured_json import parse_json_array_response
 
@@ -204,7 +205,7 @@ class WorkingMemory:
             messages=[{"role": "user", "content": prompt}],
         )
 
-        new_summary = response.text.strip()
+        new_summary = _summary_with_history_references(response.text.strip(), older)
 
         # Merge with any existing summary
         if self._summary:
@@ -291,3 +292,8 @@ class WorkingMemory:
 def _validate_message_timestamp(message: dict[str, Any]) -> None:
     if message.get("role") in {"user", "assistant"}:
         render_llm_message(message)
+
+
+def _summary_with_history_references(summary: str, messages: list[dict[str, Any]]) -> str:
+    references = history_file_references(messages)
+    return f"{summary}\n\n" + "\n".join(references) if references else summary

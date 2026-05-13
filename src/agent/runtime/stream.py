@@ -52,6 +52,8 @@ async def run_stream_inner(
     ctx: Any,
     *,
     message_timestamp: datetime,
+    source_message_id: str = "",
+    platform_user_id: str = "",
 ):
     """Inner streaming loop with trace context active."""
     messages, _ = await prepare_agent_turn(
@@ -61,6 +63,8 @@ async def run_stream_inner(
         platform,
         user_id,
         message_timestamp,
+        source_message_id,
+        platform_user_id,
     )
     route_decision = _route_decision(agent, input_text, _task_state(agent, conversation_id))
     await agent.event_bus.publish(

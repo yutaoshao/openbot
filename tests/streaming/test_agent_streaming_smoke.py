@@ -153,6 +153,7 @@ class FakeConversationManager:
         content: str,
         *,
         timestamp: datetime,
+        archive_metadata: Any = None,
     ) -> None:
         self.user_timestamps.append(timestamp)
         return None

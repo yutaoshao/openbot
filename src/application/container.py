@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from src.agent.agent import Agent
 from src.agent.conversation import ConversationManager
+from src.agent.conversation.journal import ConversationJournal
 from src.core.config import load_config
 from src.core.logging import get_logger
 from src.identity.service import IdentityService
@@ -68,6 +69,7 @@ class Application:
             self.semantic_memory,
             self.episodic_memory,
             self.procedural_memory,
+            conversation_journal=ConversationJournal(),
         )
         self.agent = Agent(
             model_gateway=self.model_gateway,

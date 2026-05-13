@@ -122,7 +122,7 @@ async def test_run_replaces_unconfirmed_save_claim_with_incomplete_message() -> 
 
 async def test_run_repairs_missing_file_write_before_final_reply(tmp_path) -> None:
     registry = ToolRegistry()
-    registry.register(FileManagerTool(workspace=tmp_path), visibility=CORE_VISIBILITY)
+    registry.register(FileManagerTool(root=tmp_path), visibility=CORE_VISIBILITY)
     agent = Agent(
         model_gateway=FinalThenWriteGateway(),
         event_bus=FakeEventBus(),

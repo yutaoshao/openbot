@@ -68,6 +68,8 @@ class Agent:
         user_id: str = "",
         *,
         message_timestamp: datetime | None = None,
+        source_message_id: str = "",
+        platform_user_id: str = "",
     ) -> AgentResponse:
         """Execute the agent ReAct loop (non-streaming)."""
         start = time.monotonic()
@@ -84,6 +86,8 @@ class Agent:
             platform,
             user_id,
             message_timestamp=message_timestamp,
+            source_message_id=source_message_id,
+            platform_user_id=platform_user_id,
         ):
             if chunk.type == "text":
                 content += chunk.text
@@ -114,6 +118,8 @@ class Agent:
         user_id: str = "",
         *,
         message_timestamp: datetime | None = None,
+        source_message_id: str = "",
+        platform_user_id: str = "",
     ) -> AsyncIterator[StreamChunk]:
         """Execute the agent ReAct loop, yielding StreamChunks."""
         resolved_timestamp = _resolve_message_timestamp(message_timestamp)
@@ -134,6 +140,8 @@ class Agent:
                     user_id,
                     ctx,
                     message_timestamp=resolved_timestamp,
+                    source_message_id=source_message_id,
+                    platform_user_id=platform_user_id,
                 ):
                     yield chunk
             finally:

@@ -12,8 +12,6 @@ from src.tools.registry import ToolResult
 
 # Safety: maximum execution time in seconds
 MAX_TIMEOUT = 30
-# Safety: maximum output size in characters
-MAX_OUTPUT = 10000
 
 
 class CodeExecutorTool:
@@ -88,8 +86,8 @@ class CodeExecutorTool:
             finally:
                 Path(script_path).unlink(missing_ok=True)
 
-            stdout_text = stdout.decode("utf-8", errors="replace")[:MAX_OUTPUT]
-            stderr_text = stderr.decode("utf-8", errors="replace")[:MAX_OUTPUT]
+            stdout_text = stdout.decode("utf-8", errors="replace")
+            stderr_text = stderr.decode("utf-8", errors="replace")
 
             if process.returncode != 0:
                 output = f"Exit code: {process.returncode}\n"
