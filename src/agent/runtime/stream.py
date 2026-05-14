@@ -33,15 +33,12 @@ _FILE_WRITE_RETRY_PROMPT = (
     "then reply with the saved path. Do not claim the file is saved without "
     "a successful write tool result."
 )
-
 if TYPE_CHECKING:
     from datetime import datetime
-
 build_system_prompt = prompting.build_system_prompt
 prepare_agent_turn = prompting.prepare_agent_turn
 resolve_route_tool_names = prompting.resolve_route_tool_names
 resolve_tools = prompting.resolve_tools
-
 
 async def run_stream_inner(
     agent: Any,
@@ -158,6 +155,7 @@ async def run_stream_inner(
         append_assistant_tool_calls(
             messages,
             accumulated_text=round_result.accumulated_text,
+            reasoning_content=round_result.reasoning_content,
             collected_tool_calls=round_result.collected_tool_calls,
         )
 
@@ -292,12 +290,10 @@ async def _finalize_text(
         task_state=task_state,
     )
     if verified:
-        await agent.event_bus.publish(
-            "harness.completion_verified",
-            {
-                "conversation_id": conversation_id,
-                "platform": platform,
-                "iterations": iterations,
-            },
-        )
+        data = {
+            "conversation_id": conversation_id,
+            "platform": platform,
+            "iterations": iterations,
+        }
+        await agent.event_bus.publish("harness.completion_verified", data)
     return verified_text

@@ -40,6 +40,7 @@ class ModelResponse:
     """Unified response from any model provider."""
 
     text: str = ""
+    reasoning_content: str = ""
     tool_calls: list[ToolCall] = field(default_factory=list)
     usage: Usage = field(default_factory=Usage)
     model: str = ""
@@ -65,6 +66,7 @@ class StreamChunk:
 
     type: Literal["text", "tool_call", "tool_status", "done"]
     text: str = ""
+    reasoning_content: str = ""
     tool_call: ToolCall | None = None
     tool_name: str = ""
     usage: Usage | None = None

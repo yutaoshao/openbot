@@ -77,11 +77,14 @@ def append_assistant_tool_calls(
     messages: list[dict[str, Any]],
     *,
     accumulated_text: str,
+    reasoning_content: str,
     collected_tool_calls: list[Any],
 ) -> None:
     assistant_msg: dict[str, Any] = {"role": "assistant"}
     if accumulated_text:
         assistant_msg["content"] = accumulated_text
+    if reasoning_content:
+        assistant_msg["reasoning_content"] = reasoning_content
     assistant_msg["tool_calls"] = [
         {
             "id": tool_call.id,

@@ -14,6 +14,7 @@ class ModelRoundResult:
     """Collected output of one streamed model round."""
 
     accumulated_text: str
+    reasoning_content: str
     collected_tool_calls: list[Any]
     usage: Usage | None
     model: str
@@ -27,6 +28,7 @@ async def stream_model_round(
 ):
     """Yield streamed text chunks, then a final ``ModelRoundResult`` event."""
     accumulated_text = ""
+    reasoning_content = ""
     collected_tool_calls: list[Any] = []
     iter_usage: Usage | None = None
     final_model = ""
@@ -46,9 +48,11 @@ async def stream_model_round(
         if chunk.type == "done":
             iter_usage = chunk.usage
             final_model = chunk.model
+            reasoning_content = chunk.reasoning_content
 
     yield ModelRoundResult(
         accumulated_text=accumulated_text,
+        reasoning_content=reasoning_content,
         collected_tool_calls=collected_tool_calls,
         usage=iter_usage,
         model=final_model,

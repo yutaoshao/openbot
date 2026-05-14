@@ -20,49 +20,18 @@ if TYPE_CHECKING:
     from src.core.config import ModelProviderConfig
 
 from src.core.logging import get_logger
-from src.infrastructure.model_gateway import ModelResponse, StreamChunk, ToolCall, Usage
+from src.infrastructure.model_gateway import ModelResponse, StreamChunk, ToolCall
+from src.infrastructure.providers.openai_messages import (
+    preserves_reasoning_content,
+    request_messages,
+    tool_schemas,
+)
+from src.infrastructure.providers.openai_streaming import (
+    OpenAIStreamAccumulator,
+    usage_from_openai,
+)
 
 logger = get_logger(__name__)
-
-
-def _merge_tool_name(existing: str, delta: str) -> str:
-    """Merge streaming tool-name fragments without duplicating full names."""
-    if not existing:
-        return delta
-    if not delta or delta == existing or existing.endswith(delta):
-        return existing
-    if delta.startswith(existing):
-        return delta
-    overlap = min(len(existing), len(delta))
-    while overlap > 0:
-        if existing[-overlap:] == delta[:overlap]:
-            return existing + delta[overlap:]
-        overlap -= 1
-    return existing + delta
-
-
-def _usage_from_openai(raw_usage: Any | None) -> Usage:
-    """Convert OpenAI-compatible usage metadata into OpenBot usage fields."""
-    if raw_usage is None:
-        return Usage()
-    tokens_in = int(getattr(raw_usage, "prompt_tokens", 0) or 0)
-    tokens_out = int(getattr(raw_usage, "completion_tokens", 0) or 0)
-    return Usage(
-        tokens_in=tokens_in,
-        tokens_out=tokens_out,
-        cached_tokens=_cached_tokens_from_usage(raw_usage),
-    )
-
-
-def _cached_tokens_from_usage(raw_usage: Any) -> int | None:
-    details = getattr(raw_usage, "prompt_tokens_details", None)
-    if details is None:
-        return None
-    if isinstance(details, dict):
-        value = details.get("cached_tokens")
-    else:
-        value = getattr(details, "cached_tokens", None)
-    return int(value) if value is not None else None
 
 
 class OpenAICompatibleProvider:
@@ -73,6 +42,7 @@ class OpenAICompatibleProvider:
 
         self.config = config
         self.model = config.model
+        self._preserve_reasoning_content = preserves_reasoning_content(self.model)
 
         import httpx
 
@@ -97,6 +67,29 @@ class OpenAICompatibleProvider:
             read_timeout=config.read_timeout,
         )
 
+    def _request_kwargs(
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None,
+        kwargs: dict[str, Any],
+        *,
+        stream: bool,
+    ) -> dict[str, Any]:
+        preserve = self._preserve_reasoning_content
+        request_kwargs: dict[str, Any] = {
+            "model": self.model,
+            "max_tokens": kwargs.get("max_tokens", self.config.max_tokens),
+            "messages": request_messages(messages, preserve_reasoning_content=preserve),
+        }
+        if stream:
+            request_kwargs["stream"] = True
+            request_kwargs["stream_options"] = {"include_usage": True}
+        if self.config.temperature is not None:
+            request_kwargs["temperature"] = self.config.temperature
+        if tools:
+            request_kwargs["tools"] = tool_schemas(tools)
+        return request_kwargs
+
     async def chat(
         self,
         messages: list[dict[str, Any]],
@@ -104,33 +97,15 @@ class OpenAICompatibleProvider:
         **kwargs: Any,
     ) -> ModelResponse:
         """Call OpenAI-compatible API and return unified response."""
-        call_kwargs: dict[str, Any] = {
-            "model": self.model,
-            "max_tokens": kwargs.get("max_tokens", self.config.max_tokens),
-            "messages": messages,  # OpenAI format accepts system in messages directly
-        }
-        if self.config.temperature is not None:
-            call_kwargs["temperature"] = self.config.temperature
-
-        if tools:
-            call_kwargs["tools"] = [
-                {
-                    "type": "function",
-                    "function": {
-                        "name": t["name"],
-                        "description": t["description"],
-                        "parameters": t["parameters"],
-                    },
-                }
-                for t in tools
-            ]
-
         start = time.monotonic()
-        response = await self.client.chat.completions.create(**call_kwargs)
+        response = await self.client.chat.completions.create(
+            **self._request_kwargs(messages, tools, kwargs, stream=False)
+        )
         latency_ms = int((time.monotonic() - start) * 1000)
 
         choice = response.choices[0]
         text = choice.message.content or ""
+        reasoning_content = str(getattr(choice.message, "reasoning_content", "") or "")
 
         tool_calls = []
         if choice.message.tool_calls:
@@ -148,8 +123,9 @@ class OpenAICompatibleProvider:
 
         return ModelResponse(
             text=text,
+            reasoning_content=reasoning_content,
             tool_calls=tool_calls,
-            usage=_usage_from_openai(response.usage),
+            usage=usage_from_openai(response.usage),
             model=self.model,
             latency_ms=latency_ms,
         )
@@ -161,107 +137,27 @@ class OpenAICompatibleProvider:
         **kwargs: Any,
     ) -> AsyncIterator[StreamChunk]:
         """Stream chat completions and yield StreamChunk objects."""
-        import json
-
-        call_kwargs: dict[str, Any] = {
-            "model": self.model,
-            "max_tokens": kwargs.get("max_tokens", self.config.max_tokens),
-            "messages": messages,
-            "stream": True,
-            "stream_options": {"include_usage": True},
-        }
-        if self.config.temperature is not None:
-            call_kwargs["temperature"] = self.config.temperature
-
-        if tools:
-            call_kwargs["tools"] = [
-                {
-                    "type": "function",
-                    "function": {
-                        "name": t["name"],
-                        "description": t["description"],
-                        "parameters": t["parameters"],
-                    },
-                }
-                for t in tools
-            ]
-
         start = time.monotonic()
-
-        stream = await self.client.chat.completions.create(**call_kwargs)
-
-        # Accumulate tool call deltas (index -> {id, name, arguments_str})
-        tc_accum: dict[int, dict[str, str]] = {}
-        usage = Usage()
-        accumulated_text = ""
+        stream = await self.client.chat.completions.create(
+            **self._request_kwargs(messages, tools, kwargs, stream=True)
+        )
+        accumulator = OpenAIStreamAccumulator()
 
         async for event in stream:
-            # Usage chunk (sent at stream end when include_usage=True)
-            if event.usage:
-                usage = _usage_from_openai(event.usage)
-
+            chunk = accumulator.consume(event)
+            if chunk is not None:
+                yield chunk
             if not event.choices:
                 continue
-
-            delta = event.choices[0].delta
-
-            # Text delta
-            if delta.content:
-                accumulated_text += delta.content
-                yield StreamChunk(type="text", text=delta.content)
-
-            # Tool call delta
-            if delta.tool_calls:
-                for tc_delta in delta.tool_calls:
-                    idx = tc_delta.index
-                    if idx not in tc_accum:
-                        tc_accum[idx] = {
-                            "id": tc_delta.id or "",
-                            "name": "",
-                            "arguments": "",
-                        }
-                    acc = tc_accum[idx]
-                    if tc_delta.id:
-                        acc["id"] = tc_delta.id
-                    if tc_delta.function:
-                        if tc_delta.function.name:
-                            acc["name"] = _merge_tool_name(
-                                acc["name"],
-                                tc_delta.function.name,
-                            )
-                        if tc_delta.function.arguments:
-                            acc["arguments"] += tc_delta.function.arguments
-
-            # Finish reason
             if event.choices[0].finish_reason:
                 break
 
-        # Yield accumulated tool calls
-        for _idx in sorted(tc_accum):
-            acc = tc_accum[_idx]
-            args_str = acc["arguments"]
-            try:
-                args = json.loads(args_str) if args_str else {}
-            except json.JSONDecodeError:
-                args = {"_raw": args_str}
-            yield StreamChunk(
-                type="tool_call",
-                tool_call=ToolCall(id=acc["id"], name=acc["name"], arguments=args),
-            )
+        for chunk in accumulator.tool_call_chunks():
+            yield chunk
 
-        # Estimate tokens if the API didn't report usage
         latency_ms = int((time.monotonic() - start) * 1000)
-
-        if usage.tokens_in == 0 and usage.tokens_out == 0:
-            # Rough estimate: ~3 chars/token for mixed CJK/Latin
-            input_chars = sum(len(str(m.get("content", ""))) for m in messages)
-            output_chars = len(accumulated_text)
-            for acc in tc_accum.values():
-                output_chars += len(acc.get("arguments", ""))
-            usage = Usage(
-                tokens_in=max(1, input_chars // 3),
-                tokens_out=max(1, output_chars // 3),
-            )
+        usage = accumulator.usage_or_estimate(messages)
+        if usage is not accumulator.usage:
             logger.debug(
                 "openai_compat.usage_estimated",
                 tokens_in=usage.tokens_in,
@@ -272,6 +168,7 @@ class OpenAICompatibleProvider:
             type="done",
             usage=usage,
             model=self.model,
+            reasoning_content=accumulator.reasoning_content,
         )
 
         logger.debug(

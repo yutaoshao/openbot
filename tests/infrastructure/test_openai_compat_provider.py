@@ -26,8 +26,10 @@ class _FakeCompletions:
     ) -> None:
         self._events = events
         self._response = response
+        self.requests: list[dict[str, object]] = []
 
     async def create(self, **kwargs: object) -> _FakeStream | SimpleNamespace:
+        self.requests.append(kwargs)
         if kwargs.get("stream"):
             return _FakeStream(self._events)
         if self._response is None:
@@ -35,11 +37,19 @@ class _FakeCompletions:
         return self._response
 
 
-def _make_chat_response(usage: SimpleNamespace) -> SimpleNamespace:
+def _make_chat_response(
+    usage: SimpleNamespace,
+    *,
+    reasoning_content: str = "",
+) -> SimpleNamespace:
     return SimpleNamespace(
         choices=[
             SimpleNamespace(
-                message=SimpleNamespace(content="hello", tool_calls=None),
+                message=SimpleNamespace(
+                    content="hello",
+                    reasoning_content=reasoning_content,
+                    tool_calls=None,
+                ),
             )
         ],
         usage=usage,
@@ -78,14 +88,16 @@ def _make_stream_usage_event(
 def _make_provider(
     events: list[SimpleNamespace] | None = None,
     response: SimpleNamespace | None = None,
+    model: str = "test-model",
 ) -> OpenAICompatibleProvider:
     provider = OpenAICompatibleProvider.__new__(OpenAICompatibleProvider)
     provider.config = ModelProviderConfig(
         provider="openai_compatible",
-        model="test-model",
+        model=model,
         base_url="https://example.invalid/v1",
     )
-    provider.model = "test-model"
+    provider.model = model
+    provider._preserve_reasoning_content = model.startswith("mimo-")
     provider.client = SimpleNamespace(
         chat=SimpleNamespace(
             completions=_FakeCompletions(events or [], response),
@@ -107,6 +119,19 @@ async def test_chat_reports_cached_prompt_tokens() -> None:
     assert response.usage.tokens_out == 20
     assert response.usage.cached_tokens == 64
     assert response.usage.cache_hit_ratio == 0.64
+
+
+async def test_chat_preserves_response_reasoning_content() -> None:
+    provider = _make_provider(
+        response=_make_chat_response(
+            _make_usage(prompt_tokens=10, completion_tokens=4, cached_tokens=0),
+            reasoning_content="I should call a tool.",
+        )
+    )
+
+    response = await provider.chat(messages=[])
+
+    assert response.reasoning_content == "I should call a tool."
 
 
 async def test_chat_stream_reports_cached_prompt_tokens() -> None:
@@ -143,6 +168,7 @@ def _make_legacy_provider(events: list[SimpleNamespace]) -> OpenAICompatibleProv
         base_url="https://example.invalid/v1",
     )
     provider.model = "test-model"
+    provider._preserve_reasoning_content = False
     provider.client = SimpleNamespace(
         chat=SimpleNamespace(
             completions=_LegacyFakeCompletions(events),
@@ -153,6 +179,8 @@ def _make_legacy_provider(events: list[SimpleNamespace]) -> OpenAICompatibleProv
 
 def _stream_event(
     *,
+    content: str | None = None,
+    reasoning_content: str | None = None,
     tool_name: str | None = None,
     tool_arguments: str | None = None,
     tool_call_id: str | None = None,
@@ -174,7 +202,11 @@ def _stream_event(
         usage=None,
         choices=[
             SimpleNamespace(
-                delta=SimpleNamespace(content=None, tool_calls=tool_calls),
+                delta=SimpleNamespace(
+                    content=content,
+                    reasoning_content=reasoning_content,
+                    tool_calls=tool_calls,
+                ),
                 finish_reason=finish_reason,
             )
         ],
@@ -199,3 +231,18 @@ async def test_chat_stream_deduplicates_repeated_tool_name_deltas() -> None:
     assert len(tool_chunks) == 1
     assert tool_chunks[0].tool_call is not None
     assert tool_chunks[0].tool_call.name == "web_fetch"
+
+
+async def test_chat_stream_preserves_accumulated_reasoning_content() -> None:
+    provider = _make_legacy_provider(
+        [
+            _stream_event(reasoning_content="I need "),
+            _stream_event(reasoning_content="weather data."),
+            _stream_event(finish_reason="stop"),
+        ]
+    )
+
+    chunks = [chunk async for chunk in provider.chat_stream(messages=[])]
+
+    assert chunks[-1].type == "done"
+    assert chunks[-1].reasoning_content == "I need weather data."
