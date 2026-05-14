@@ -106,7 +106,7 @@ def _event_from_record(record: dict[str, Any]) -> ToolEvent:
         name=str(record.get("name") or "unknown"),
         operation=str(data.get("operation") or ""),
         path=str(data.get("path") or ""),
-        status=str(data.get("status") or (STATUS_ERROR if is_error else STATUS_COMPLETED)),
+        status=str(data.get("status") or STATUS_ERROR) if is_error else STATUS_COMPLETED,
         effect=str(data.get("effect") or EFFECT_NONE),
         summary=str(record.get("result_preview") or ""),
     )

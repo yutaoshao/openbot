@@ -1,7 +1,12 @@
 from __future__ import annotations
 
 from src.agent.state.task_contract import build_task_contract
-from src.agent.verification.stop import ToolEvent, ToolLedger, verify_stop
+from src.agent.verification.stop import (
+    ToolEvent,
+    ToolLedger,
+    ledger_from_tool_calls,
+    verify_stop,
+)
 
 
 def test_stop_verifier_rejects_required_write_without_confirmed_write() -> None:
@@ -71,3 +76,34 @@ def test_stop_verifier_allows_concrete_write_for_template_path() -> None:
     decision = verify_stop(contract, "已保存到 data/diaries/2026-05-10.md。", ledger)
 
     assert decision.allow
+
+
+def test_ledger_ignores_successful_tool_business_status() -> None:
+    ledger = ledger_from_tool_calls(
+        [
+            {
+                "name": "schedule_manager",
+                "is_error": False,
+                "result_preview": "Created schedule abc. Status: active.",
+                "metadata": {"id": "abc", "status": "active"},
+            },
+        ]
+    )
+
+    assert not ledger.has_problem_events()
+
+
+def test_ledger_preserves_failed_tool_status_detail() -> None:
+    ledger = ledger_from_tool_calls(
+        [
+            {
+                "name": "bash",
+                "is_error": True,
+                "result_preview": "Tool 'bash' timed out after 60.00s",
+                "metadata": {"status": "timeout", "effect": "none"},
+            },
+        ]
+    )
+
+    assert ledger.events[0].status == "timeout"
+    assert ledger.has_problem_events()
