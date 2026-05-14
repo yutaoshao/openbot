@@ -15,9 +15,13 @@ from src.core.monitor import MetricsCollector
 from src.infrastructure.embedding import EmbeddingService, NullEmbeddingService
 from src.infrastructure.reranker import NullRerankerService, RerankerService
 from src.tools.builtin import (
+    BashTool,
     CodeExecutorTool,
     DeepResearchTool,
+    EditFileTool,
     FileManagerTool,
+    GlobTool,
+    GrepTool,
     ScheduleManagerTool,
     ToolSearchTool,
     WebFetchTool,
@@ -89,6 +93,26 @@ def register_builtin_tools(app: Any) -> None:
         FileManagerTool(root=Path(".")),
         visibility=CORE_VISIBILITY,
         keywords=["file", "workspace", "read file", "write file", "文件"],
+    )
+    app.tool_registry.register(
+        EditFileTool(root=Path(".")),
+        visibility=CORE_VISIBILITY,
+        keywords=["edit file", "replace text", "patch", "修改文件", "增量编辑"],
+    )
+    app.tool_registry.register(
+        BashTool(root=Path(".")),
+        visibility=CORE_VISIBILITY,
+        keywords=["bash", "shell", "terminal", "git", "pytest", "终端", "命令"],
+    )
+    app.tool_registry.register(
+        GlobTool(root=Path(".")),
+        visibility=CORE_VISIBILITY,
+        keywords=["glob", "find file", "list files", "文件搜索"],
+    )
+    app.tool_registry.register(
+        GrepTool(root=Path(".")),
+        visibility=CORE_VISIBILITY,
+        keywords=["grep", "ripgrep", "search code", "内容搜索", "搜索代码"],
     )
     app.tool_registry.register(
         ScheduleManagerTool(lambda: app.scheduler),

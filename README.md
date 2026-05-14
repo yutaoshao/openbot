@@ -208,6 +208,10 @@ openbot/
 │   │       ├── web_fetch.py         # Web page fetch + content extraction
 │   │       ├── code_executor.py     # Sandboxed Python execution
 │   │       ├── file_manager.py      # Project-root file operations
+│   │       ├── edit_file.py         # Incremental project-root file edits
+│   │       ├── bash_tool.py         # Full-permission local shell execution
+│   │       ├── glob_tool.py         # ripgrep-backed file search
+│   │       ├── grep_tool.py         # ripgrep-backed content search
 │   │       ├── schedule_manager.py  # Recurring schedule management
 │   │       ├── deep_research.py     # Deferred multi-round research tool
 │   │       └── tool_search.py       # Deferred tool discovery
@@ -361,9 +365,17 @@ details on demand.
 | `web_fetch` | Fetch and extract content from web pages |
 | `code_executor` | Execute Python code in sandboxed subprocess |
 | `file_manager` | Read, write, and list complete text files under the project root |
+| `edit_file` | Apply exact-text or line-range edits to project-root text files |
+| `bash` | Run full-permission local shell commands from the project environment |
+| `glob` | Find files with ripgrep-backed glob patterns |
+| `grep` | Search file contents with ripgrep-backed keyword or regex matching |
 | `schedule_manager` | Create, list, update, and delete recurring schedules |
 | `deep_research` | Run multi-round research when explicitly activated |
 | `load_skill` | Load project or user skills when explicitly activated |
+
+`grep` and `glob` require `rg` (ripgrep) on `PATH`. The `bash` tool intentionally
+runs with full local host permissions; it does not apply command allowlists or
+denylists.
 
 Tool results longer than 10,000 characters are written to
 `data/tool_outputs/YYYY/MM/DD/`. The model receives a compact file reference,

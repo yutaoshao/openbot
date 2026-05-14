@@ -205,6 +205,10 @@ openbot/
 │   │       ├── web_fetch.py         # 网页抓取与正文提取
 │   │       ├── code_executor.py     # 沙箱 Python 执行
 │   │       ├── file_manager.py      # 项目根目录文件操作
+│   │       ├── edit_file.py         # 项目根目录增量文件编辑
+│   │       ├── bash_tool.py         # 本机全权限 shell 执行
+│   │       ├── glob_tool.py         # 基于 ripgrep 的文件搜索
+│   │       ├── grep_tool.py         # 基于 ripgrep 的内容搜索
 │   │       ├── schedule_manager.py  # 定时任务管理
 │   │       ├── deep_research.py     # 延迟激活的多轮研究工具
 │   │       └── tool_search.py       # 延迟工具发现
@@ -357,9 +361,16 @@ openbot/
 | `web_fetch` | 抓取网页并提取正文 |
 | `code_executor` | 在沙箱子进程中执行 Python |
 | `file_manager` | 读取、写入、列出项目根目录下的完整文本文件 |
+| `edit_file` | 对项目根目录下的文本文件执行精确文本或行范围增量编辑 |
+| `bash` | 从项目环境执行本机全权限 shell 命令 |
+| `glob` | 使用 ripgrep glob pattern 搜索文件 |
+| `grep` | 使用 ripgrep 进行关键词或正则内容搜索 |
 | `schedule_manager` | 创建、列出、更新、删除定时任务 |
 | `deep_research` | 显式激活后执行多轮深度研究 |
 | `load_skill` | 显式激活后加载项目或用户技能 |
+
+`grep` 和 `glob` 依赖 `PATH` 中存在 `rg`（ripgrep）。`bash` 工具按本机
+全权限执行，不额外应用命令白名单或黑名单。
 
 超过 10,000 字符的工具结果会写入
 `data/tool_outputs/YYYY/MM/DD/`。模型上下文只接收文件路径、行数、字符数和
