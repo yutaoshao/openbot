@@ -109,15 +109,9 @@ async def test_edit_file_rejects_directory_binary_and_path_escape(tmp_path: Path
     (tmp_path / "binary.bin").write_bytes(b"\xff\xfe\x00")
     tool = EditFileTool(root=tmp_path)
 
-    directory = await tool.execute(
-        {"file_path": "dir", "old_text": "x", "new_text": "y"}
-    )
-    binary = await tool.execute(
-        {"file_path": "binary.bin", "old_text": "x", "new_text": "y"}
-    )
-    escaped = await tool.execute(
-        {"file_path": "../escape.txt", "old_text": "x", "new_text": "y"}
-    )
+    directory = await tool.execute({"file_path": "dir", "old_text": "x", "new_text": "y"})
+    binary = await tool.execute({"file_path": "binary.bin", "old_text": "x", "new_text": "y"})
+    escaped = await tool.execute({"file_path": "../escape.txt", "old_text": "x", "new_text": "y"})
 
     assert directory.is_error
     assert "Path is a directory" in directory.content
@@ -202,13 +196,7 @@ async def test_grep_supports_literal_context_and_max_results(tmp_path: Path) -> 
 async def test_grep_omits_context_for_truncated_matches(tmp_path: Path) -> None:
     target = tmp_path / "notes.txt"
     target.write_text(
-        "first before\n"
-        "needle one\n"
-        "first after\n"
-        "gap one\n"
-        "gap two\n"
-        "second before\n"
-        "needle two\n",
+        "first before\nneedle one\nfirst after\ngap one\ngap two\nsecond before\nneedle two\n",
         encoding="utf-8",
     )
     tool = GrepTool(root=tmp_path)
@@ -234,11 +222,7 @@ async def test_grep_omits_context_for_truncated_matches(tmp_path: Path) -> None:
 async def test_grep_omits_adjacent_before_context_for_truncated_matches(tmp_path: Path) -> None:
     target = tmp_path / "notes.txt"
     target.write_text(
-        "first before\n"
-        "needle one\n"
-        "first after\n"
-        "second before\n"
-        "needle two\n",
+        "first before\nneedle one\nfirst after\nsecond before\nneedle two\n",
         encoding="utf-8",
     )
     tool = GrepTool(root=tmp_path)

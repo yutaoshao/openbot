@@ -43,8 +43,7 @@ class EditFileInput(StrictToolInput):
     def _validate_mode(self) -> Self:
         text_mode = self.old_text is not None or self.new_text is not None
         line_mode = any(
-            value is not None
-            for value in (self.line_start, self.line_end, self.replacement)
+            value is not None for value in (self.line_start, self.line_end, self.replacement)
         )
         if text_mode == line_mode:
             raise ValueError("provide exactly one edit mode")

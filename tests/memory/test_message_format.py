@@ -46,6 +46,4 @@ def test_render_user_message_preserves_literal_timestamp_text(monkeypatch) -> No
 
     rendered = render_llm_message(message)
 
-    assert rendered["content"] == (
-        "[2026-05-11 11:50] [2026-05-11 11:49] 这就是我发的正文"
-    )
+    assert rendered["content"] == ("[2026-05-11 11:50] [2026-05-11 11:49] 这就是我发的正文")

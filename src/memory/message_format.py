@@ -10,9 +10,7 @@ if TYPE_CHECKING:
     from collections.abc import Mapping
 
 _TIMESTAMPED_ROLES = {"user", "assistant"}
-_INTERNAL_TIMESTAMP_PREFIX = re.compile(
-    r"^(?:\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}\]\s*)+"
-)
+_INTERNAL_TIMESTAMP_PREFIX = re.compile(r"^(?:\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}\]\s*)+")
 
 
 def render_llm_message(message: Mapping[str, Any]) -> dict[str, Any]:
