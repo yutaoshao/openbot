@@ -116,7 +116,11 @@ async def _execute_rg(cmd: list[str], root: Path | None, data: GrepInput) -> Too
 
 
 def _grep_result(stdout: str, data: GrepInput) -> ToolResult:
-    lines, match_count, truncated = _parse_rg_json(stdout, data.max_results)
+    lines, match_count, truncated = _parse_rg_json(
+        stdout,
+        data.max_results,
+        data.context_lines,
+    )
     return ToolResult(
         content="\n".join(lines) if lines else "No matches found.",
         metadata={
@@ -131,8 +135,14 @@ def _grep_result(stdout: str, data: GrepInput) -> ToolResult:
     )
 
 
-def _parse_rg_json(stdout: str, max_results: int) -> tuple[list[str], int, bool]:
+def _parse_rg_json(
+    stdout: str,
+    max_results: int,
+    context_lines: int = 0,
+) -> tuple[list[str], int, bool]:
     lines: list[str] = []
+    pending_context: list[dict[str, Any]] = []
+    last_visible_match: tuple[str, int] | None = None
     match_count = 0
     truncated = False
     for raw_line in stdout.splitlines():
@@ -142,10 +152,37 @@ def _parse_rg_json(stdout: str, max_results: int) -> tuple[list[str], int, bool]
             match_count += 1
             if match_count > max_results:
                 truncated = True
+                pending_context.clear()
                 continue
-        if match_count <= max_results and event_type in {"match", "context"}:
+            lines.extend(_format_event(context) for context in pending_context)
+            pending_context.clear()
             lines.append(_format_event(event))
+            last_visible_match = _event_location(event)
+            continue
+        if event_type != "context":
+            continue
+        if _is_after_visible_match(event, last_visible_match, context_lines):
+            lines.append(_format_event(event))
+            continue
+        pending_context.append(event)
     return lines, min(match_count, max_results), truncated
+
+
+def _is_after_visible_match(
+    context_event: dict[str, Any],
+    last_match: tuple[str, int] | None,
+    context_lines: int,
+) -> bool:
+    if last_match is None:
+        return False
+    context_path, context_line = _event_location(context_event)
+    match_path, match_line = last_match
+    return context_path == match_path and match_line < context_line <= match_line + context_lines
+
+
+def _event_location(event: dict[str, Any]) -> tuple[str, int]:
+    data = event["data"]
+    return data["path"]["text"], data["line_number"]
 
 
 def _format_event(event: dict[str, Any]) -> str:

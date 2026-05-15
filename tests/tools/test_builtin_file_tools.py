@@ -197,3 +197,65 @@ async def test_grep_supports_literal_context_and_max_results(tmp_path: Path) -> 
     ]
     assert result.metadata["count"] == 1
     assert result.metadata["truncated"] is True
+
+
+async def test_grep_omits_context_for_truncated_matches(tmp_path: Path) -> None:
+    target = tmp_path / "notes.txt"
+    target.write_text(
+        "first before\n"
+        "needle one\n"
+        "first after\n"
+        "gap one\n"
+        "gap two\n"
+        "second before\n"
+        "needle two\n",
+        encoding="utf-8",
+    )
+    tool = GrepTool(root=tmp_path)
+
+    result = await tool.execute(
+        {
+            "pattern": "needle",
+            "context_lines": 1,
+            "max_results": 1,
+        }
+    )
+
+    assert not result.is_error
+    assert result.content.splitlines() == [
+        "notes.txt:1:first before",
+        "notes.txt:2:1:needle one",
+        "notes.txt:3:first after",
+    ]
+    assert result.metadata["count"] == 1
+    assert result.metadata["truncated"] is True
+
+
+async def test_grep_omits_adjacent_before_context_for_truncated_matches(tmp_path: Path) -> None:
+    target = tmp_path / "notes.txt"
+    target.write_text(
+        "first before\n"
+        "needle one\n"
+        "first after\n"
+        "second before\n"
+        "needle two\n",
+        encoding="utf-8",
+    )
+    tool = GrepTool(root=tmp_path)
+
+    result = await tool.execute(
+        {
+            "pattern": "needle",
+            "context_lines": 1,
+            "max_results": 1,
+        }
+    )
+
+    assert not result.is_error
+    assert result.content.splitlines() == [
+        "notes.txt:1:first before",
+        "notes.txt:2:1:needle one",
+        "notes.txt:3:first after",
+    ]
+    assert result.metadata["count"] == 1
+    assert result.metadata["truncated"] is True
