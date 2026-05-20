@@ -90,6 +90,7 @@ async def prepare_agent_turn(
             build_system_prompt(agent, input_text=input_text, task_state=task_state),
             input_text,
             resolved_user_id,
+            message_timestamp=message_timestamp,
         )
     else:
         task_state = None

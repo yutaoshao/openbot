@@ -18,6 +18,7 @@ from .compression import maybe_compress_shared_timeline
 from .prompt_builder import PromptBuilder
 from .shared_timeline import SharedTimelineMemory
 from .task_state_store import TaskStateStore
+from .turn_assembly import assemble_turn_messages
 
 if TYPE_CHECKING:
     from datetime import datetime
@@ -79,18 +80,18 @@ class ConversationManager:
         system_prompt: str,
         user_input: str,
         user_id: str,
+        message_timestamp: datetime | None = None,
     ) -> list[dict[str, Any]]:
-        if self._shared_timeline is None:
-            return [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_input},
-            ]
-
-        enriched_prompt = await self._prompt_builder.enrich(system_prompt, user_input, user_id)
-        messages: list[dict[str, Any]] = [{"role": "system", "content": enriched_prompt}]
-        messages.extend(self._task_store.get_protected_messages(conversation_id))
-        messages.extend(self._shared_timeline.get_messages())
-        return messages
+        prompt = system_prompt
+        protected_messages: list[dict[str, str]] = []
+        history_messages: list[dict[str, Any]] = []
+        if self._shared_timeline is not None:
+            prompt = await self._prompt_builder.enrich(system_prompt, user_input, user_id)
+            protected_messages = self._task_store.get_protected_messages(conversation_id)
+            history_messages = self._shared_timeline.get_messages()
+        return assemble_turn_messages(
+            prompt, protected_messages, history_messages, user_input, message_timestamp
+        )
 
     async def add_user_message(
         self,

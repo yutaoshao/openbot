@@ -164,6 +164,7 @@ class FakeConversationManager:
         system_prompt: str,
         user_input: str,
         user_id: str,
+        message_timestamp: datetime | None = None,
     ) -> list[dict[str, str]]:
         return [
             {"role": "system", "content": system_prompt},
