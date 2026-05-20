@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from src.agent.runtime.stream import _needs_file_write_retry
 from src.agent.state.task_contract import build_task_contract
 from src.agent.verification.stop import (
     ToolEvent,
@@ -7,6 +8,14 @@ from src.agent.verification.stop import (
     ledger_from_tool_calls,
     verify_stop,
 )
+
+RESEARCH_PROMPT = """每天早上 3 点，针对 OpenBot 的一个具体功能点做一次技术调研。
+
+执行步骤：
+1. 读取 `data/workspace/research/openbot-daily/`，根据已有报告决定下一个功能点。
+2. 使用 file_manager 保存到：
+   `data/workspace/research/openbot-daily/YYYY-MM-DD-NN-topic-slug.md`
+"""
 
 
 def test_stop_verifier_rejects_required_write_without_confirmed_write() -> None:
@@ -76,6 +85,74 @@ def test_stop_verifier_allows_concrete_write_for_template_path() -> None:
     decision = verify_stop(contract, "已保存到 data/diaries/2026-05-10.md。", ledger)
 
     assert decision.allow
+
+
+def test_task_contract_treats_template_save_path_as_allowed_write_dir() -> None:
+    contract = build_task_contract(RESEARCH_PROMPT)
+
+    assert contract.requires_file_write
+    assert contract.target_paths == ()
+    assert contract.allowed_write_dirs == ("data/workspace/research/openbot-daily/",)
+
+
+def test_stop_verifier_allows_write_inside_template_save_dir() -> None:
+    contract = build_task_contract(RESEARCH_PROMPT)
+    ledger = ToolLedger(
+        (
+            ToolEvent(
+                name="file_manager",
+                operation="write_file",
+                path="data/workspace/research/openbot-daily/2026-05-20-01-topic.md",
+                status="completed",
+                effect="written",
+                summary="Written report",
+            ),
+        )
+    )
+
+    decision = verify_stop(contract, "已保存到每日技术调研报告。", ledger)
+
+    assert decision.allow
+
+
+def test_stop_verifier_rejects_write_outside_template_save_dir() -> None:
+    contract = build_task_contract(RESEARCH_PROMPT)
+    ledger = ToolLedger(
+        (
+            ToolEvent(
+                name="file_manager",
+                operation="write_file",
+                path="data/diaries/2026-05-20.md",
+                status="completed",
+                effect="written",
+                summary="Written unrelated file",
+            ),
+        )
+    )
+
+    decision = verify_stop(contract, "已保存。", ledger)
+
+    assert not decision.allow
+    assert "未确认写入成功" in decision.message
+
+
+def test_runtime_retry_accepts_write_inside_template_save_dir() -> None:
+    contract = build_task_contract(RESEARCH_PROMPT)
+    tool_calls = [
+        {
+            "name": "file_manager",
+            "is_error": False,
+            "result_preview": "Written report",
+            "metadata": {
+                "operation": "write_file",
+                "path": "data/workspace/research/openbot-daily/2026-05-20-01-topic.md",
+                "status": "completed",
+                "effect": "written",
+            },
+        }
+    ]
+
+    assert not _needs_file_write_retry(contract, tool_calls)
 
 
 def test_ledger_ignores_successful_tool_business_status() -> None:

@@ -266,7 +266,7 @@ def _needs_file_write_retry(contract: Any, all_tool_calls: list[dict[str, Any]])
     if not contract.requires_file_write:
         return False
     ledger = ledger_from_tool_calls(all_tool_calls)
-    return not ledger.has_confirmed_write(contract.target_paths)
+    return not ledger.satisfies_file_write(contract)
 
 
 def _append_file_write_retry(messages: list[dict[str, Any]], final_text: str) -> None:

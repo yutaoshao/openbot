@@ -47,16 +47,31 @@ class ToolLedger:
 
     events: tuple[ToolEvent, ...] = ()
 
-    def has_confirmed_write(self, target_paths: tuple[str, ...] = ()) -> bool:
+    def has_confirmed_write(
+        self,
+        target_paths: tuple[str, ...] = (),
+        allowed_write_dirs: tuple[str, ...] = (),
+    ) -> bool:
         writes = [
             event
             for event in self.events
             if event.status == STATUS_COMPLETED and event.effect == EFFECT_WRITTEN
         ]
-        if not target_paths:
+        if not target_paths and not allowed_write_dirs:
             return bool(writes)
         written_paths = {event.path for event in writes}
-        return all(path in written_paths for path in target_paths)
+        if target_paths and not all(path in written_paths for path in target_paths):
+            return False
+        return all(
+            any(_path_inside_dir(event.path, directory) for event in writes)
+            for directory in allowed_write_dirs
+        )
+
+    def satisfies_file_write(self, contract: TaskContract) -> bool:
+        return self.has_confirmed_write(
+            contract.target_paths,
+            contract.allowed_write_dirs,
+        )
 
     def has_problem_events(self) -> bool:
         return any(event.status != STATUS_COMPLETED for event in self.events)
@@ -86,7 +101,7 @@ def verify_stop(
     cleaned = " ".join(final_text.strip().split())
     if _is_vague(cleaned) or _is_internal_summary(cleaned):
         return StopDecision(False, "本轮未完成：模型调用工具后没有生成有效最终回复。")
-    if contract.requires_file_write and not ledger.has_confirmed_write(contract.target_paths):
+    if contract.requires_file_write and not ledger.satisfies_file_write(contract):
         return StopDecision(False, "本轮未完成：用户要求保存/修改文件，但未确认写入成功。")
     if ledger.has_problem_events() and not _mentions_problem(cleaned):
         return StopDecision(False, _tool_problem_message(ledger))
@@ -130,3 +145,11 @@ def _tool_problem_message(ledger: ToolLedger) -> str:
     lines = ["本轮未完成：工具调用出现问题，但最终回复没有说明失败原因。"]
     lines.extend(f"- {summary}" for summary in ledger.problem_summaries())
     return "\n".join(lines)
+
+
+def _path_inside_dir(path: str, directory: str) -> bool:
+    normalized_path = path.strip().rstrip("/")
+    normalized_dir = directory.strip().rstrip("/")
+    if not normalized_path or not normalized_dir:
+        return False
+    return normalized_path.startswith(f"{normalized_dir}/")
