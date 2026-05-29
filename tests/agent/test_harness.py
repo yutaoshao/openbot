@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import asyncio
+from types import SimpleNamespace
 
 from src.agent.coordination import UserExecutionCoordinator
+from src.agent.runtime.tool_calls import _record_tool_context
 from src.agent.state import TaskState
 from src.agent.verification import verify_final_response
 from src.tools.builtin.tool_search import ToolSearchTool
-from src.tools.registry import CORE_VISIBILITY, DEFERRED_VISIBILITY, ToolRegistry
+from src.tools.effects import ToolEffect
+from src.tools.registry import CORE_VISIBILITY, DEFERRED_VISIBILITY, ToolRegistry, ToolResult
 
 
 class _DummyTool:
@@ -69,7 +72,44 @@ async def test_tool_search_returns_activation_metadata() -> None:
     result = await search_tool.execute({"query": "alert"})
 
     assert result.is_error is False
-    assert result.metadata["activate_tools"] == ["alarm_tool"]
+    assert result.effects[0].effect == "tools_discovered"
+    assert result.effects[0].details["activated_tools"] == ("alarm_tool",)
+
+
+def test_loaded_skill_effect_is_protected_context() -> None:
+    protected: list[tuple[str, str, str]] = []
+
+    class ConversationManager:
+        def record_tool_event(self, *_args, **_kwargs) -> None:
+            return None
+
+        def protect_context(self, conversation_id: str, key: str, content: str) -> None:
+            protected.append((conversation_id, key, content))
+
+    tool_result = ToolResult(
+        content="skill body",
+        effects=(
+            ToolEffect(
+                action="skill.load",
+                effect="skill_loaded",
+                status="completed",
+                target_type="skill",
+                target="demo",
+                name="load_skill",
+            ),
+        ),
+    )
+    agent = SimpleNamespace(conversation_manager=ConversationManager())
+    tool_call = SimpleNamespace(name="load_skill")
+
+    _record_tool_context(
+        agent,
+        conversation_id="conv-1",
+        tool_call=tool_call,
+        tool_result=tool_result,
+    )
+
+    assert protected == [("conv-1", "skill:demo", "skill body")]
 
 
 def test_verify_final_response_rewrites_vague_completion() -> None:

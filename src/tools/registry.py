@@ -8,9 +8,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import Any, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 from src.core.logging import get_logger
+
+if TYPE_CHECKING:
+    from src.tools.effects import ToolEffect
 
 logger = get_logger(__name__)
 
@@ -25,6 +28,7 @@ class ToolResult:
     content: str
     is_error: bool = False
     metadata: dict[str, Any] = field(default_factory=dict)
+    effects: tuple[ToolEffect, ...] = ()
 
     def to_message(self, tool_call_id: str) -> dict[str, Any]:
         """Convert to tool result message for model context."""

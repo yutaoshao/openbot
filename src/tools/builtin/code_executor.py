@@ -8,6 +8,13 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
+from src.tools.effects import (
+    EFFECT_NONE,
+    STATUS_COMPLETED,
+    STATUS_ERROR,
+    STATUS_TIMEOUT,
+    tool_effect,
+)
 from src.tools.registry import ToolResult
 
 # Safety: maximum execution time in seconds
@@ -61,58 +68,73 @@ class CodeExecutorTool:
         timeout = min(args.get("timeout", 10), MAX_TIMEOUT)
 
         if not code.strip():
-            return ToolResult(content="No code provided", is_error=True)
+            return _result("No code provided", True, STATUS_ERROR)
 
         try:
-            # Write code to a temp file and run in subprocess
-            with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False) as f:
-                f.write(code)
-                script_path = f.name
-
-            try:
-                process = await asyncio.create_subprocess_exec(
-                    "python3",
-                    script_path,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    # Isolate: no inherited env except PATH
-                    env={"PATH": "/usr/bin:/usr/local/bin"},
-                )
-
-                stdout, stderr = await asyncio.wait_for(
-                    process.communicate(),
-                    timeout=timeout,
-                )
-            finally:
-                Path(script_path).unlink(missing_ok=True)
-
-            stdout_text = stdout.decode("utf-8", errors="replace")
-            stderr_text = stderr.decode("utf-8", errors="replace")
-
-            if process.returncode != 0:
-                output = f"Exit code: {process.returncode}\n"
-                if stdout_text:
-                    output += f"Stdout:\n{stdout_text}\n"
-                output += f"Stderr:\n{stderr_text}"
-                return ToolResult(
-                    content=output.strip(),
-                    is_error=True,
-                    metadata={"exit_code": process.returncode},
-                )
-
-            output = stdout_text or "(no output)"
-            if stderr_text:
-                output += f"\nStderr:\n{stderr_text}"
-
-            return ToolResult(
-                content=output.strip(),
-                metadata={"exit_code": 0},
-            )
-
+            return _process_result(*(await _run_python(code, timeout)))
         except TimeoutError:
-            return ToolResult(
-                content=f"Execution timed out after {timeout} seconds",
-                is_error=True,
-            )
+            return _result(f"Execution timed out after {timeout} seconds", True, STATUS_TIMEOUT)
         except Exception as e:
-            return ToolResult(content=f"Execution failed: {e}", is_error=True)
+            return _result(f"Execution failed: {e}", True, STATUS_ERROR)
+
+
+async def _run_python(code: str, timeout: int) -> tuple[int, bytes, bytes]:
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False) as handle:
+        handle.write(code)
+        script_path = handle.name
+    try:
+        process = await asyncio.create_subprocess_exec(
+            "python3",
+            script_path,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            env={"PATH": "/usr/bin:/usr/local/bin"},
+        )
+        stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=timeout)
+        return process.returncode or 0, stdout, stderr
+    finally:
+        Path(script_path).unlink(missing_ok=True)
+
+
+def _process_result(exit_code: int, stdout: bytes, stderr: bytes) -> ToolResult:
+    stdout_text = stdout.decode("utf-8", errors="replace")
+    stderr_text = stderr.decode("utf-8", errors="replace")
+    if exit_code != 0:
+        return _failed_result(exit_code, stdout_text, stderr_text)
+    output = stdout_text or "(no output)"
+    if stderr_text:
+        output += f"\nStderr:\n{stderr_text}"
+    return ToolResult(
+        content=output.strip(),
+        metadata={"exit_code": 0},
+        effects=(_effect(STATUS_COMPLETED, "code_executed", 0),),
+    )
+
+
+def _failed_result(exit_code: int, stdout: str, stderr: str) -> ToolResult:
+    output = f"Exit code: {exit_code}\n"
+    if stdout:
+        output += f"Stdout:\n{stdout}\n"
+    output += f"Stderr:\n{stderr}"
+    return ToolResult(
+        content=output.strip(),
+        is_error=True,
+        metadata={"exit_code": exit_code},
+        effects=(_effect(STATUS_ERROR, EFFECT_NONE, exit_code),),
+    )
+
+
+def _result(content: str, is_error: bool, status: str) -> ToolResult:
+    return ToolResult(content=content, is_error=is_error, effects=(_effect(status, EFFECT_NONE),))
+
+
+def _effect(status: str, effect: str, exit_code: int | None = None):
+    return tool_effect(
+        "code.execute",
+        effect,
+        status=status,
+        target_type="runtime",
+        target="python",
+        name="code_executor",
+        exit_code=exit_code,
+    )

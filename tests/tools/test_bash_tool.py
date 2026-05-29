@@ -37,7 +37,8 @@ async def test_bash_returns_error_for_non_zero_exit_with_stderr(tmp_path: Path) 
     assert result.is_error
     assert "Stderr:\nproblem" in result.content
     assert result.metadata["exit_code"] == 7
-    assert result.metadata["status"] == "error"
+    assert result.effects[0].status == "error"
+    assert result.effects[0].action == "command.execute"
 
 
 async def test_bash_uses_requested_cwd(tmp_path: Path) -> None:
@@ -64,7 +65,7 @@ async def test_bash_rejects_empty_command(tmp_path: Path) -> None:
 
     assert result.is_error
     assert "Invalid arguments for bash" in result.content
-    assert result.metadata["status"] == "validation_error"
+    assert result.effects[0].status == "validation_error"
 
 
 async def test_bash_reports_timeout(tmp_path: Path) -> None:
@@ -80,4 +81,4 @@ async def test_bash_reports_timeout(tmp_path: Path) -> None:
 
     assert result.is_error
     assert "timed out" in result.content
-    assert result.metadata["status"] == "timeout"
+    assert result.effects[0].status == "timeout"

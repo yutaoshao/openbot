@@ -11,6 +11,13 @@ from pydantic import Field, field_validator
 
 from src.tools.builtin.path_utils import project_root, relative_to_root, resolve_project_path
 from src.tools.builtin.validation import StrictToolInput, schema_for, validate_args
+from src.tools.effects import (
+    EFFECT_NONE,
+    STATUS_COMPLETED,
+    STATUS_ERROR,
+    STATUS_MISSING_DEPENDENCY,
+    tool_effect,
+)
 from src.tools.registry import ToolResult
 
 if TYPE_CHECKING:
@@ -18,10 +25,7 @@ if TYPE_CHECKING:
 
 DEFAULT_MAX_RESULTS = 200
 RG_TIMEOUT_SECONDS = 30
-STATUS_COMPLETED = "completed"
-STATUS_ERROR = "error"
-STATUS_MISSING_DEPENDENCY = "missing_dependency"
-EFFECT_NONE = "none"
+EFFECT_FILES_MATCHED = "files_matched"
 
 
 class GlobInput(StrictToolInput):
@@ -112,14 +116,13 @@ def _glob_result(stdout: str, data: GlobInput) -> ToolResult:
     return ToolResult(
         content="\n".join(visible) if visible else "No files matched.",
         metadata={
-            "operation": "glob",
-            "path": data.path,
             "pattern": data.pattern,
             "count": len(visible),
             "truncated": truncated,
-            "status": STATUS_COMPLETED,
-            "effect": EFFECT_NONE,
         },
+        effects=(
+            _effect(data.path, STATUS_COMPLETED, EFFECT_FILES_MATCHED, pattern=data.pattern),
+        ),
     )
 
 
@@ -127,7 +130,7 @@ def _missing_rg() -> ToolResult:
     return ToolResult(
         content="ripgrep (rg) is required for glob but was not found on PATH",
         is_error=True,
-        metadata={"status": STATUS_MISSING_DEPENDENCY, "effect": EFFECT_NONE},
+        effects=(_effect(".", STATUS_MISSING_DEPENDENCY, EFFECT_NONE),),
     )
 
 
@@ -135,10 +138,17 @@ def _error(path: str, content: str) -> ToolResult:
     return ToolResult(
         content=content,
         is_error=True,
-        metadata={
-            "operation": "glob",
-            "path": path,
-            "status": STATUS_ERROR,
-            "effect": EFFECT_NONE,
-        },
+        effects=(_effect(path, STATUS_ERROR, EFFECT_NONE),),
+    )
+
+
+def _effect(path: str, status: str, effect: str, **details: Any):
+    return tool_effect(
+        "file.glob",
+        effect,
+        status=status,
+        target_type="path",
+        target=path,
+        name="glob",
+        **details,
     )

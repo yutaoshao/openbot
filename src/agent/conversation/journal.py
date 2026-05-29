@@ -59,7 +59,21 @@ class ConversationJournal:
 def _payload(entry: ConversationJournalEntry, local_ts: datetime) -> dict[str, Any]:
     payload = asdict(entry)
     payload["ts"] = local_ts.isoformat()
-    return {key: value for key, value in payload.items() if value not in ("", None, [])}
+    return {
+        key: _jsonable(value)
+        for key, value in payload.items()
+        if value not in ("", None, [])
+    }
+
+
+def _jsonable(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {str(key): _jsonable(item) for key, item in value.items()}
+    if isinstance(value, list | tuple):
+        return [_jsonable(item) for item in value]
+    if value is None or isinstance(value, str | int | float | bool):
+        return value
+    return str(value)
 
 
 def _localize(value: datetime, local_tz: tzinfo | None) -> datetime:

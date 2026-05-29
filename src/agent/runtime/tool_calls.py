@@ -66,19 +66,13 @@ async def _execute_tool_call(
     messages: list[dict[str, Any]],
 ) -> dict[str, Any]:
     tool_start = time.monotonic()
-    tool_result = await execute_tool_call(
+    tool_result = await _run_tool_call(
         agent,
-        tool_call.name,
-        tool_call.arguments,
-        conversation_id=conversation_id,
-        platform=platform,
-        task_state=task_state,
-        timeout_override=_timeout_override(task_timeout, task_start),
-    )
-    tool_result = offload_tool_output_if_needed(
-        tool_result,
-        tool_name=tool_call.name,
-        tool_call_id=tool_call.id,
+        tool_call,
+        conversation_id,
+        platform,
+        task_state,
+        _timeout_override(task_timeout, task_start),
     )
     tool_latency = int((time.monotonic() - tool_start) * 1000)
     _record_tool_context(
@@ -88,31 +82,80 @@ async def _execute_tool_call(
         tool_result=tool_result,
     )
     messages.append(tool_result.to_message(tool_call.id))
-    await agent.event_bus.publish(
-        "agent.tool.executed",
-        {
-            "conversation_id": conversation_id,
-            "tool": tool_call.name,
-            "is_error": tool_result.is_error,
-            "iteration": iterations,
-        },
+    await _publish_tool_event(
+        agent,
+        conversation_id,
+        tool_call.name,
+        tool_result.is_error,
+        iterations,
     )
-    logger.info(
-        "tool_called",
-        surface="operational",
-        tool=tool_call.name,
-        status="error" if tool_result.is_error else "success",
-        latency_ms=tool_latency,
-        result_length=len(tool_result.content),
+    _log_tool_call(tool_call.name, tool_result, tool_latency)
+    return _execution_record(tool_call, tool_result, tool_latency)
+
+
+async def _run_tool_call(
+    agent: Any,
+    tool_call: Any,
+    conversation_id: str,
+    platform: str,
+    task_state: Any,
+    timeout_override: float | None,
+) -> Any:
+    tool_result = await execute_tool_call(
+        agent,
+        tool_call.name,
+        tool_call.arguments,
+        conversation_id=conversation_id,
+        platform=platform,
+        task_state=task_state,
+        timeout_override=timeout_override,
     )
+    return offload_tool_output_if_needed(
+        tool_result,
+        tool_name=tool_call.name,
+        tool_call_id=tool_call.id,
+    )
+
+
+def _execution_record(tool_call: Any, tool_result: Any, tool_latency: int) -> dict[str, Any]:
     return {
         "name": tool_call.name,
         "arguments": tool_call.arguments,
         "result_preview": tool_result.content[:200],
         "is_error": tool_result.is_error,
         "metadata": dict(tool_result.metadata),
+        "effects": [effect.to_dict() for effect in tool_result.effects],
         "tool_latency": tool_latency,
     }
+
+
+async def _publish_tool_event(
+    agent: Any,
+    conversation_id: str,
+    tool_name: str,
+    is_error: bool,
+    iterations: int,
+) -> None:
+    await agent.event_bus.publish(
+        "agent.tool.executed",
+        {
+            "conversation_id": conversation_id,
+            "tool": tool_name,
+            "is_error": is_error,
+            "iteration": iterations,
+        },
+    )
+
+
+def _log_tool_call(tool_name: str, tool_result: Any, tool_latency: int) -> None:
+    logger.info(
+        "tool_called",
+        surface="operational",
+        tool=tool_name,
+        status="error" if tool_result.is_error else "success",
+        latency_ms=tool_latency,
+        result_length=len(tool_result.content),
+    )
 
 
 def _timeout_override(task_timeout: int, task_start: float) -> float | None:
@@ -128,7 +171,7 @@ def _record_tool_context(
     tool_call: Any,
     tool_result: Any,
 ) -> None:
-    activated_tools = tool_result.metadata.get("activated_tools") or []
+    activated_tools = _activated_tools(tool_result)
     if not agent.conversation_manager:
         return
     agent.conversation_manager.record_tool_event(
@@ -136,12 +179,33 @@ def _record_tool_context(
         tool_call.name,
         summarize_tool_result(tool_result.content),
         is_error=tool_result.is_error,
-        activated_tools=activated_tools if isinstance(activated_tools, list) else None,
+        activated_tools=activated_tools,
     )
-    skill_name = tool_result.metadata.get("skill_name")
+    skill_name = _loaded_skill_name(tool_result)
     if isinstance(skill_name, str) and skill_name:
         agent.conversation_manager.protect_context(
             conversation_id,
             f"skill:{skill_name}",
             tool_result.content[:4000],
         )
+
+
+def _activated_tools(tool_result: Any) -> list[str] | None:
+    activated = tool_result.metadata.get("activated_tools") or []
+    if isinstance(activated, list):
+        return [str(item) for item in activated]
+    for effect in tool_result.effects:
+        value = effect.details.get("activated_tools")
+        if isinstance(value, tuple | list):
+            return [str(item) for item in value]
+    return None
+
+
+def _loaded_skill_name(tool_result: Any) -> str:
+    skill_name = tool_result.metadata.get("skill_name")
+    if isinstance(skill_name, str):
+        return skill_name
+    for effect in tool_result.effects:
+        if effect.action == "skill.load" and effect.effect == "skill_loaded":
+            return str(effect.target)
+    return ""

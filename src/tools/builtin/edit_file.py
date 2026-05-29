@@ -9,15 +9,13 @@ from pydantic import Field, field_validator, model_validator
 
 from src.tools.builtin.path_utils import project_root, resolve_project_path
 from src.tools.builtin.validation import StrictToolInput, schema_for, validate_args
+from src.tools.effects import EFFECT_NONE, STATUS_COMPLETED, STATUS_ERROR, tool_effect
 from src.tools.registry import ToolResult
 
 if TYPE_CHECKING:
     from pathlib import Path
 
-STATUS_COMPLETED = "completed"
-STATUS_ERROR = "error"
-EFFECT_NONE = "none"
-EFFECT_WRITTEN = "written"
+EFFECT_FILE_WRITTEN = "file_written"
 
 
 class EditFileInput(StrictToolInput):
@@ -173,11 +171,17 @@ def _write_edit(
         target.write_text(new_content, encoding="utf-8")
     except OSError as exc:
         return _error(data.file_path, f"Write failed: {exc}", mode=mode)
-    metadata = _metadata(data.file_path, STATUS_COMPLETED, EFFECT_WRITTEN, mode)
-    metadata.update(_line_metadata(data))
     return ToolResult(
         content=f"Edited {data.file_path}\n{_diff(data.file_path, content, new_content)}",
-        metadata=metadata,
+        effects=(
+            _effect(
+                data.file_path,
+                STATUS_COMPLETED,
+                EFFECT_FILE_WRITTEN,
+                mode,
+                **_line_metadata(data),
+            ),
+        ),
     )
 
 
@@ -207,15 +211,18 @@ def _error(path: str, content: str, *, mode: str, **extra: Any) -> ToolResult:
     return ToolResult(
         content=content,
         is_error=True,
-        metadata={**_metadata(path, STATUS_ERROR, EFFECT_NONE, mode), **extra},
+        effects=(_effect(path, STATUS_ERROR, EFFECT_NONE, mode, **extra),),
     )
 
 
-def _metadata(path: str, status: str, effect: str, mode: str) -> dict[str, Any]:
-    return {
-        "operation": "edit_file",
-        "path": path,
-        "status": status,
-        "effect": effect,
-        "mode": mode,
-    }
+def _effect(path: str, status: str, effect: str, mode: str, **details: Any):
+    return tool_effect(
+        "file.edit",
+        effect,
+        status=status,
+        target_type="file",
+        target=path,
+        name="edit_file",
+        mode=mode,
+        **details,
+    )

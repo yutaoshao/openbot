@@ -13,12 +13,16 @@ from pydantic import Field, field_validator
 
 from src.tools.builtin.path_utils import project_root
 from src.tools.builtin.validation import StrictToolInput, schema_for, validate_args
+from src.tools.effects import (
+    EFFECT_NONE,
+    STATUS_COMPLETED,
+    STATUS_ERROR,
+    STATUS_TIMEOUT,
+    tool_effect,
+)
 from src.tools.registry import ToolResult
 
-STATUS_COMPLETED = "completed"
-STATUS_ERROR = "error"
-STATUS_TIMEOUT = "timeout"
-EFFECT_UNKNOWN = "unknown"
+EFFECT_COMMAND_EXECUTED = "command_executed"
 
 
 class BashInput(StrictToolInput):
@@ -92,7 +96,8 @@ async def _run_command(command: str, cwd: Path, timeout: float | None) -> ToolRe
         return ToolResult(
             content=f"Command timed out after {timeout:.2f}s",
             is_error=True,
-            metadata=_metadata(cwd, None, STATUS_TIMEOUT),
+            metadata={"cwd": str(cwd), "exit_code": None},
+            effects=(_effect(cwd, None, STATUS_TIMEOUT, EFFECT_NONE),),
         )
     return _process_result(cwd, process.returncode or 0, stdout, stderr)
 
@@ -109,7 +114,15 @@ def _process_result(
     return ToolResult(
         content=_format_output(stdout_text, stderr_text),
         is_error=is_error,
-        metadata=_metadata(cwd, exit_code, STATUS_ERROR if is_error else STATUS_COMPLETED),
+        metadata={"cwd": str(cwd), "exit_code": exit_code},
+        effects=(
+            _effect(
+                cwd,
+                exit_code,
+                STATUS_ERROR if is_error else STATUS_COMPLETED,
+                EFFECT_NONE if is_error else EFFECT_COMMAND_EXECUTED,
+            ),
+        ),
     )
 
 
@@ -138,17 +151,27 @@ def _cwd_error(content: str) -> ToolResult:
     return ToolResult(
         content=content,
         is_error=True,
-        metadata={"status": STATUS_ERROR, "effect": EFFECT_UNKNOWN},
+        effects=(
+            tool_effect(
+                "command.execute",
+                EFFECT_NONE,
+                status=STATUS_ERROR,
+                name="bash",
+            ),
+        ),
     )
 
 
-def _metadata(cwd: Path, exit_code: int | None, status: str) -> dict[str, Any]:
-    return {
-        "cwd": str(cwd),
-        "exit_code": exit_code,
-        "status": status,
-        "effect": EFFECT_UNKNOWN,
-    }
+def _effect(cwd: Path, exit_code: int | None, status: str, effect: str):
+    return tool_effect(
+        "command.execute",
+        effect,
+        status=status,
+        target_type="cwd",
+        target=str(cwd),
+        name="bash",
+        exit_code=exit_code,
+    )
 
 
 def _shell() -> str:

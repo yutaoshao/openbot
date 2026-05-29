@@ -34,7 +34,8 @@ def test_read_file_reports_directory_paths_explicitly(tmp_path: Path) -> None:
     assert result.is_error
     assert "Path is a directory: src/agent/conversation" in result.content
     assert "list_directory" in result.content
-    assert result.metadata["status"] == "error"
+    assert result.effects[0].status == "error"
+    assert result.effects[0].action == "file.read"
 
 
 async def test_write_file_reports_structured_write_effect(tmp_path: Path) -> None:
@@ -49,10 +50,10 @@ async def test_write_file_reports_structured_write_effect(tmp_path: Path) -> Non
     )
 
     assert not result.is_error
-    assert result.metadata["operation"] == "write_file"
-    assert result.metadata["path"] == "notes/example.md"
-    assert result.metadata["effect"] == "written"
-    assert result.metadata["status"] == "completed"
+    assert result.effects[0].action == "file.write"
+    assert result.effects[0].target == "notes/example.md"
+    assert result.effects[0].effect == "file_written"
+    assert result.effects[0].status == "completed"
 
 
 def test_file_manager_reads_large_files_without_internal_truncation(tmp_path: Path) -> None:

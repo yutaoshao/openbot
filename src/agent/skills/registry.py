@@ -30,10 +30,8 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
 
 from src.core.logging import get_logger
-from src.tools.registry import ToolResult
 
 logger = get_logger(__name__)
 
@@ -232,77 +230,3 @@ class SkillRegistry:
     def reload(self) -> None:
         """Re-scan the skills directory (e.g. after adding a new skill)."""
         self._scan()
-
-
-# ---------------------------------------------------------------------------
-# Tool: load_skill
-# ---------------------------------------------------------------------------
-
-
-class LoadSkillTool:
-    """Agent tool for loading a skill's full instructions.
-
-    The Agent calls this when it determines a user's task matches
-    an available skill (based on metadata in the system prompt).
-    """
-
-    def __init__(self, registry: SkillRegistry) -> None:
-        self._registry = registry
-
-    @property
-    def name(self) -> str:
-        return "load_skill"
-
-    @property
-    def description(self) -> str:
-        return (
-            "Loads one specialized skill's full SKILL.md instructions into context. "
-            "Use when the current task matches an available skill listed in the system "
-            "prompt and that skill's workflow would guide the answer or tool use. "
-            "Do not use when a direct answer or visible tool is sufficient, or no listed "
-            "skill clearly matches the task."
-        )
-
-    @property
-    def parameters(self) -> dict[str, Any]:
-        return {
-            "type": "object",
-            "properties": {
-                "skill_name": {
-                    "type": "string",
-                    "description": "Name of the skill to load (from the available skills list)",
-                },
-            },
-            "required": ["skill_name"],
-        }
-
-    @property
-    def category(self) -> str:
-        return "system"
-
-    async def execute(self, args: dict[str, Any]) -> ToolResult:
-        skill_name = args.get("skill_name", "")
-        if not skill_name:
-            return ToolResult(content="skill_name is required", is_error=True)
-
-        content = self._registry.load(skill_name)
-        if content is None:
-            available = ", ".join(m.name for m in self._registry._skills.values())
-            return ToolResult(
-                content=f"Skill '{skill_name}' not found. Available: {available}",
-                is_error=True,
-            )
-
-        # Include reference file listing if any exist
-        refs = self._registry.list_references(skill_name)
-        if refs:
-            content += (
-                "\n\n---\nAvailable reference files "
-                "(use file_manager to read if needed):\n" + "\n".join(f"- {r}" for r in refs)
-            )
-
-        logger.info("skill.loaded", name=skill_name, length=len(content))
-        return ToolResult(
-            content=content,
-            metadata={"skill_name": skill_name, "references": refs},
-        )

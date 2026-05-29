@@ -3,13 +3,11 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
 
+from src.tools.effects import EFFECT_NONE, STATUS_ERROR, tool_effect
 from src.tools.registry import ToolResult
 
 DEFAULT_PROJECT_ROOT = Path(".")
-STATUS_ERROR = "error"
-EFFECT_NONE = "none"
 
 
 def project_root(root: Path | None) -> Path:
@@ -51,21 +49,13 @@ def _path_error(operation: str, path: str, content: str) -> ToolResult:
     return ToolResult(
         content=content,
         is_error=True,
-        metadata=_metadata(operation, path, STATUS_ERROR, EFFECT_NONE),
+        effects=(
+            tool_effect(
+                operation,
+                EFFECT_NONE,
+                status=STATUS_ERROR,
+                target_type="file",
+                target=path,
+            ),
+        ),
     )
-
-
-def _metadata(
-    operation: str,
-    path: str,
-    status: str,
-    effect: str,
-    **extra: Any,
-) -> dict[str, Any]:
-    return {
-        "operation": operation,
-        "path": path,
-        "status": status,
-        "effect": effect,
-        **extra,
-    }

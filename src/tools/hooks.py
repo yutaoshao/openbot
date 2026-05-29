@@ -107,7 +107,7 @@ class ToolSearchActivationHook:
     ) -> PostToolHookResult:
         if tool_name != "tool_search":
             return PostToolHookResult()
-        activated = result.metadata.get("activate_tools") or []
+        activated = _activated_tools(result)
         if not isinstance(activated, list):
             activated = []
         feedback = []
@@ -118,3 +118,14 @@ class ToolSearchActivationHook:
             feedback=feedback,
             activated_tools=[str(item) for item in activated],
         )
+
+
+def _activated_tools(result: ToolResult) -> list[str]:
+    activated = result.metadata.get("activate_tools") or []
+    if isinstance(activated, list):
+        return [str(item) for item in activated]
+    for effect in result.effects:
+        value = effect.details.get("activated_tools")
+        if isinstance(value, tuple | list):
+            return [str(item) for item in value]
+    return []

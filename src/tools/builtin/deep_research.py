@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+from src.tools.effects import EFFECT_NONE, STATUS_COMPLETED, STATUS_ERROR, tool_effect
 from src.tools.registry import ToolResult
 
 if TYPE_CHECKING:
@@ -60,7 +61,7 @@ class DeepResearchTool:
     async def execute(self, args: dict[str, Any]) -> ToolResult:
         topic = args.get("topic", "")
         if not topic:
-            return ToolResult(content="Topic is required", is_error=True)
+            return _result("Topic is required", True, topic, STATUS_ERROR, EFFECT_NONE)
 
         max_rounds = args.get("max_rounds", 5)
 
@@ -88,7 +89,25 @@ class DeepResearchTool:
                     "saturated": report.saturated,
                     "latency_ms": report.latency_ms,
                 },
+                effects=(
+                    _effect(topic, STATUS_COMPLETED, "research_completed"),
+                ),
             )
 
         except Exception as e:
-            return ToolResult(content=f"Research failed: {e}", is_error=True)
+            return _result(f"Research failed: {e}", True, topic, STATUS_ERROR, EFFECT_NONE)
+
+
+def _result(content: str, is_error: bool, topic: str, status: str, effect: str) -> ToolResult:
+    return ToolResult(content=content, is_error=is_error, effects=(_effect(topic, status, effect),))
+
+
+def _effect(topic: str, status: str, effect: str):
+    return tool_effect(
+        "research.run",
+        effect,
+        status=status,
+        target_type="topic",
+        target=topic,
+        name="deep_research",
+    )

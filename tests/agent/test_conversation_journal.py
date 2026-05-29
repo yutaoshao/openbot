@@ -62,3 +62,32 @@ def test_conversation_journal_keeps_assistant_trace_and_usage_fields(tmp_path) -
     assert data["tokens_out"] == 8
     assert data["latency_ms"] == 34
     assert data["tool_calls"] == [{"name": "web_fetch", "is_error": False}]
+
+
+def test_conversation_journal_serializes_tool_validation_errors(tmp_path) -> None:
+    journal = ConversationJournal(root=tmp_path, local_tz=UTC)
+    entry = ConversationJournalEntry(
+        ts=datetime(2026, 5, 10, 14, 30, 5, tzinfo=UTC),
+        role="assistant",
+        content="本轮未完成",
+        channel="wechat",
+        conversation_id="conv-3",
+        message_id="stored-msg-3",
+        tool_calls=[
+            {
+                "name": "edit_file",
+                "is_error": True,
+                "metadata": {
+                    "validation_errors": [
+                        {"ctx": {"error": ValueError("old_text and new_text are required")}}
+                    ]
+                },
+            }
+        ],
+    )
+
+    path = journal.append(entry)
+
+    data = json.loads(path.read_text(encoding="utf-8"))
+    error = data["tool_calls"][0]["metadata"]["validation_errors"][0]["ctx"]["error"]
+    assert error == "old_text and new_text are required"

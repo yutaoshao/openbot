@@ -17,7 +17,7 @@ async def test_edit_file_rejects_unknown_arguments(tmp_path: Path) -> None:
 
     assert result.is_error
     assert "Invalid arguments for edit_file" in result.content
-    assert result.metadata["status"] == "validation_error"
+    assert result.effects[0].status == "validation_error"
     assert result.metadata["validation_errors"][0]["loc"] == ("unexpected",)
 
 
@@ -36,9 +36,9 @@ async def test_edit_file_replaces_exact_old_text_once(tmp_path: Path) -> None:
 
     assert not result.is_error
     assert target.read_text(encoding="utf-8") == "one\nchanged\nthree\n"
-    assert result.metadata["effect"] == "written"
-    assert result.metadata["mode"] == "old_text"
-    assert result.metadata["path"] == "sample.txt"
+    assert result.effects[0].effect == "file_written"
+    assert result.effects[0].details["mode"] == "old_text"
+    assert result.effects[0].target == "sample.txt"
     assert "-needle" in result.content
     assert "+changed" in result.content
 
@@ -60,7 +60,7 @@ async def test_edit_file_reports_missing_old_text_without_writing(tmp_path: Path
     assert result.is_error
     assert "old_text not found" in result.content
     assert target.read_text(encoding="utf-8") == original
-    assert result.metadata["effect"] == "none"
+    assert result.effects[0].effect == "none"
 
 
 async def test_edit_file_reports_multiple_old_text_matches(tmp_path: Path) -> None:
@@ -80,7 +80,7 @@ async def test_edit_file_reports_multiple_old_text_matches(tmp_path: Path) -> No
     assert result.is_error
     assert "old_text matched 2 times" in result.content
     assert target.read_text(encoding="utf-8") == original
-    assert result.metadata["match_count"] == 2
+    assert result.effects[0].details["match_count"] == 2
 
 
 async def test_edit_file_replaces_inclusive_line_range(tmp_path: Path) -> None:
@@ -99,9 +99,9 @@ async def test_edit_file_replaces_inclusive_line_range(tmp_path: Path) -> None:
 
     assert not result.is_error
     assert target.read_text(encoding="utf-8") == "alpha\nBETA\nGAMMA\ndelta\n"
-    assert result.metadata["mode"] == "line_range"
-    assert result.metadata["line_start"] == 2
-    assert result.metadata["line_end"] == 3
+    assert result.effects[0].details["mode"] == "line_range"
+    assert result.effects[0].details["line_start"] == 2
+    assert result.effects[0].details["line_end"] == 3
 
 
 async def test_edit_file_rejects_directory_binary_and_path_escape(tmp_path: Path) -> None:
@@ -144,7 +144,7 @@ async def test_glob_reports_missing_ripgrep(tmp_path: Path, monkeypatch) -> None
 
     assert result.is_error
     assert "ripgrep (rg) is required" in result.content
-    assert result.metadata["status"] == "missing_dependency"
+    assert result.effects[0].status == "missing_dependency"
 
 
 async def test_grep_returns_matches_with_line_column_and_glob_filter(tmp_path: Path) -> None:

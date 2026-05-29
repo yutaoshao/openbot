@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
-from .registry import LoadSkillTool, SkillMeta, SkillRegistry
+from .load_tool import LoadSkillTool
+from .registry import SkillMeta, SkillRegistry
 
 __all__ = ["LoadSkillTool", "SkillMeta", "SkillRegistry"]

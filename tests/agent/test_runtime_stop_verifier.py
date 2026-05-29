@@ -4,8 +4,9 @@ from typing import Any
 
 from src.agent.agent import Agent
 from src.core.config import AgentConfig
-from src.infrastructure.model_gateway import StreamChunk, ToolCall, Usage
+from src.infrastructure.model_gateway import ModelResponse, StreamChunk, ToolCall, Usage
 from src.tools.builtin.file_manager import FileManagerTool
+from src.tools.effects import ToolEffect
 from src.tools.registry import CORE_VISIBILITY, ToolRegistry, ToolResult
 
 
@@ -60,12 +61,15 @@ class FakeFileTool:
     async def execute(self, args: dict[str, object]) -> ToolResult:
         return ToolResult(
             content="read notes.md",
-            metadata={
-                "operation": "read_file",
-                "path": "notes.md",
-                "status": "completed",
-                "effect": "read",
-            },
+            effects=(
+                ToolEffect(
+                    action="file.read",
+                    effect="file_read",
+                    status="completed",
+                    target_type="file",
+                    target="notes.md",
+                ),
+            ),
         )
 
 
@@ -92,14 +96,14 @@ class FinalThenWriteGateway:
                     name="file_manager",
                     arguments={
                         "operation": "write_file",
-                        "path": "data/diaries/2026-05-10.md",
+                        "path": "data/diaries/2026/05/2026-05-10.md",
                         "content": "# 2026-05-10\n\n今天聊了定时日记。",
                     },
                 ),
             )
             yield StreamChunk(type="done", usage=Usage(tokens_in=7, tokens_out=4))
             return
-        yield StreamChunk(type="text", text="已保存到 data/diaries/2026-05-10.md。")
+        yield StreamChunk(type="text", text="已保存到 data/diaries/2026/05/2026-05-10.md。")
         yield StreamChunk(type="done", usage=Usage(tokens_in=6, tokens_out=5))
 
 
@@ -136,6 +140,58 @@ class ResearchWriteThenFinalGateway:
         yield StreamChunk(type="done", usage=Usage(tokens_in=6, tokens_out=5))
 
 
+class PlannedEditGateway:
+    def __init__(self) -> None:
+        self.stream_calls = 0
+
+    async def chat(
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None = None,
+        **_: Any,
+    ) -> ModelResponse:
+        return ModelResponse(
+            text=(
+                '{"required_actions": ['
+                '{"action": "file.write", '
+                '"target_paths": ["data/workspace/leetcode-hot100-plan.md"]}'
+                '], "confidence": 0.93}'
+            )
+        )
+
+    async def chat_stream(
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None = None,
+        **_: Any,
+    ):
+        self.stream_calls += 1
+        if self.stream_calls == 1:
+            yield StreamChunk(type="text", text="已更新计划。")
+            yield StreamChunk(type="done", usage=Usage(tokens_in=5, tokens_out=4))
+            return
+        if self.stream_calls == 2:
+            yield StreamChunk(
+                type="tool_call",
+                tool_call=ToolCall(
+                    id="tc-write-plan",
+                    name="file_manager",
+                    arguments={
+                        "operation": "write_file",
+                        "path": "data/workspace/leetcode-hot100-plan.md",
+                        "content": "# 带题号的计划",
+                    },
+                ),
+            )
+            yield StreamChunk(type="done", usage=Usage(tokens_in=7, tokens_out=4))
+            return
+        yield StreamChunk(
+            type="text",
+            text="已更新 data/workspace/leetcode-hot100-plan.md。",
+        )
+        yield StreamChunk(type="done", usage=Usage(tokens_in=6, tokens_out=5))
+
+
 async def test_run_replaces_unconfirmed_save_claim_with_incomplete_message() -> None:
     registry = ToolRegistry()
     registry.register(FakeFileTool(), visibility=CORE_VISIBILITY)
@@ -166,9 +222,9 @@ async def test_run_repairs_missing_file_write_before_final_reply(tmp_path) -> No
 
     result = await agent.run("写一篇日记，保存到文件 data/diaries/YYYY-MM-DD.md")
 
-    saved = tmp_path / "data/diaries/2026-05-10.md"
+    saved = tmp_path / "data/diaries/2026/05/2026-05-10.md"
     assert saved.read_text(encoding="utf-8") == "# 2026-05-10\n\n今天聊了定时日记。"
-    assert "已保存到 data/diaries/2026-05-10.md" in result.content
+    assert "已保存到 data/diaries/2026/05/2026-05-10.md" in result.content
 
 
 async def test_run_accepts_research_report_written_inside_template_dir(tmp_path) -> None:
@@ -194,3 +250,23 @@ async def test_run_accepts_research_report_written_inside_template_dir(tmp_path)
     assert saved.read_text(encoding="utf-8") == "# report"
     assert "未确认写入成功" not in result.content
     assert gateway.calls == 2
+
+
+async def test_run_repairs_model_planned_contextual_file_update(tmp_path) -> None:
+    registry = ToolRegistry()
+    registry.register(FileManagerTool(root=tmp_path), visibility=CORE_VISIBILITY)
+    gateway = PlannedEditGateway()
+    agent = Agent(
+        model_gateway=gateway,
+        event_bus=FakeEventBus(),
+        config=AgentConfig(max_iterations=4),
+        tool_registry=registry,
+        conversation_manager=None,
+    )
+
+    result = await agent.run("你更新一下这份计划，每一题都带上题号")
+
+    saved = tmp_path / "data/workspace/leetcode-hot100-plan.md"
+    assert saved.read_text(encoding="utf-8") == "# 带题号的计划"
+    assert "已更新 data/workspace/leetcode-hot100-plan.md" in result.content
+    assert gateway.stream_calls == 3

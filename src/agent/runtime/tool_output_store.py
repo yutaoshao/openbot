@@ -51,6 +51,7 @@ def offload_tool_output_if_needed(
         content=_reference_text(relative_path, content, line_count),
         is_error=tool_result.is_error,
         metadata=metadata,
+        effects=tool_result.effects,
     )
 
 

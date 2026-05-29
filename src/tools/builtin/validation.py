@@ -6,10 +6,8 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, ValidationError
 
+from src.tools.effects import EFFECT_NONE, STATUS_VALIDATION_ERROR, tool_effect
 from src.tools.registry import ToolResult
-
-STATUS_VALIDATION_ERROR = "validation_error"
-EFFECT_NONE = "none"
 
 
 class StrictToolInput(BaseModel):
@@ -37,9 +35,13 @@ def validate_args[InputModel: BaseModel](
         return None, ToolResult(
             content=f"Invalid arguments for {tool_name}: {len(errors)} validation error(s)",
             is_error=True,
-            metadata={
-                "status": STATUS_VALIDATION_ERROR,
-                "effect": EFFECT_NONE,
-                "validation_errors": errors,
-            },
+            metadata={"validation_errors": errors},
+            effects=(
+                tool_effect(
+                    f"{tool_name}.validate",
+                    EFFECT_NONE,
+                    status=STATUS_VALIDATION_ERROR,
+                    name=tool_name,
+                ),
+            ),
         )

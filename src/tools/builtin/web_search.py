@@ -7,6 +7,7 @@ from typing import Any
 
 import httpx
 
+from src.tools.effects import EFFECT_NONE, STATUS_COMPLETED, STATUS_ERROR, tool_effect
 from src.tools.registry import ToolResult
 
 
@@ -56,7 +57,7 @@ class WebSearchTool:
 
         api_key = os.environ.get("TAVILY_API_KEY", "")
         if not api_key:
-            return ToolResult(content="TAVILY_API_KEY not configured", is_error=True)
+            return _result("TAVILY_API_KEY not configured", True, query, STATUS_ERROR, EFFECT_NONE)
 
         try:
             async with httpx.AsyncClient(timeout=30) as client:
@@ -85,10 +86,32 @@ class WebSearchTool:
 
             return ToolResult(
                 content="\n\n".join(parts) if parts else "No results found.",
-                metadata={"query": query, "result_count": len(data.get("results", []))},
+                metadata={"result_count": len(data.get("results", []))},
+                effects=(_effect(query, STATUS_COMPLETED, "web_searched"),),
             )
 
         except httpx.HTTPStatusError as e:
-            return ToolResult(content=f"Search API error: {e.response.status_code}", is_error=True)
+            return _result(
+                f"Search API error: {e.response.status_code}",
+                True,
+                query,
+                STATUS_ERROR,
+                EFFECT_NONE,
+            )
         except Exception as e:
-            return ToolResult(content=f"Search failed: {e}", is_error=True)
+            return _result(f"Search failed: {e}", True, query, STATUS_ERROR, EFFECT_NONE)
+
+
+def _result(content: str, is_error: bool, query: str, status: str, effect: str) -> ToolResult:
+    return ToolResult(content=content, is_error=is_error, effects=(_effect(query, status, effect),))
+
+
+def _effect(query: str, status: str, effect: str):
+    return tool_effect(
+        "web.search",
+        effect,
+        status=status,
+        target_type="query",
+        target=query,
+        name="web_search",
+    )

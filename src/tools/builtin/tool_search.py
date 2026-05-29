@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+from src.tools.effects import EFFECT_NONE, STATUS_COMPLETED, STATUS_ERROR, tool_effect
 from src.tools.registry import ToolResult
 
 if TYPE_CHECKING:
@@ -50,10 +51,16 @@ class ToolSearchTool:
     async def execute(self, args: dict[str, Any]) -> ToolResult:
         query = str(args.get("query") or "").strip()
         if not query:
-            return ToolResult(content="query is required", is_error=True)
+            return _result("query is required", True, query, STATUS_ERROR, EFFECT_NONE)
         matches = self._registry.search_deferred(query)
         if not matches:
-            return ToolResult(content="No deferred tools matched the query.")
+            return _result(
+                "No deferred tools matched the query.",
+                False,
+                query,
+                STATUS_COMPLETED,
+                "tools_discovered",
+            )
         lines = ["Deferred tools that match the query:"]
         activate_tools: list[str] = []
         for match in matches:
@@ -61,5 +68,28 @@ class ToolSearchTool:
             lines.append(f"- {match['name']} ({match['category']}): {match['description']}")
         return ToolResult(
             content="\n".join(lines),
-            metadata={"activate_tools": activate_tools},
+            effects=(
+                _effect(
+                    query,
+                    STATUS_COMPLETED,
+                    "tools_discovered",
+                    activated_tools=tuple(activate_tools),
+                ),
+            ),
         )
+
+
+def _result(content: str, is_error: bool, query: str, status: str, effect: str) -> ToolResult:
+    return ToolResult(content=content, is_error=is_error, effects=(_effect(query, status, effect),))
+
+
+def _effect(query: str, status: str, effect: str, **details: Any):
+    return tool_effect(
+        "tool.search",
+        effect,
+        status=status,
+        target_type="query",
+        target=query,
+        name="tool_search",
+        **details,
+    )

@@ -7,6 +7,7 @@ from typing import Any
 import httpx
 import trafilatura
 
+from src.tools.effects import EFFECT_NONE, STATUS_COMPLETED, STATUS_ERROR, tool_effect
 from src.tools.registry import ToolResult
 
 
@@ -48,7 +49,7 @@ class WebFetchTool:
         url = args.get("url", "")
 
         if not url:
-            return ToolResult(content="URL is required", is_error=True)
+            return _result("URL is required", True, "", STATUS_ERROR, EFFECT_NONE)
 
         try:
             async with httpx.AsyncClient(timeout=30, follow_redirects=True) as client:
@@ -70,17 +71,39 @@ class WebFetchTool:
             if not extracted:
                 return ToolResult(
                     content="Could not extract meaningful content from the page.",
-                    metadata={"url": url},
+                    effects=(_effect(url, STATUS_COMPLETED, "page_fetched"),),
                 )
 
             return ToolResult(
                 content=extracted,
-                metadata={"url": url, "length": len(extracted)},
+                metadata={"length": len(extracted)},
+                effects=(_effect(url, STATUS_COMPLETED, "page_fetched"),),
             )
 
         except httpx.HTTPStatusError as e:
-            return ToolResult(content=f"HTTP error: {e.response.status_code}", is_error=True)
+            return _result(
+                f"HTTP error: {e.response.status_code}",
+                True,
+                url,
+                STATUS_ERROR,
+                EFFECT_NONE,
+            )
         except httpx.RequestError as e:
-            return ToolResult(content=f"Request failed: {e}", is_error=True)
+            return _result(f"Request failed: {e}", True, url, STATUS_ERROR, EFFECT_NONE)
         except Exception as e:
-            return ToolResult(content=f"Fetch failed: {e}", is_error=True)
+            return _result(f"Fetch failed: {e}", True, url, STATUS_ERROR, EFFECT_NONE)
+
+
+def _result(content: str, is_error: bool, url: str, status: str, effect: str) -> ToolResult:
+    return ToolResult(content=content, is_error=is_error, effects=(_effect(url, status, effect),))
+
+
+def _effect(url: str, status: str, effect: str):
+    return tool_effect(
+        "web.fetch",
+        effect,
+        status=status,
+        target_type="url",
+        target=url,
+        name="web_fetch",
+    )

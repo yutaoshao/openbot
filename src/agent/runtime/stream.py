@@ -5,7 +5,10 @@ from __future__ import annotations
 import time
 from typing import TYPE_CHECKING, Any
 
-from src.agent.state.task_contract import build_task_contract
+from src.agent.state.task_contract_planner import (
+    plan_scheduled_task_contract,
+    plan_task_contract,
+)
 from src.agent.verification import verify_final_response
 from src.agent.verification.stop import ledger_from_tool_calls, verify_stop
 from src.core.logging import get_logger
@@ -25,14 +28,10 @@ from .loop_helpers import (
 )
 from .rounds import ModelRoundResult, stream_model_round
 from .tool_calls import ToolExecutionBatch, execute_tool_calls_for_round
+from .write_retry import append_file_write_retry as _append_file_write_retry
+from .write_retry import needs_file_write_retry as _needs_file_write_retry
 
 logger = get_logger(__name__)
-_FILE_WRITE_RETRY_PROMPT = (
-    "The previous answer did not confirm the required file write. "
-    "Use an available filesystem tool to write the requested file now, "
-    "then reply with the saved path. Do not claim the file is saved without "
-    "a successful write tool result."
-)
 if TYPE_CHECKING:
     from datetime import datetime
 build_system_prompt = prompting.build_system_prompt
@@ -82,7 +81,15 @@ async def run_stream_inner(
     task_start = time.monotonic()
     recent_tool_sigs: list[str] = []
     emit_final_text = False
-    contract = build_task_contract(input_text)
+    contract_planner = (
+        plan_scheduled_task_contract if platform == "scheduler" else plan_task_contract
+    )
+    contract = await contract_planner(
+        agent.model_gateway,
+        input_text,
+        messages=messages,
+        task_state=_task_state(agent, conversation_id),
+    )
 
     while iterations < agent.max_iterations:
         current_task_state = _task_state(agent, conversation_id)
@@ -260,19 +267,6 @@ def _route_decision(agent: Any, input_text: str, task_state: Any) -> Any:
         return None
     tool_names = resolve_route_tool_names(agent, input_text, task_state=task_state)
     return decide_route(RouteRequest(input_text=input_text, tool_names=tool_names))
-
-
-def _needs_file_write_retry(contract: Any, all_tool_calls: list[dict[str, Any]]) -> bool:
-    if not contract.requires_file_write:
-        return False
-    ledger = ledger_from_tool_calls(all_tool_calls)
-    return not ledger.satisfies_file_write(contract)
-
-
-def _append_file_write_retry(messages: list[dict[str, Any]], final_text: str) -> None:
-    if final_text.strip():
-        messages.append({"role": "assistant", "content": final_text})
-    messages.append({"role": "user", "content": _FILE_WRITE_RETRY_PROMPT})
 
 
 async def _finalize_text(
