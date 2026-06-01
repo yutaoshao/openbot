@@ -126,4 +126,11 @@ def _exception_result(name: str, exc: Exception) -> ToolResult:
 
 
 def _tool_effect(name: str, status: str):
-    return tool_effect(f"{name}.execute", EFFECT_NONE, status=status, name=name)
+    return tool_effect(
+        f"{name}.execute",
+        EFFECT_NONE,
+        status=status,
+        target_type="tool",
+        target=name,
+        name=name,
+    )

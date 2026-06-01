@@ -4,6 +4,10 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from src.tools.effects import ResourceRef
 
 ACTION_ANSWER = "answer"
 ACTION_DIAGNOSE = "diagnose"
@@ -42,6 +46,7 @@ class TaskRequirement:
     target: str = ""
     target_paths: tuple[str, ...] = ()
     allowed_write_dirs: tuple[str, ...] = ()
+    resources: tuple[ResourceRef, ...] = ()
 
 
 @dataclass(frozen=True)

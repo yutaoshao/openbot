@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from src.tools.effects import EFFECT_NONE, STATUS_COMPLETED, STATUS_ERROR, tool_effect
+from src.tools.effects import EFFECT_NONE, STATUS_COMPLETED, STATUS_ERROR, ResourceRef, tool_effect
 from src.tools.registry import ToolResult
 
 if TYPE_CHECKING:
@@ -88,8 +88,9 @@ def _effect(query: str, status: str, effect: str, **details: Any):
         "tool.search",
         effect,
         status=status,
-        target_type="query",
+        target_type="tool",
         target=query,
         name="tool_search",
+        resource=ResourceRef("tool", query, query),
         **details,
     )

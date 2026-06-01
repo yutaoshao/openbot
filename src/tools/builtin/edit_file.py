@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Any, Self
 
 from pydantic import Field, field_validator, model_validator
 
-from src.tools.builtin.path_utils import project_root, resolve_project_path
+from src.tools.builtin.path_utils import project_root, relative_to_root, resolve_project_path
 from src.tools.builtin.validation import StrictToolInput, schema_for, validate_args
 from src.tools.effects import EFFECT_NONE, STATUS_COMPLETED, STATUS_ERROR, tool_effect
 from src.tools.registry import ToolResult
@@ -98,13 +98,18 @@ class EditFileTool:
         target, error = resolve_project_path(self._root, data.file_path, operation=self.name)
         if error or target is None:
             return error or ToolResult(content="Invalid path", is_error=True)
-        return self._edit_target(target, data)
+        return self._edit_target(target, data, project_root(self._root))
 
-    def _edit_target(self, target: Path, data: EditFileInput) -> ToolResult:
+    def _edit_target(self, target: Path, data: EditFileInput, root: Path) -> ToolResult:
         if target.is_dir():
-            return _error(data.file_path, "Path is a directory", mode=_mode(data))
+            return _error(data.file_path, "Path is a directory", mode=_mode(data), root=root)
         if not target.is_file():
-            return _error(data.file_path, f"File not found: {data.file_path}", mode=_mode(data))
+            return _error(
+                data.file_path,
+                f"File not found: {data.file_path}",
+                mode=_mode(data),
+                root=root,
+            )
         try:
             content = target.read_text(encoding="utf-8")
         except UnicodeDecodeError:
@@ -112,43 +117,66 @@ class EditFileTool:
                 data.file_path,
                 f"Cannot edit binary file: {data.file_path}",
                 mode=_mode(data),
+                root=root,
             )
         except OSError as exc:
-            return _error(data.file_path, f"Read failed: {exc}", mode=_mode(data))
-        return self._apply_edit(target, data, content)
+            return _error(data.file_path, f"Read failed: {exc}", mode=_mode(data), root=root)
+        return self._apply_edit(target, data, content, root)
 
-    def _apply_edit(self, target: Path, data: EditFileInput, content: str) -> ToolResult:
+    def _apply_edit(
+        self,
+        target: Path,
+        data: EditFileInput,
+        content: str,
+        root: Path,
+    ) -> ToolResult:
         if data.old_text is not None:
-            return _apply_old_text_edit(target, data, content)
-        return _apply_line_range_edit(target, data, content)
+            return _apply_old_text_edit(target, data, content, root)
+        return _apply_line_range_edit(target, data, content, root)
 
 
-def _apply_old_text_edit(target: Path, data: EditFileInput, content: str) -> ToolResult:
+def _apply_old_text_edit(
+    target: Path,
+    data: EditFileInput,
+    content: str,
+    root: Path,
+) -> ToolResult:
     old_text = data.old_text or ""
     match_count = content.count(old_text)
     if match_count == 0:
-        return _error(data.file_path, "old_text not found", mode="old_text")
+        return _error(data.file_path, "old_text not found", mode="old_text", root=root)
     if match_count > 1:
         return _error(
             data.file_path,
             f"old_text matched {match_count} times",
             mode="old_text",
+            root=root,
             match_count=match_count,
         )
     new_content = content.replace(old_text, data.new_text or "", 1)
-    return _write_edit(target, data, content, new_content, "old_text")
+    return _write_edit(target, data, content, new_content, "old_text", root)
 
 
-def _apply_line_range_edit(target: Path, data: EditFileInput, content: str) -> ToolResult:
+def _apply_line_range_edit(
+    target: Path,
+    data: EditFileInput,
+    content: str,
+    root: Path,
+) -> ToolResult:
     lines = content.splitlines(keepends=True)
     line_start = data.line_start or 1
     line_end = data.line_end or 1
     if line_start > len(lines) or line_end > len(lines):
-        return _error(data.file_path, "line range is outside file", mode="line_range")
+        return _error(
+            data.file_path,
+            "line range is outside file",
+            mode="line_range",
+            root=root,
+        )
     selected = lines[line_start - 1 : line_end]
     replacement = _line_replacement_text(data.replacement or "", selected)
     new_content = "".join([*lines[: line_start - 1], replacement, *lines[line_end:]])
-    return _write_edit(target, data, content, new_content, "line_range")
+    return _write_edit(target, data, content, new_content, "line_range", root)
 
 
 def _line_replacement_text(replacement: str, selected: list[str]) -> str:
@@ -166,16 +194,18 @@ def _write_edit(
     content: str,
     new_content: str,
     mode: str,
+    root: Path,
 ) -> ToolResult:
     try:
         target.write_text(new_content, encoding="utf-8")
     except OSError as exc:
-        return _error(data.file_path, f"Write failed: {exc}", mode=mode)
+        return _error(data.file_path, f"Write failed: {exc}", mode=mode, root=root)
+    canonical_path = relative_to_root(root, target)
     return ToolResult(
         content=f"Edited {data.file_path}\n{_diff(data.file_path, content, new_content)}",
         effects=(
             _effect(
-                data.file_path,
+                canonical_path,
                 STATUS_COMPLETED,
                 EFFECT_FILE_WRITTEN,
                 mode,
@@ -207,12 +237,30 @@ def _line_metadata(data: EditFileInput) -> dict[str, int]:
     return {"line_start": data.line_start, "line_end": data.line_end}
 
 
-def _error(path: str, content: str, *, mode: str, **extra: Any) -> ToolResult:
+def _error(
+    path: str,
+    content: str,
+    *,
+    mode: str,
+    root: Path,
+    **extra: Any,
+) -> ToolResult:
+    canonical_path = _canonical_path(path, root)
     return ToolResult(
         content=content,
         is_error=True,
-        effects=(_effect(path, STATUS_ERROR, EFFECT_NONE, mode, **extra),),
+        effects=(_effect(canonical_path, STATUS_ERROR, EFFECT_NONE, mode, **extra),),
     )
+
+
+def _canonical_path(path: str, root: Path) -> str:
+    try:
+        target = (root / path).resolve()
+    except (OSError, RuntimeError):
+        return path
+    if not target.is_relative_to(root):
+        return path
+    return relative_to_root(root, target)
 
 
 def _effect(path: str, status: str, effect: str, mode: str, **details: Any):

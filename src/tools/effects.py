@@ -15,6 +15,42 @@ EFFECT_NONE = "none"
 
 
 @dataclass(frozen=True)
+class ResourceRef:
+    """Canonical identity for a resource touched by a tool or task contract."""
+
+    kind: str
+    canonical: str
+    raw: str = ""
+    ambiguity: tuple[str, ...] = ()
+    error: str = ""
+
+    def to_dict(self) -> dict[str, Any]:
+        payload = {
+            "kind": self.kind,
+            "canonical": self.canonical,
+            "raw": self.raw,
+        }
+        if self.ambiguity:
+            payload["ambiguity"] = list(self.ambiguity)
+        if self.error:
+            payload["error"] = self.error
+        return payload
+
+    @classmethod
+    def from_mapping(cls, value: dict[str, Any]) -> ResourceRef:
+        ambiguity = value.get("ambiguity")
+        return cls(
+            kind=str(value.get("kind") or ""),
+            canonical=str(value.get("canonical") or ""),
+            raw=str(value.get("raw") or ""),
+            ambiguity=tuple(str(item) for item in ambiguity)
+            if isinstance(ambiguity, list | tuple)
+            else (),
+            error=str(value.get("error") or ""),
+        )
+
+
+@dataclass(frozen=True)
 class ToolEffect:
     """Typed fact emitted by a tool for harness-level verification."""
 
@@ -26,6 +62,7 @@ class ToolEffect:
     details: dict[str, Any] = field(default_factory=dict)
     name: str = ""
     summary: str = ""
+    resource: ResourceRef | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to a JSON-serializable record."""
@@ -44,12 +81,15 @@ class ToolEffect:
             payload["name"] = self.name
         if self.summary:
             payload["summary"] = self.summary
+        if self.resource is not None:
+            payload["resource"] = self.resource.to_dict()
         return payload
 
     @classmethod
     def from_mapping(cls, value: dict[str, Any]) -> ToolEffect:
         """Build an effect from a serialized record."""
         details = value.get("details")
+        resource = value.get("resource")
         return cls(
             action=str(value.get("action") or ""),
             status=str(value.get("status") or STATUS_ERROR),
@@ -59,6 +99,7 @@ class ToolEffect:
             details=dict(details) if isinstance(details, dict) else {},
             name=str(value.get("name") or ""),
             summary=str(value.get("summary") or ""),
+            resource=ResourceRef.from_mapping(resource) if isinstance(resource, dict) else None,
         )
 
 
@@ -71,6 +112,7 @@ def tool_effect(
     target: str = "",
     name: str = "",
     summary: str = "",
+    resource: ResourceRef | None = None,
     **details: Any,
 ) -> ToolEffect:
     """Create a structured tool effect with optional details."""
@@ -83,7 +125,25 @@ def tool_effect(
         details=details,
         name=name,
         summary=summary,
+        resource=resource or _resource_from_target(target_type, target),
     )
+
+
+def _resource_from_target(target_type: str, target: str) -> ResourceRef | None:
+    if not target_type:
+        return None
+    kind = _resource_kind(target_type)
+    return ResourceRef(kind=kind, canonical=target, raw=target)
+
+
+def _resource_kind(target_type: str) -> str:
+    if target_type in {"file", "path"}:
+        return "file"
+    if target_type in {"cwd", "runtime"}:
+        return "command"
+    if target_type == "query" and target_type:
+        return "query"
+    return target_type
 
 
 def _json_safe(value: dict[str, Any]) -> dict[str, Any]:

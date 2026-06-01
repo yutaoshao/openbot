@@ -90,10 +90,10 @@ class GlobTool:
         cmd = ["rg", "--files", "-g", data.pattern]
         if rel_path != ".":
             cmd.append(rel_path)
-        return await _execute_rg(cmd, project_root(self._root), data)
+        return await _execute_rg(cmd, data, rel_path, project_root(self._root))
 
 
-async def _execute_rg(cmd: list[str], cwd: Path, data: GlobInput) -> ToolResult:
+async def _execute_rg(cmd: list[str], data: GlobInput, search_path: str, cwd: Path) -> ToolResult:
     process = await asyncio.create_subprocess_exec(
         *cmd,
         cwd=str(cwd),
@@ -105,11 +105,11 @@ async def _execute_rg(cmd: list[str], cwd: Path, data: GlobInput) -> ToolResult:
         timeout=RG_TIMEOUT_SECONDS,
     )
     if process.returncode not in (0, 1):
-        return _error(data.path, stderr.decode("utf-8", errors="replace").strip())
-    return _glob_result(stdout.decode("utf-8", errors="replace"), data)
+        return _error(search_path, stderr.decode("utf-8", errors="replace").strip())
+    return _glob_result(stdout.decode("utf-8", errors="replace"), data, search_path)
 
 
-def _glob_result(stdout: str, data: GlobInput) -> ToolResult:
+def _glob_result(stdout: str, data: GlobInput, search_path: str) -> ToolResult:
     matches = sorted(line for line in stdout.splitlines() if line)
     visible = matches[: data.max_results]
     truncated = len(matches) > len(visible)
@@ -121,7 +121,7 @@ def _glob_result(stdout: str, data: GlobInput) -> ToolResult:
             "truncated": truncated,
         },
         effects=(
-            _effect(data.path, STATUS_COMPLETED, EFFECT_FILES_MATCHED, pattern=data.pattern),
+            _effect(search_path, STATUS_COMPLETED, EFFECT_FILES_MATCHED, pattern=data.pattern),
         ),
     )
 

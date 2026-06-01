@@ -155,7 +155,24 @@ def _log_tool_call(tool_name: str, tool_result: Any, tool_latency: int) -> None:
         status="error" if tool_result.is_error else "success",
         latency_ms=tool_latency,
         result_length=len(tool_result.content),
+        effects=_effect_log_records(tool_result),
     )
+
+
+def _effect_log_records(tool_result: Any) -> list[dict[str, Any]]:
+    records: list[dict[str, Any]] = []
+    for effect in tool_result.effects:
+        record = {
+            "action": effect.action,
+            "effect": effect.effect,
+            "status": effect.status,
+        }
+        if effect.resource is not None:
+            record["resource"] = effect.resource.to_dict()
+        elif effect.target:
+            record["target"] = effect.target
+        records.append(record)
+    return records
 
 
 def _timeout_override(task_timeout: int, task_start: float) -> float | None:

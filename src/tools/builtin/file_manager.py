@@ -111,7 +111,7 @@ class FileManagerTool:
             return ToolResult(
                 content="Path is required for read_file",
                 is_error=True,
-                effects=(_effect("file.read", EFFECT_NONE, STATUS_ERROR, path),),
+                effects=(_effect("file.read", EFFECT_NONE, STATUS_ERROR, path, self.project_root),),
             )
 
         target = self._resolve_safe_path(path)
@@ -119,7 +119,7 @@ class FileManagerTool:
             return ToolResult(
                 content="Invalid path: outside project root",
                 is_error=True,
-                effects=(_effect("file.read", EFFECT_NONE, STATUS_ERROR, path),),
+                effects=(_effect("file.read", EFFECT_NONE, STATUS_ERROR, path, self.project_root),),
             )
 
         if target.is_dir():
@@ -129,14 +129,14 @@ class FileManagerTool:
                     "or read_file with a concrete file path."
                 ),
                 is_error=True,
-                effects=(_effect("file.read", EFFECT_NONE, STATUS_ERROR, path),),
+                effects=(_effect("file.read", EFFECT_NONE, STATUS_ERROR, path, self.project_root),),
             )
 
         if not target.is_file():
             return ToolResult(
                 content=f"File not found: {path}",
                 is_error=True,
-                effects=(_effect("file.read", EFFECT_NONE, STATUS_ERROR, path),),
+                effects=(_effect("file.read", EFFECT_NONE, STATUS_ERROR, path, self.project_root),),
             )
 
         try:
@@ -145,13 +145,21 @@ class FileManagerTool:
             return ToolResult(
                 content=content,
                 metadata={"size": size},
-                effects=(_effect("file.read", EFFECT_FILE_READ, STATUS_COMPLETED, path),),
+                effects=(
+                    _effect(
+                        "file.read",
+                        EFFECT_FILE_READ,
+                        STATUS_COMPLETED,
+                        path,
+                        self.project_root,
+                    ),
+                ),
             )
         except UnicodeDecodeError:
             return ToolResult(
                 content=f"Cannot read binary file: {path}",
                 is_error=True,
-                effects=(_effect("file.read", EFFECT_NONE, STATUS_ERROR, path),),
+                effects=(_effect("file.read", EFFECT_NONE, STATUS_ERROR, path, self.project_root),),
             )
 
     def _write_file(self, args: dict[str, Any]) -> ToolResult:
@@ -162,7 +170,9 @@ class FileManagerTool:
             return ToolResult(
                 content="Path is required for write_file",
                 is_error=True,
-                effects=(_effect("file.write", EFFECT_NONE, STATUS_ERROR, path),),
+                effects=(
+                    _effect("file.write", EFFECT_NONE, STATUS_ERROR, path, self.project_root),
+                ),
             )
 
         target = self._resolve_safe_path(path)
@@ -170,7 +180,9 @@ class FileManagerTool:
             return ToolResult(
                 content="Invalid path: outside project root",
                 is_error=True,
-                effects=(_effect("file.write", EFFECT_NONE, STATUS_ERROR, path),),
+                effects=(
+                    _effect("file.write", EFFECT_NONE, STATUS_ERROR, path, self.project_root),
+                ),
             )
 
         try:
@@ -180,14 +192,22 @@ class FileManagerTool:
                 content=f"Written {len(content)} chars to {path}",
                 metadata={"size": len(content)},
                 effects=(
-                    _effect("file.write", EFFECT_FILE_WRITTEN, STATUS_COMPLETED, path),
+                    _effect(
+                        "file.write",
+                        EFFECT_FILE_WRITTEN,
+                        STATUS_COMPLETED,
+                        path,
+                        self.project_root,
+                    ),
                 ),
             )
         except OSError as e:
             return ToolResult(
                 content=f"Write failed: {e}",
                 is_error=True,
-                effects=(_effect("file.write", EFFECT_NONE, STATUS_ERROR, path),),
+                effects=(
+                    _effect("file.write", EFFECT_NONE, STATUS_ERROR, path, self.project_root),
+                ),
             )
 
     def _list_directory(self, args: dict[str, Any]) -> ToolResult:
@@ -198,24 +218,24 @@ class FileManagerTool:
             return ToolResult(
                 content="Invalid path: outside project root",
                 is_error=True,
-                effects=(_effect("file.list", EFFECT_NONE, STATUS_ERROR, path),),
+                effects=(_effect("file.list", EFFECT_NONE, STATUS_ERROR, path, self.project_root),),
             )
 
         if not target.is_dir():
             return ToolResult(
                 content=f"Not a directory: {path}",
                 is_error=True,
-                effects=(_effect("file.list", EFFECT_NONE, STATUS_ERROR, path),),
+                effects=(_effect("file.list", EFFECT_NONE, STATUS_ERROR, path, self.project_root),),
             )
 
         try:
             lines = _directory_lines(target, self.project_root)
-            return _list_result(path, self.project_root_text, lines)
+            return _list_result(path, self.project_root_text, lines, self.project_root)
         except OSError as e:
             return ToolResult(
                 content=f"List failed: {e}",
                 is_error=True,
-                effects=(_effect("file.list", EFFECT_NONE, STATUS_ERROR, path),),
+                effects=(_effect("file.list", EFFECT_NONE, STATUS_ERROR, path, self.project_root),),
             )
 
 
@@ -229,26 +249,37 @@ def _directory_lines(target: Path, project_root: Path) -> list[str]:
     return lines
 
 
-def _list_result(path: str, project_root_text: str, lines: list[str]) -> ToolResult:
+def _list_result(path: str, project_root_text: str, lines: list[str], root: Path) -> ToolResult:
     if not lines:
         return ToolResult(
             content=f"Project root: {project_root_text}\nPath: {path}\n(empty directory)",
             metadata={"path": path, "project_root": project_root_text},
-            effects=(_effect("file.list", EFFECT_FILE_LISTED, STATUS_COMPLETED, path),),
+            effects=(_effect("file.list", EFFECT_FILE_LISTED, STATUS_COMPLETED, path, root),),
         )
     return ToolResult(
         content=f"Project root: {project_root_text}\nPath: {path}\n" + "\n".join(lines),
         metadata={"path": path, "count": len(lines), "project_root": project_root_text},
-        effects=(_effect("file.list", EFFECT_FILE_LISTED, STATUS_COMPLETED, path),),
+        effects=(_effect("file.list", EFFECT_FILE_LISTED, STATUS_COMPLETED, path, root),),
     )
 
 
-def _effect(action: str, effect: str, status: str, path: str):
+def _effect(action: str, effect: str, status: str, path: str, root: Path):
+    canonical_path = _canonical_path(path, root)
     return tool_effect(
         action,
         effect,
         status=status,
         target_type="file",
-        target=path,
+        target=canonical_path,
         name="file_manager",
     )
+
+
+def _canonical_path(path: str, root: Path) -> str:
+    try:
+        target = (root / path).resolve()
+    except (OSError, RuntimeError):
+        return path
+    if not target.is_relative_to(root):
+        return path
+    return target.relative_to(root).as_posix()

@@ -86,7 +86,12 @@ class GrepTool:
         target, error = resolve_project_path(self._root, data.path, operation=self.name)
         if error or target is None:
             return error or ToolResult(content="Invalid path", is_error=True)
-        return await _execute_rg(_build_command(data, target, self._root), self._root, data)
+        return await _execute_rg(
+            _build_command(data, target, self._root),
+            self._root,
+            data,
+            relative_to_root(self._root, target),
+        )
 
 
 def _build_command(data: GrepInput, target: Path, root: Path | None) -> list[str]:
@@ -103,7 +108,12 @@ def _build_command(data: GrepInput, target: Path, root: Path | None) -> list[str
     return cmd
 
 
-async def _execute_rg(cmd: list[str], root: Path | None, data: GrepInput) -> ToolResult:
+async def _execute_rg(
+    cmd: list[str],
+    root: Path | None,
+    data: GrepInput,
+    search_path: str,
+) -> ToolResult:
     process = await asyncio.create_subprocess_exec(
         *cmd,
         cwd=str(project_root(root)),
@@ -115,11 +125,11 @@ async def _execute_rg(cmd: list[str], root: Path | None, data: GrepInput) -> Too
         timeout=RG_TIMEOUT_SECONDS,
     )
     if process.returncode not in (0, 1):
-        return _error(data.path, stderr.decode("utf-8", errors="replace").strip())
-    return _grep_result(stdout.decode("utf-8", errors="replace"), data)
+        return _error(search_path, stderr.decode("utf-8", errors="replace").strip())
+    return _grep_result(stdout.decode("utf-8", errors="replace"), data, search_path)
 
 
-def _grep_result(stdout: str, data: GrepInput) -> ToolResult:
+def _grep_result(stdout: str, data: GrepInput, search_path: str) -> ToolResult:
     lines, match_count, truncated = _parse_rg_json(
         stdout,
         data.max_results,
@@ -133,7 +143,7 @@ def _grep_result(stdout: str, data: GrepInput) -> ToolResult:
             "truncated": truncated,
         },
         effects=(
-            _effect(data.path, STATUS_COMPLETED, EFFECT_CONTENT_MATCHED, pattern=data.pattern),
+            _effect(search_path, STATUS_COMPLETED, EFFECT_CONTENT_MATCHED, pattern=data.pattern),
         ),
     )
 

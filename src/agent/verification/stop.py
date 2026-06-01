@@ -14,11 +14,12 @@ from src.agent.state.task_contract import (
     ACTION_SCHEDULE_UPDATE,
     TaskRequirement,
 )
+from src.agent.verification.stop_messages import missing_requirement_message
+from src.agent.verification.tool_recovery import is_recovered_tool_problem
 from src.tools.effects import (
     EFFECT_NONE,
     STATUS_COMPLETED,
     STATUS_ERROR,
-    STATUS_VALIDATION_ERROR,
     ToolEffect,
 )
 
@@ -32,6 +33,7 @@ _ACTION_EFFECTS = {
     ACTION_SCHEDULE_LIST: "schedule_listed",
     ACTION_SCHEDULE_UPDATE: "schedule_updated",
 }
+_CONFIRMED_OPERATION_ACTIONS = frozenset((ACTION_FILE_WRITE, *_ACTION_EFFECTS))
 _INTERNAL_PREFIX = "Objective:"
 _CLAIM_WINDOW_CHARS = 12
 _SCHEDULE_CLAIM_PATTERNS = {
@@ -105,12 +107,14 @@ class ToolLedger:
             if event.status == STATUS_COMPLETED:
                 continue
             later_events = self.events[index + 1 :]
-            if _is_recovered_validation_error(event, later_events):
+            if is_recovered_tool_problem(event, later_events):
                 continue
             unresolved.append(event)
         return tuple(unresolved)
 
     def _satisfies_file_write(self, requirement: TaskRequirement) -> bool:
+        if any(resource.error for resource in requirement.resources):
+            return False
         writes = [
             event
             for event in self.events
@@ -120,13 +124,13 @@ class ToolLedger:
         ]
         if not requirement.target_paths and not requirement.allowed_write_dirs:
             return bool(writes)
-        written_paths = {event.target for event in writes}
+        written_paths = {_event_target(event) for event in writes}
         if requirement.target_paths and not all(
             path in written_paths for path in requirement.target_paths
         ):
             return False
         return all(
-            any(_path_inside_dir(event.target, directory) for event in writes)
+            any(_path_inside_dir(_event_target(event), directory) for event in writes)
             for directory in requirement.allowed_write_dirs
         )
 
@@ -161,15 +165,24 @@ def verify_stop(
         return StopDecision(False, "本轮未完成：模型调用工具后没有生成有效最终回复。")
     for requirement in contract.required_actions:
         if not ledger.satisfies(requirement):
-            return StopDecision(False, _missing_requirement_message(requirement))
+            return StopDecision(
+                False,
+                missing_requirement_message(requirement, _ACTION_EFFECTS, ledger.events),
+            )
     for claimed_action in _claimed_schedule_actions(cleaned):
         if not ledger.has_completed_action(claimed_action):
             return StopDecision(
                 False,
-                _missing_requirement_message(TaskRequirement(claimed_action)),
+                missing_requirement_message(
+                    TaskRequirement(claimed_action),
+                    _ACTION_EFFECTS,
+                    ledger.events,
+                ),
             )
     unresolved_events = ledger.unresolved_problem_events()
     if unresolved_events and not _mentions_problem(cleaned):
+        if _has_confirmed_side_effect(contract):
+            return StopDecision(True, _tool_notice_message(final_text, unresolved_events))
         return StopDecision(False, _tool_problem_message(unresolved_events))
     return StopDecision(True)
 
@@ -204,6 +217,7 @@ def _effect_from_record(effect: dict[str, Any], record: dict[str, Any]) -> ToolE
         details=parsed.details,
         name=parsed.name or str(record.get("name") or "unknown"),
         summary=parsed.summary or str(record.get("result_preview") or ""),
+        resource=parsed.resource,
     )
 
 
@@ -215,14 +229,6 @@ def _generic_error_effect(record: dict[str, Any]) -> ToolEffect:
         name=str(record.get("name") or "unknown"),
         summary=str(record.get("result_preview") or ""),
     )
-
-
-def _missing_requirement_message(requirement: TaskRequirement) -> str:
-    if requirement.action == ACTION_FILE_WRITE:
-        return "本轮未完成：用户要求保存/修改文件，但未确认写入成功。"
-    if requirement.action in _ACTION_EFFECTS:
-        return "本轮未完成：用户要求的任务操作没有确认成功。"
-    return "本轮未完成：没有确认用户要求的操作成功。"
 
 
 def _is_vague(text: str) -> bool:
@@ -245,27 +251,23 @@ def _mentions_problem(text: str) -> bool:
     return any(marker in lowered for marker in markers)
 
 
-def _is_recovered_validation_error(
-    event: ToolEffect,
-    later_events: tuple[ToolEffect, ...],
-) -> bool:
-    if event.status != STATUS_VALIDATION_ERROR:
-        return False
-    return any(_is_successful_retry(event, later_event) for later_event in later_events)
-
-
-def _is_successful_retry(event: ToolEffect, later_event: ToolEffect) -> bool:
-    if later_event.status != STATUS_COMPLETED:
-        return False
-    if event.name and later_event.name != event.name:
-        return False
-    return later_event.effect != EFFECT_NONE
-
-
 def _tool_problem_message(problem_events: tuple[ToolEffect, ...]) -> str:
     lines = ["本轮未完成：工具调用出现问题，但最终回复没有说明失败原因。"]
     lines.extend(f"- {_event_summary(event)}" for event in problem_events)
     return "\n".join(lines)
+
+
+def _tool_notice_message(final_text: str, problem_events: tuple[ToolEffect, ...]) -> str:
+    lines = [final_text.rstrip(), "", "另外，有工具调用失败，已保留给你确认："]
+    lines.extend(f"- {_event_summary(event)}" for event in problem_events)
+    return "\n".join(line for line in lines if line)
+
+
+def _has_confirmed_side_effect(contract: TaskContract) -> bool:
+    return any(
+        requirement.action in _CONFIRMED_OPERATION_ACTIONS
+        for requirement in contract.required_actions
+    )
 
 
 def _event_summary(event: ToolEffect) -> str:
@@ -281,3 +283,7 @@ def _path_inside_dir(path: str, directory: str) -> bool:
     if not normalized_path or not normalized_dir:
         return False
     return normalized_path.startswith(f"{normalized_dir}/")
+
+
+def _event_target(event: ToolEffect) -> str:
+    return event.resource.canonical if event.resource else event.target

@@ -200,6 +200,7 @@ def _merge_requirement(
             baseline.allowed_write_dirs,
             model_requirement.allowed_write_dirs,
         ),
+        resources=baseline.resources or model_requirement.resources,
     )
 
 

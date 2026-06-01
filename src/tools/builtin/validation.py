@@ -41,6 +41,8 @@ def validate_args[InputModel: BaseModel](
                     f"{tool_name}.validate",
                     EFFECT_NONE,
                     status=STATUS_VALIDATION_ERROR,
+                    target_type="tool",
+                    target=tool_name,
                     name=tool_name,
                 ),
             ),

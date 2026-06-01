@@ -9,6 +9,7 @@ from src.agent.state.task_contract_planner import (
     plan_scheduled_task_contract,
     plan_task_contract,
 )
+from src.agent.state.task_contract_resources import resolve_agent_contract_resources
 from src.agent.verification import verify_final_response
 from src.agent.verification.stop import ledger_from_tool_calls, verify_stop
 from src.core.logging import get_logger
@@ -84,11 +85,14 @@ async def run_stream_inner(
     contract_planner = (
         plan_scheduled_task_contract if platform == "scheduler" else plan_task_contract
     )
-    contract = await contract_planner(
-        agent.model_gateway,
-        input_text,
-        messages=messages,
-        task_state=_task_state(agent, conversation_id),
+    contract = resolve_agent_contract_resources(
+        await contract_planner(
+            agent.model_gateway,
+            input_text,
+            messages=messages,
+            task_state=_task_state(agent, conversation_id),
+        ),
+        agent,
     )
 
     while iterations < agent.max_iterations:
@@ -220,7 +224,7 @@ async def run_stream_inner(
     )
     final_text = strip_internal_timestamp_prefixes(final_text)
     stop_decision = verify_stop(contract, final_text, ledger_from_tool_calls(all_tool_calls))
-    if not stop_decision.allow:
+    if stop_decision.message:
         final_text = stop_decision.message
         emit_final_text = True
     final_text = strip_internal_timestamp_prefixes(final_text)
