@@ -38,3 +38,4 @@ scripts/openbot-watch.sh
 /.agents/
 /skills-lock.json
 .impeccable.md
+/docs/
