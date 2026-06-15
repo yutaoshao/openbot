@@ -334,7 +334,7 @@ openbot/
 
 - ReAct reasoning loop with multi-turn tool calling
 - Streaming output via `run_stream()` async generator
-- Stop-time reply verification: vague post-tool completions become explicit incomplete-turn messages, and file-write requests retry the same turn until a confirmed write effect is observed or the task remains explicitly incomplete
+- Stop-time reply verification: vague post-tool completions become explicit incomplete-turn messages, file-write requests retry until a confirmed write effect is observed, and useful final answers keep their content while appending any non-blocking tool failures
 - Sub-agent delegation with scoped tool registries and parallel execution
 - Cron-based task scheduler with DB persistence
 - Multi-round deep research with saturation detection

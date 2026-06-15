@@ -15,6 +15,10 @@ from src.agent.state.task_contract import (
     TaskRequirement,
 )
 from src.agent.verification.stop_messages import missing_requirement_message
+from src.agent.verification.tool_problem_messages import (
+    blocking_tool_problem_message,
+    nonblocking_tool_problem_notice,
+)
 from src.agent.verification.tool_recovery import is_recovered_tool_problem
 from src.tools.effects import (
     EFFECT_NONE,
@@ -33,7 +37,6 @@ _ACTION_EFFECTS = {
     ACTION_SCHEDULE_LIST: "schedule_listed",
     ACTION_SCHEDULE_UPDATE: "schedule_updated",
 }
-_CONFIRMED_OPERATION_ACTIONS = frozenset((ACTION_FILE_WRITE, *_ACTION_EFFECTS))
 _INTERNAL_PREFIX = "Objective:"
 _CLAIM_WINDOW_CHARS = 12
 _SCHEDULE_CLAIM_PATTERNS = {
@@ -100,6 +103,12 @@ class ToolLedger:
 
     def has_problem_events(self) -> bool:
         return any(event.status != STATUS_COMPLETED for event in self.events)
+
+    def has_completed_evidence(self) -> bool:
+        return any(
+            event.status == STATUS_COMPLETED and event.effect != EFFECT_NONE
+            for event in self.events
+        )
 
     def unresolved_problem_events(self) -> tuple[ToolEffect, ...]:
         unresolved: list[ToolEffect] = []
@@ -181,9 +190,14 @@ def verify_stop(
             )
     unresolved_events = ledger.unresolved_problem_events()
     if unresolved_events and not _mentions_problem(cleaned):
-        if _has_confirmed_side_effect(contract):
-            return StopDecision(True, _tool_notice_message(final_text, unresolved_events))
-        return StopDecision(False, _tool_problem_message(unresolved_events))
+        if ledger.has_completed_evidence() and not _has_required_operation_problem(
+            unresolved_events
+        ):
+            return StopDecision(
+                True,
+                nonblocking_tool_problem_notice(final_text, unresolved_events),
+            )
+        return StopDecision(False, blocking_tool_problem_message(unresolved_events))
     return StopDecision(True)
 
 
@@ -251,30 +265,9 @@ def _mentions_problem(text: str) -> bool:
     return any(marker in lowered for marker in markers)
 
 
-def _tool_problem_message(problem_events: tuple[ToolEffect, ...]) -> str:
-    lines = ["本轮未完成：工具调用出现问题，但最终回复没有说明失败原因。"]
-    lines.extend(f"- {_event_summary(event)}" for event in problem_events)
-    return "\n".join(lines)
-
-
-def _tool_notice_message(final_text: str, problem_events: tuple[ToolEffect, ...]) -> str:
-    lines = [final_text.rstrip(), "", "另外，有工具调用失败，已保留给你确认："]
-    lines.extend(f"- {_event_summary(event)}" for event in problem_events)
-    return "\n".join(line for line in lines if line)
-
-
-def _has_confirmed_side_effect(contract: TaskContract) -> bool:
-    return any(
-        requirement.action in _CONFIRMED_OPERATION_ACTIONS
-        for requirement in contract.required_actions
-    )
-
-
-def _event_summary(event: ToolEffect) -> str:
-    if event.summary:
-        return event.summary
-    name = event.name or event.action
-    return f"{name} {event.status}"
+def _has_required_operation_problem(events: tuple[ToolEffect, ...]) -> bool:
+    operation_actions = {ACTION_FILE_WRITE, "file.edit", *_ACTION_EFFECTS}
+    return any(event.action in operation_actions for event in events)
 
 
 def _path_inside_dir(path: str, directory: str) -> bool:
