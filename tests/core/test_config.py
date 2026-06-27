@@ -90,6 +90,65 @@ def test_model_routing_disabled_accepts_legacy_model_config() -> None:
     assert config.routing.tiers == {}
 
 
+def test_model_routing_accepts_responses_reasoning_tiers_when_disabled() -> None:
+    config = ModelConfig(
+        routing={
+            "enabled": False,
+            "default_tier": "complex",
+            "tiers": {
+                "simple": {
+                    "provider": "openai_responses",
+                    "model": "gpt-5.5",
+                    "reasoning_effort": "medium",
+                    "verbosity": "low",
+                },
+                "complex": {
+                    "provider": "openai_responses",
+                    "model": "gpt-5.5",
+                    "reasoning_effort": "xhigh",
+                    "verbosity": "low",
+                },
+            },
+        },
+    )
+
+    assert config.routing.enabled is False
+    assert config.routing.tiers["simple"].reasoning_effort == "medium"
+    assert config.routing.tiers["complex"].reasoning_effort == "xhigh"
+    assert config.routing.tiers["complex"].verbosity == "low"
+
+
+def test_model_accepts_active_responses_provider() -> None:
+    config = ModelConfig(
+        primary={
+            "provider": "openai_responses",
+            "model": "gpt-5.5",
+            "base_url": "https://api.example.com/v1",
+            "api_key_env": "OPENAI_API_KEY",
+        },
+    )
+
+    assert config.primary.provider == "openai_responses"
+
+
+def test_responses_provider_requires_sdk_base_url_root() -> None:
+    with pytest.raises(ValidationError, match="openai_responses base_url must end with /v1"):
+        ModelProviderConfig(
+            provider="openai_responses",
+            model="gpt-5.5",
+            base_url="https://api.example.com",
+        )
+
+
+def test_responses_provider_requires_api_key_env_name() -> None:
+    with pytest.raises(ValidationError, match="openai_responses api_key_env must not be empty"):
+        ModelProviderConfig(
+            provider="openai_responses",
+            model="gpt-5.5",
+            api_key_env="",
+        )
+
+
 def test_model_routing_enabled_requires_simple_and_complex_tiers() -> None:
     with pytest.raises(ValidationError, match="simple.*complex"):
         ModelConfig(

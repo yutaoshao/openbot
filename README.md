@@ -2,63 +2,160 @@
 
 # OpenBot
 
-Local single-user AI agent with multi-platform messaging, tool execution, 4-tier memory, and a loopback-first management dashboard.
+OpenBot is a local, single-user AI agent for personal automation. It combines
+multi-platform messaging, tool execution, persistent memory, scheduled tasks,
+and a loopback-first management dashboard.
 
-## Architecture
+The default posture is local-first: runtime data stays under `data/`,
+management APIs bind to localhost by default, and secrets live in `.env`.
 
-| Layer | Components |
-|------|------------|
-| Application | Frontend (React), REST API (FastAPI), Msg Hub (Adapters) |
-| Core | Agent (ReAct), Sub-Agent, Scheduler, Deep Research |
-| Memory | Working, Episodic, Semantic, Procedural |
-| Tool | Registry, Protocol, Sandbox, Built-in Tools |
-| Platform | Monitor, Config (Pydantic + YAML), Logging (structlog) |
-| Infrastructure | Event Bus, SQLite + sqlite-vec, Model Gateway (Multi-provider) |
+## Features
+
+- ReAct-style agent loop with tool calling and final-response verification
+- Model gateway with primary/fallback providers, retry, cost tracking, and
+  optional simple/complex routing
+- GPT-5 style non-streaming Responses API provider with configurable
+  `reasoning_effort` and `verbosity`
+- OpenAI-compatible Chat Completions provider for providers such as DashScope,
+  DeepSeek, Kimi, Volcengine, Ollama, vLLM, and LM Studio
+- Anthropic Claude provider
+- Built-in tools for web search, web fetch, file operations, incremental edits,
+  shell commands, Python execution, schedules, and deep research
+- Four memory layers: working, episodic, semantic, and procedural
+- Telegram, Feishu/Lark, WeChat iLink, REST, and WebSocket adapters
+- React dashboard for chat, conversations, memory, tools, schedules, monitoring,
+  logs, and settings
+
+## Requirements
+
+- Python 3.12+
+- Node.js 18+ for the frontend build
+- [uv](https://docs.astral.sh/uv/)
+- `rg` / ripgrep on `PATH` for `grep` and `glob` tools
+- API keys for the model/search/platform adapters you enable
 
 ## Quick Start
 
-### Prerequisites
-
-- Python 3.12+
-- Node.js 18+ (for frontend)
-- [uv](https://docs.astral.sh/uv/) package manager
-
-### Installation
+Install Python dependencies and build the dashboard:
 
 ```bash
 uv sync
 cd frontend && npm install && npm run build && cd ..
 ```
 
-### Configuration
-
-OpenBot is designed for a local single-user workflow. By default, management pages, REST APIs, and WebSocket chat stay on local-only access, while webhook endpoints remain explicitly configurable for platform callbacks.
-
-1. Copy `.env.example` to `.env` and fill in API keys:
+Create local secret and config files:
 
 ```bash
 cp .env.example .env
-```
-
-```env
-OPENBOT_MODEL_API_KEY=your_model_provider_api_key
-OPENBOT_EMBEDDING_API_KEY=your_embedding_provider_api_key
-OPENBOT_RERANKER_API_KEY=your_reranker_provider_api_key
-TELEGRAM_BOT_TOKEN=your_telegram_bot_token
-TAVILY_API_KEY=your_tavily_api_key
-FEISHU_APP_ID=your_feishu_app_id
-FEISHU_APP_SECRET=your_feishu_app_secret
-FEISHU_VERIFICATION_TOKEN=your_feishu_verification_token
-FEISHU_ENCRYPT_KEY=your_feishu_encrypt_key
-```
-
-2. Copy the example config, then edit local non-secret settings (model, parameters,
-   adapters). `config.yaml` is intentionally ignored so local endpoints and runtime
-   choices stay off GitHub.
-
-```bash
 cp config.example.yaml config.yaml
 ```
+
+Edit `.env` and `config.yaml`, then start OpenBot:
+
+```bash
+uv run python main.py
+```
+
+Open the dashboard at [http://127.0.0.1:8000/](http://127.0.0.1:8000/).
+
+For backend development with automatic restarts:
+
+```bash
+cp scripts/openbot-watch.example.sh scripts/openbot-watch.sh
+chmod +x scripts/openbot-watch.sh && scripts/openbot-watch.sh
+```
+
+The watcher restarts `main.py` when source files, `.env`, `config.yaml`,
+`pyproject.toml`, or `uv.lock` change. It ignores `data/` to avoid restart loops
+from log or runtime writes.
+
+## Configuration
+
+Secrets go in `.env`. Non-secret runtime choices go in `config.yaml`.
+`config.yaml` is intentionally ignored by Git.
+
+Minimum model keys for the current GPT-5.5 Responses setup:
+
+```env
+OPENAI_API_KEY=sk-...
+OPENBOT_EMBEDDING_API_KEY=...
+OPENBOT_RERANKER_API_KEY=...
+TAVILY_API_KEY=...
+TELEGRAM_BOT_TOKEN=...
+```
+
+### GPT-5.5 Responses Provider
+
+Use `openai_responses` when you want GPT-5 style Responses API parameters such
+as reasoning effort and verbosity:
+
+```yaml
+model:
+  primary:
+    provider: openai_responses
+    model: gpt-5.5
+    base_url: https://api.example.com/v1
+    api_key_env: OPENAI_API_KEY
+    max_tokens: 16384
+    reasoning_effort: high
+    verbosity: low
+telegram:
+  enable_streaming: false
+```
+
+Provider rules:
+
+- `reasoning_effort`: `low`, `medium`, `high`, or `xhigh`
+- `verbosity`: `low`, `medium`, or `high`
+- `max_tokens` maps to the Responses API `max_output_tokens`
+- `temperature` is not sent by this provider
+- `base_url` may be omitted for the SDK default; if set, it must end with `/v1`
+- `api_key_env` must name an environment variable that contains the API key
+- Streaming is not implemented for `openai_responses`; keep channel streaming
+  disabled when using it
+
+### Chat Completions Provider
+
+Use `openai_compatible` for providers that implement the OpenAI Chat
+Completions shape:
+
+```yaml
+model:
+  primary:
+    provider: openai_compatible
+    model: example-model
+    base_url: https://api.example.com/v1
+    api_key_env: OPENBOT_MODEL_API_KEY
+    max_tokens: 4096
+    temperature: 0.7
+```
+
+This remains the broadest compatibility path for non-OpenAI providers.
+
+### Fallback and Routing
+
+OpenBot can try a fallback provider after primary provider failures. Optional
+routing can select a configured `simple` or `complex` tier for each agent run.
+Routing is disabled by default:
+
+```yaml
+model:
+  fallback:
+    provider: openai_compatible
+    model: fallback-model
+    base_url: https://api.example.com/v1
+    api_key_env: FALLBACK_MODEL_API_KEY
+
+  routing:
+    enabled: false
+    default_tier: complex
+```
+
+When routing is disabled, only `primary` and `fallback` are active.
+
+## Platform Adapters
+
+Telegram polling is the simplest local setup:
 
 ```yaml
 telegram:
@@ -66,7 +163,14 @@ telegram:
   mode: polling
   bot_token_env: TELEGRAM_BOT_TOKEN
   enable_streaming: false
+```
 
+`enable_streaming` must stay `false` when the selected model provider does not
+support streaming.
+
+Feishu/Lark webhook mode requires a public callback endpoint:
+
+```yaml
 feishu:
   enabled: true
   mode: webhook
@@ -74,350 +178,121 @@ feishu:
   app_secret_env: FEISHU_APP_SECRET
   verification_token_env: FEISHU_VERIFICATION_TOKEN
   encrypt_key_env: FEISHU_ENCRYPT_KEY
+```
 
+Configure the callback URL as `https://<your-host>/webhook/feishu` and subscribe
+to `im.message.receive_v1`. Long-connection mode avoids a public webhook URL:
+
+```yaml
+feishu:
+  enabled: true
+  mode: long_connection
+```
+
+Keep `FEISHU_APP_ID` and `FEISHU_APP_SECRET` configured.
+
+The WeChat adapter targets a personal-account iLink polling workflow for
+direct-message text chats:
+
+```yaml
 wechat:
-  enabled: false
+  enabled: true
   mode: ilink_polling
   state_path: data/wechat/ilink_state.json
-  api_base_url: https://ilinkai.weixin.qq.com
-  poll_interval: 2.0
-  max_backoff: 30.0
 ```
-
-### Run
-
-```bash
-uv run python main.py
-```
-
-The dashboard is available at `http://127.0.0.1:8000/`.
-
-For local backend development with automatic restarts after code or local
-configuration changes, copy the watcher template to the local ignored wrapper:
-
-```bash
-cp scripts/openbot-watch.example.sh scripts/openbot-watch.sh
-chmod +x scripts/openbot-watch.sh
-scripts/openbot-watch.sh
-```
-
-The watcher restarts the full `main.py` process when `main.py`, `src/`,
-`config.yaml`, `.env`, `pyproject.toml`, or `uv.lock` changes. It ignores
-runtime data and logs under `data/` so log writes do not trigger restart loops.
-The local `scripts/openbot-watch.sh` file is ignored because it may contain
-machine-specific paths or launchd settings.
-
-### Feishu Webhook Setup
-
-1. Enable the `feishu.enabled` switch in `config.yaml`.
-2. In the Feishu developer console, configure the event subscription callback URL as:
-   `https://<your-host>/webhook/feishu`
-3. In the same event subscription page, set the verification token and encrypt key to match:
-   `FEISHU_VERIFICATION_TOKEN` and `FEISHU_ENCRYPT_KEY`
-4. Subscribe to `im.message.receive_v1`.
-5. Restart OpenBot and confirm the logs contain `app.feishu_ready`.
-
-Current Feishu support is intentionally narrow:
-
-- Incoming messages: text-only
-- Outgoing messages: plain text or single-card `lark_md`
-- Security: verification token plus encrypted callback signature validation
-
-### Feishu Long Connection Setup
-
-If you prefer Feishu's long-connection mode and do not want a public webhook URL:
-
-1. Set `feishu.mode: long_connection` in `config.yaml`.
-2. Keep `FEISHU_APP_ID` and `FEISHU_APP_SECRET` configured.
-3. Start OpenBot and confirm the logs contain:
-   `app.feishu_ready` with `mode=long_connection`
-4. In the Feishu developer console, use the long-connection / WebSocket event mode instead of developer-server callbacks.
-
-Current long-connection support:
-
-- No public callback URL required
-- No webhook verification token or encrypt key required by OpenBot runtime
-- Incoming messages still limited to text-only
-- Outgoing messages still use the same text / interactive card sender
-
-### WeChat Personal Account (iLink) Setup
-
-The built-in WeChat adapter currently targets the personal-account iLink route:
-
-- Single account only
-- Direct-message text chats only
-- Polling mode only, no public webhook required
-- No standalone proactive sends
-
-1. Enable `wechat.enabled` in `config.yaml`.
-2. Run the local login command:
 
 ```bash
 uv run python -m src.channels.adapters.wechat_login
 ```
 
-3. Scan the generated QR code and confirm login in WeChat.
-4. Confirm `data/wechat/ilink_state.json` exists and logs contain `app.wechat_ready`.
+Scan the generated QR code and confirm `data/wechat/ilink_state.json` exists.
 
-Current v1 limitations:
+## Development
 
-- Inbound: direct-message text only
-- Outbound: replies inside active conversations only
-- Unsupported media types receive a fixed text notice
-- Schedules cannot target `target_platform="wechat"`; creation and updates are rejected before saving
-
-### Scheduled Delivery
-
-- WeChat cannot receive proactive scheduled-task results; schedules targeting
-  `target_platform="wechat"` are rejected before saving.
-- Telegram schedule targets require the real numeric chat id in `target_id`.
-  When a schedule is created from a Telegram conversation, OpenBot can use the
-  current chat id automatically.
-
-## Project Structure
-
-```
-openbot/
-├── main.py                          # Application entrypoint
-├── config.example.yaml              # Example configuration; copy to local config.yaml
-├── src/
-│   ├── application/                 # Composition root + runtime orchestration
-│   │   ├── container.py             # Application object graph
-│   │   ├── bootstrap.py             # Runtime service + tool registration
-│   │   ├── message_dispatch.py      # Incoming message dispatch
-│   │   └── lifecycle.py             # API/adapters/scheduler startup
-│   ├── infrastructure/              # Event Bus, Database, Model Gateway
-│   │   ├── event_bus.py             # Async pub/sub with wildcard matching
-│   │   ├── database.py              # SQLite schema and migrations
-│   │   ├── storage/                 # Repository layer packages
-│   │   ├── model_gateway.py         # Multi-provider LLM gateway (routing/retry/fallback/streaming)
-│   │   ├── model_routing.py         # Deterministic simple/complex route classifier
-│   │   ├── embedding.py             # Embedding service (OpenAI-compat + DashScope)
-│   │   ├── reranker.py              # Reranker service (SiliconFlow/Jina/Cohere)
-│   │   └── providers/
-│   │       ├── anthropic.py         # Claude API (chat + streaming)
-│   │       └── openai_compat.py     # OpenAI-compatible (Volcengine, DeepSeek, etc.)
-│   ├── core/                        # Config, Logging, Monitor
-│   │   ├── config.py                # Pydantic config with declarative secret resolution
-│   │   ├── logging.py               # structlog setup (console/JSON)
-│   │   └── monitor.py               # Metrics collector (latency, tokens, cost)
-│   ├── tools/                       # Tool Protocol and Registry
-│   │   ├── registry.py              # Tool Protocol, ToolResult, ToolRegistry
-│   │   └── builtin/
-│   │       ├── web_search.py        # Tavily web search
-│   │       ├── web_fetch.py         # Web page fetch + content extraction
-│   │       ├── code_executor.py     # Sandboxed Python execution
-│   │       ├── file_manager.py      # Project-root file operations
-│   │       ├── edit_file.py         # Incremental project-root file edits
-│   │       ├── bash_tool.py         # Full-permission local shell execution
-│   │       ├── glob_tool.py         # ripgrep-backed file search
-│   │       ├── grep_tool.py         # ripgrep-backed content search
-│   │       ├── schedule_manager.py  # Recurring schedule management
-│   │       ├── deep_research.py     # Deferred multi-round research tool
-│   │       └── tool_search.py       # Deferred tool discovery
-│   ├── agent/                       # Agent Core
-│   │   ├── agent.py                 # ReAct reasoning loop (streaming + non-streaming)
-│   │   ├── conversation/            # Conversation assembly package
-│   │   │   ├── __init__.py          # Conversation package exports
-│   │   │   ├── manager.py           # Conversation manager (context assembly)
-│   │   │   ├── message_flow.py      # Message persistence flow helpers
-│   │   │   ├── prompt_builder.py    # Memory-enriched prompt assembly
-│   │   │   ├── shared_timeline.py   # Cross-platform recent timeline
-│   │   │   └── task_state_store.py  # Per-conversation protected state
-│   │   ├── runtime/                 # Agent turn execution helpers
-│   │   │   ├── __init__.py          # Runtime package exports
-│   │   │   ├── loop_helpers.py      # ReAct loop helper functions
-│   │   │   ├── stream.py            # Main streamed ReAct loop
-│   │   │   ├── finalize.py          # Post-response persistence/finalization
-│   │   │   └── tool_executor.py     # Tool invocation + hook integration
-│   │   ├── delegation/              # Sub-agent delegation domain
-│   │   │   ├── __init__.py          # Delegation exports
-│   │   │   └── manager.py           # Parallel subtask delegation with scoped tools
-│   │   ├── research/                # Research domain
-│   │   │   ├── __init__.py          # Research exports
-│   │   │   └── engine.py            # Multi-round research engine with saturation detection
-│   │   ├── skills/                  # Skill discovery/loading domain
-│   │   │   ├── __init__.py          # Skill exports
-│   │   │   └── registry.py          # Skill registry + load_skill tool
-│   │   ├── scheduling/              # Scheduled execution domain
-│   │   │   ├── __init__.py          # Scheduler exports
-│   │   │   ├── cron.py              # Cron trigger and timezone helpers
-│   │   │   ├── delivery.py          # Scheduled result delivery
-│   │   │   ├── delivery_policy.py   # Scheduled delivery constraints
-│   │   │   └── scheduler.py         # APScheduler-based cron task execution
-│   │   ├── prompts/                 # Prompt assembly fragments
-│   │   │   ├── __init__.py          # Prompt exports
-│   │   │   └── fragments.py         # Harness prompt fragments
-│   │   ├── coordination/            # Cross-request execution coordination
-│   │   │   ├── __init__.py          # Coordination exports
-│   │   │   └── execution.py         # Per-user execution serialization
-│   │   ├── state/                   # Agent task state domain
-│   │   │   ├── __init__.py          # State exports
-│   │   │   ├── task_contract.py     # Per-turn expected outcome contract
-│   │   │   └── task_state.py        # Structured task state objects
-│   │   └── verification/            # Final-response verification
-│   │       ├── __init__.py          # Verification exports
-│   │       ├── responses.py         # Vague-response incomplete-turn messages
-│   │       └── stop.py              # Stop-time contract and tool-ledger checks
-│   ├── memory/                      # 4-Tier Memory System
-│   │   ├── message_format.py        # LLM-visible timestamped message rendering
-│   │   ├── working.py               # Working memory + compression
-│   │   ├── episodic/                # Conversation archival + summaries
-│   │   │   ├── __init__.py          # Episodic facade exports
-│   │   │   ├── service.py           # Episodic memory service
-│   │   │   └── helpers.py           # Episodic helper utilities
-│   │   ├── semantic/                # Knowledge extraction + vector search
-│   │   │   ├── __init__.py          # Semantic facade exports
-│   │   │   ├── service.py           # Semantic memory service
-│   │   │   ├── queries.py           # Semantic recall/extraction mixins
-│   │   │   ├── mutations.py         # Semantic mutation/storage mixins
-│   │   │   └── helpers.py           # Semantic helper utilities
-│   │   └── procedural/              # User preferences + behavior patterns
-│   │       ├── __init__.py          # Procedural facade exports
-│   │       ├── service.py           # Procedural memory service
-│   │       └── helpers.py           # Procedural helper utilities
-│   ├── channels/                    # Messaging Adapters
-│   │   ├── hub.py                   # Message routing hub
-│   │   ├── types.py                 # UnifiedMessage, MessageContent, StreamingAdapter
-│   │   ├── markdown.py              # Markdown to Telegram HTML converter
-│   │   ├── table_format.py          # Telegram-friendly Markdown table rendering
-│   │   └── adapters/
-│   │       ├── telegram.py          # Telegram (polling + webhook + streaming draft)
-│   │       ├── feishu.py            # Feishu/Lark (webhook + interactive card)
-│   │       ├── feishu_long_connection.py # Feishu SDK long-connection mode
-│   │       ├── wechat.py            # WeChat iLink personal-account adapter
-│   │       └── web.py               # WebSocket adapter for frontend
-│   └── api/                         # REST API
-│       ├── app.py                   # FastAPI app factory
-│       ├── local_access.py          # Local-only API guard
-│       ├── runtime_status.py        # Adapter runtime status reporting
-│       ├── websocket.py             # WebSocket streaming chat handler
-│       └── routes/
-│           ├── chat.py              # POST /api/chat
-│           ├── conversations.py     # CRUD /api/conversations
-│           ├── identities.py        # Account identity binding
-│           ├── knowledge.py         # CRUD /api/knowledge + semantic search
-│           ├── logs.py              # Runtime logs endpoint
-│           ├── tools.py             # GET/PUT /api/tools
-│           ├── schedules.py         # CRUD /api/schedules
-│           ├── metrics.py           # GET /api/metrics/*
-│           ├── settings.py          # GET/PUT /api/settings
-│           └── webhook.py           # POST /webhook/telegram, /webhook/feishu
-└── frontend/                        # React Dashboard
-    └── src/
-        ├── app/
-        │   ├── App.tsx              # Route definitions
-        │   ├── Layout.tsx           # App shell (sidebar + theme toggle)
-        │   └── route-loaders.ts     # Lazy route loaders + preload hooks
-        ├── lib/
-        │   ├── api.ts               # API client + WebSocket helper
-        │   └── markdown.ts          # Markdown renderer for chat
-        ├── components/
-        │   ├── Icon.tsx             # Shared icon system
-        │   └── TopbarQuickSearch.tsx # Global workspace search
-        └── pages/
-            ├── dashboard.tsx        # Metrics overview + charts
-            ├── chat.tsx             # Streaming chat interface
-            ├── conversations.tsx    # Conversation history browser
-            ├── memory.tsx           # Knowledge base CRUD
-            ├── tools.tsx            # Tool status + config
-            ├── scheduler.tsx        # Scheduled task management
-            ├── monitoring.tsx       # Latency/token/cost charts
-            ├── logs.tsx             # Runtime log viewer
-            ├── help.tsx             # In-app help
-            └── settings.tsx         # Runtime configuration
-```
-
-## Features
-
-### Agent
-
-- ReAct reasoning loop with multi-turn tool calling
-- Streaming output via `run_stream()` async generator
-- Stop-time reply verification: vague post-tool completions become explicit incomplete-turn messages, file-write requests retry until a confirmed write effect is observed, and useful final answers keep their content while appending any non-blocking tool failures
-- Sub-agent delegation with scoped tool registries and parallel execution
-- Cron-based task scheduler with DB persistence
-- Multi-round deep research with saturation detection
-
-### Memory
-
-| Tier | Purpose | Lifecycle |
-|------|---------|-----------|
-| Working | Active conversation context | Session |
-| Episodic | Conversation summaries + embeddings | Persistent |
-| Semantic | Extracted knowledge with vector search | Persistent (TTL) |
-| Procedural | User preferences + behavior patterns | Persistent |
-
-Stored chat messages keep both event time (`timestamp`) and database write time
-(`created_at`) without changing raw message text.
-
-Each new user and assistant message is also appended to local-date JSONL files
-under `data/conversations/YYYY/MM/DD.jsonl`, using the message event timestamp
-as the date source. When working memory compression summarizes older context,
-the summary includes references to those JSONL files so the agent can reload
-details on demand.
-
-### Tools
-
-| Tool | Description |
-|------|-------------|
-| `web_search` | Search the web via Tavily API |
-| `web_fetch` | Fetch and extract content from web pages |
-| `code_executor` | Execute Python code in sandboxed subprocess |
-| `file_manager` | Read, write, and list complete text files under the project root |
-| `edit_file` | Apply exact-text or line-range edits to project-root text files |
-| `bash` | Run full-permission local shell commands from the project environment |
-| `glob` | Find files with ripgrep-backed glob patterns |
-| `grep` | Search file contents with ripgrep-backed keyword or regex matching |
-| `schedule_manager` | Create, list, update, and delete recurring schedules |
-| `deep_research` | Run multi-round research when explicitly activated |
-| `load_skill` | Load project or user skills when explicitly activated |
-
-`grep` and `glob` require `rg` (ripgrep) on `PATH`. The `bash` tool intentionally
-runs with full local host permissions; it does not apply command allowlists or
-denylists.
-
-Tool results longer than 10,000 characters are written to
-`data/tool_outputs/YYYY/MM/DD/`. The model receives a compact file reference,
-line count, character count, and preview instead of the full output.
-
-### Platform Adapters
-
-| Platform | Mode | Features |
-|----------|------|----------|
-| Telegram | Polling / Webhook | Streaming draft, Markdown-to-HTML, adaptive table rendering, access control |
-| Feishu | Webhook / Long connection | Encrypted callback validation, interactive card messages, auto token refresh |
-| WeChat | iLink polling | QR login, long-poll text chats, context-token replies |
-| Web | WebSocket | Streaming chat, REST fallback |
-
-Telegram Markdown tables render as aligned `<pre>` blocks when they are narrow. Wide or long-text tables render as field lists for better mobile readability.
-
-### Dashboard
-
-Light/dark theme, 10 pages: Dashboard, Chat, Conversations, Memory, Tools, Scheduler, Monitoring, Logs, Help, Settings.
-
-### Model Support
-
-Any OpenAI-compatible API endpoint, including:
-
-- Volcengine (Doubao/Kimi)
-- DashScope (Qwen)
-- DeepSeek
-- Anthropic (Claude)
-- Local models via Ollama / vLLM
-
-Primary + fallback models with automatic retry and exponential backoff.
-
-Optional model routing can select a configured `simple` or `complex` tier per
-agent run using deterministic prompt/tool rules. Routing decides which model
-tier to try first; fallback still only handles provider failures.
-
-## Testing
+Common commands:
 
 ```bash
 uv run ruff check .
 uv run pytest -q
+cd frontend && npm run build
 ```
+
+Use focused tests while iterating:
+
+```bash
+uv run pytest tests/core/test_config.py
+uv run pytest tests/infrastructure/test_openai_responses_provider.py
+```
+
+Local-only files:
+
+- `.env`
+- `config.yaml`
+- `scripts/openbot-watch.sh`
+- `data/`
+
+Do not commit runtime data, logs, local provider endpoints, or local API keys.
+
+## Architecture
+
+OpenBot is split into five main areas:
+
+- `src/application/`: composition root, startup lifecycle, and message dispatch
+- `src/agent/`: conversation assembly, ReAct runtime, delegation, research,
+  scheduling, and verification
+- `src/infrastructure/`: event bus, storage, model gateway, provider adapters,
+  embeddings, reranking, and monitoring
+- `src/tools/`: tool protocol, registry, and built-in tools
+- `src/api/` and `frontend/`: FastAPI management API and React dashboard
+
+Persistent runtime state is stored under `data/`, including SQLite databases,
+logs, conversation exports, tool-output offloads, and local adapter state.
+
+## Troubleshooting
+
+### `openai_responses base_url must end with /v1`
+
+OpenBot passes `base_url` directly to the OpenAI Python SDK. Use the SDK API
+root:
+
+```yaml
+base_url: https://api.example.com/v1
+```
+
+Do not copy Codex provider URLs blindly; Codex has its own provider URL
+semantics.
+
+### `Missing API key env ... for openai_responses provider`
+
+The active provider was instantiated, but the configured environment variable
+was empty or missing. Add it to `.env`:
+
+```env
+OPENAI_API_KEY=sk-...
+```
+
+### Streaming fails with `openai_responses`
+
+`openai_responses` does not implement streaming yet. Disable streaming for the
+active channel:
+
+```yaml
+telegram:
+  enable_streaming: false
+```
+
+## Security and Local Data
+
+OpenBot is designed for trusted local use.
+
+- The `bash` tool runs local shell commands with host permissions.
+- File tools operate under the project root.
+- Management APIs and dashboard access are local-only by default.
+- Webhook endpoints are only useful when explicitly exposed for platform
+  callbacks.
+- `.env` contains secrets and must stay local.
+- `data/` contains runtime state, logs, conversations, tool outputs, and adapter
+  state; keep it local unless you intentionally export a specific file.
 
 ## License
 

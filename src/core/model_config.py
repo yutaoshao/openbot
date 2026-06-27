@@ -8,12 +8,14 @@ from typing import Literal
 from pydantic import BaseModel, Field, model_validator
 
 RouteTier = Literal["simple", "complex"]
+ReasoningEffort = Literal["low", "medium", "high", "xhigh"]
+ModelVerbosity = Literal["low", "medium", "high"]
 
 
 class ModelProviderConfig(BaseModel):
     """Single model provider configuration."""
 
-    provider: Literal["anthropic", "openai_compatible"] = "anthropic"
+    provider: Literal["anthropic", "openai_compatible", "openai_responses"] = "anthropic"
     model: str = "claude-sonnet-4-20250514"
     base_url: str | None = None
     max_tokens: int = 4096
@@ -23,11 +25,23 @@ class ModelProviderConfig(BaseModel):
     pricing_output: float | None = None
     connect_timeout: float = 30.0
     read_timeout: float = 300.0
+    reasoning_effort: ReasoningEffort = "medium"
+    verbosity: ModelVerbosity = "low"
 
     @property
     def api_key(self) -> str:
         """Resolve API key from environment variable."""
         return os.environ.get(self.api_key_env, "")
+
+    @model_validator(mode="after")
+    def _validate_provider_specific_fields(self) -> ModelProviderConfig:
+        if self.provider != "openai_responses":
+            return self
+        if self.base_url is not None and not self.base_url.rstrip("/").endswith("/v1"):
+            raise ValueError("openai_responses base_url must end with /v1")
+        if not self.api_key_env.strip():
+            raise ValueError("openai_responses api_key_env must not be empty")
+        return self
 
 
 class ModelRoutingRulesConfig(BaseModel):

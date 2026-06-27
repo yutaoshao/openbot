@@ -20,25 +20,23 @@ model:
     default_tier: complex
     tiers:
       simple:
-        provider: openai_compatible
-        model: example-fast-model
+        provider: openai_responses
+        model: gpt-5.5
         base_url: https://api.example.com/v1
-        api_key_env: OPENBOT_MODEL_API_KEY
+        api_key_env: OPENAI_API_KEY
         max_tokens: 4096
-        temperature: 0.7
-        pricing_input: 0.0
-        pricing_output: 0.0
+        reasoning_effort: medium
+        verbosity: low
         connect_timeout: 30
         read_timeout: 300
       complex:
-        provider: openai_compatible
-        model: example-reasoning-model
+        provider: openai_responses
+        model: gpt-5.5
         base_url: https://api.example.com/v1
-        api_key_env: OPENBOT_MODEL_API_KEY
+        api_key_env: OPENAI_API_KEY
         max_tokens: 4096
-        temperature: 0.7
-        pricing_input: 0.0
-        pricing_output: 0.0
+        reasoning_effort: xhigh
+        verbosity: low
         connect_timeout: 30
         read_timeout: 600
     rules:
@@ -53,7 +51,7 @@ telegram:
   enabled: false
   mode: polling
   bot_token_env: TELEGRAM_BOT_TOKEN
-  enable_streaming: true
+  enable_streaming: false
   allowed_user_ids: []
 
 feishu:

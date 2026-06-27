@@ -2,97 +2,58 @@
 
 # OpenBot
 
-一个面向本机单用户场景的个人 AI Agent，具备多平台消息接入、工具执行、四层记忆系统和本地优先的管理面板。
+OpenBot 是一个面向本机单用户场景的个人 AI Agent，用于个人自动化、多平台消息接入、工具执行、持久记忆、定时任务，以及本地优先的管理面板。
 
-## 架构
+默认安全姿态是本地优先：运行时数据放在 `data/`，管理 API 默认只绑定本机，密钥放在 `.env`。
 
-| 层级 | 组件 |
-|------|------|
-| Application | Frontend (React)、REST API (FastAPI)、Msg Hub (Adapters) |
-| Core | Agent (ReAct)、Sub-Agent、Scheduler、Deep Research |
-| Memory | Working、Episodic、Semantic、Procedural |
-| Tool | Registry、Protocol、Sandbox、Built-in Tools |
-| Platform | Monitor、Config (Pydantic + YAML)、Logging (structlog) |
-| Infrastructure | Event Bus、SQLite + sqlite-vec、Model Gateway (Multi-provider) |
+## 功能
+
+- ReAct 风格 Agent 循环，支持工具调用和最终回复验证
+- 模型网关支持 primary/fallback、重试、成本统计，以及可选 simple/complex 路由
+- GPT-5 风格非 streaming Responses API provider，支持配置 `reasoning_effort` 和 `verbosity`
+- OpenAI-compatible Chat Completions provider，适配 DashScope、DeepSeek、Kimi、Volcengine、Ollama、vLLM、LM Studio 等
+- Anthropic Claude provider
+- 内置工具：Web 搜索、网页抓取、文件操作、增量编辑、Shell、Python 执行、定时任务、深度研究
+- 四层记忆：working、episodic、semantic、procedural
+- Telegram、飞书/Lark、微信 iLink、REST、WebSocket 适配器
+- React 管理面板：聊天、会话、记忆、工具、定时任务、监控、日志、设置
+
+## 环境要求
+
+- Python 3.12+
+- Node.js 18+，用于前端构建
+- [uv](https://docs.astral.sh/uv/)
+- `rg` / ripgrep，需要在 `PATH` 中，供 `grep` 和 `glob` 工具使用
+- 已启用模型、搜索、消息平台所需的 API key
 
 ## 快速开始
 
-### 前置要求
-
-- Python 3.12+
-- Node.js 18+（用于前端）
-- [uv](https://docs.astral.sh/uv/) 包管理器
-
-### 安装
+安装 Python 依赖并构建管理面板：
 
 ```bash
 uv sync
-cd frontend && npm install && npm run build && cd ..
+cd frontend
+npm install
+npm run build
+cd ..
 ```
 
-### 配置
-
-OpenBot 以本机单用户工作流为默认形态。管理页面、REST API 和 WebSocket 聊天默认只允许本机访问；平台回调相关的 webhook 端点则按适配器配置显式开放。
-
-1. 复制 `.env.example` 为 `.env`，并填写 API Key：
+创建本地密钥和配置文件：
 
 ```bash
 cp .env.example .env
-```
-
-```env
-OPENBOT_MODEL_API_KEY=your_model_provider_api_key
-OPENBOT_EMBEDDING_API_KEY=your_embedding_provider_api_key
-OPENBOT_RERANKER_API_KEY=your_reranker_provider_api_key
-TELEGRAM_BOT_TOKEN=your_telegram_bot_token
-TAVILY_API_KEY=your_tavily_api_key
-FEISHU_APP_ID=your_feishu_app_id
-FEISHU_APP_SECRET=your_feishu_app_secret
-FEISHU_VERIFICATION_TOKEN=your_feishu_verification_token
-FEISHU_ENCRYPT_KEY=your_feishu_encrypt_key
-```
-
-2. 复制示例配置，再编辑本地非敏感项（模型、参数、适配器等）。
-   `config.yaml` 会被忽略，避免把本地 endpoint 和运行时选择提交到 GitHub。
-
-```bash
 cp config.example.yaml config.yaml
 ```
 
-```yaml
-telegram:
-  enabled: true
-  mode: polling
-  bot_token_env: TELEGRAM_BOT_TOKEN
-  enable_streaming: false
-
-feishu:
-  enabled: true
-  mode: webhook
-  app_id_env: FEISHU_APP_ID
-  app_secret_env: FEISHU_APP_SECRET
-  verification_token_env: FEISHU_VERIFICATION_TOKEN
-  encrypt_key_env: FEISHU_ENCRYPT_KEY
-
-wechat:
-  enabled: false
-  mode: ilink_polling
-  state_path: data/wechat/ilink_state.json
-  api_base_url: https://ilinkai.weixin.qq.com
-  poll_interval: 2.0
-  max_backoff: 30.0
-```
-
-### 运行
+编辑 `.env` 和 `config.yaml` 后启动 OpenBot：
 
 ```bash
 uv run python main.py
 ```
 
-管理面板默认地址为 `http://127.0.0.1:8000/`。
+管理面板地址：[http://127.0.0.1:8000/](http://127.0.0.1:8000/)。
 
-本地后端开发时，如果希望修改代码或本地配置后自动重启，可以先复制 watcher 模板，
-生成本地忽略的包装脚本：
+本地后端开发时，可以使用自动重启脚本：
 
 ```bash
 cp scripts/openbot-watch.example.sh scripts/openbot-watch.sh
@@ -100,319 +61,222 @@ chmod +x scripts/openbot-watch.sh
 scripts/openbot-watch.sh
 ```
 
-watcher 会在 `main.py`、`src/`、`config.yaml`、`.env`、`pyproject.toml` 或
-`uv.lock` 变化时重启完整的 `main.py` 进程。它会忽略 `data/` 下的运行时数据和
-日志，避免日志写入导致循环重启。本地的 `scripts/openbot-watch.sh` 会被忽略，
-因为它可能包含机器相关路径或 launchd 设置。
+watcher 会在 `main.py`、源码、`.env`、`config.yaml`、`pyproject.toml` 或 `uv.lock` 变化时重启 `main.py`。它会忽略 `data/`，避免日志或运行时写入导致循环重启。
 
-### 飞书 Webhook 配置
+## 配置
 
-1. 在 `config.yaml` 中开启 `feishu.enabled`。
-2. 在飞书开发者后台将事件订阅回调地址配置为：
-   `https://<your-host>/webhook/feishu`
-3. 在同一个事件订阅页面里，将校验 token 和 encrypt key 配置为：
-   `FEISHU_VERIFICATION_TOKEN` 与 `FEISHU_ENCRYPT_KEY`
-4. 订阅 `im.message.receive_v1` 事件。
-5. 重启 OpenBot，并确认日志中出现 `app.feishu_ready`。
+密钥放在 `.env`。非敏感运行时选择放在 `config.yaml`。`config.yaml` 会被 Git 忽略。
 
-当前飞书支持范围有意保持精简：
+当前 GPT-5.5 Responses 配置需要的最小模型相关密钥：
 
-- 入站消息：仅文本
-- 出站消息：纯文本或单卡片 `lark_md`
-- 安全策略：校验 token，并对加密回调做签名校验
+```env
+OPENAI_API_KEY=sk-...
+OPENBOT_EMBEDDING_API_KEY=...
+OPENBOT_RERANKER_API_KEY=...
+TAVILY_API_KEY=...
+TELEGRAM_BOT_TOKEN=...
+```
 
-### 飞书长连接配置
+### GPT-5.5 Responses Provider
 
-如果你想使用飞书的长连接模式，而不是公网 webhook：
+需要 GPT-5 风格 Responses API 参数时，使用 `openai_responses`，例如 reasoning effort 和 verbosity：
 
-1. 在 `config.yaml` 中将 `feishu.mode` 设置为 `long_connection`
-2. 保留 `FEISHU_APP_ID` 和 `FEISHU_APP_SECRET`
-3. 启动 OpenBot，并确认日志中出现：
-   `app.feishu_ready` 且 `mode=long_connection`
-4. 在飞书开发者后台选择长连接 / WebSocket 事件接收模式，而不是开发者服务器回调
+```yaml
+model:
+  primary:
+    provider: openai_responses
+    model: gpt-5.5
+    base_url: https://api.example.com/v1
+    api_key_env: OPENAI_API_KEY
+    max_tokens: 16384
+    reasoning_effort: high
+    verbosity: low
+    connect_timeout: 30
+    read_timeout: 600
 
-当前长连接模式支持：
+telegram:
+  enable_streaming: false
+```
 
-- 不需要公网回调地址
-- OpenBot 运行时不依赖 webhook token 和 encrypt key
-- 入站消息仍然仅支持文本
-- 出站仍然复用当前的文本 / interactive card 发送逻辑
+Provider 规则：
 
-### 微信个人号（iLink）配置
+- `reasoning_effort`：`low`、`medium`、`high`、`xhigh`
+- `verbosity`：`low`、`medium`、`high`
+- `max_tokens` 会映射为 Responses API 的 `max_output_tokens`
+- 该 provider 不传 `temperature`
+- `base_url` 可以省略，使用 SDK 默认值；如果显式填写，必须以 `/v1` 结尾
+- `api_key_env` 必须指向包含 API key 的环境变量
+- `openai_responses` 还没有实现 streaming；使用它时请保持渠道 streaming 关闭
 
-内置微信适配器当前面向个人号 iLink 路线，首版范围固定为：
+### Chat Completions Provider
 
-- 单账号
-- 私聊文本
-- 轮询模式，不需要公网 webhook
-- 不支持独立主动推送
+实现 OpenAI Chat Completions 兼容接口的模型供应商使用 `openai_compatible`：
 
-1. 在 `config.yaml` 中开启 `wechat.enabled`。
-2. 在本机运行登录命令：
+```yaml
+model:
+  primary:
+    provider: openai_compatible
+    model: example-model
+    base_url: https://api.example.com/v1
+    api_key_env: OPENBOT_MODEL_API_KEY
+    max_tokens: 4096
+    temperature: 0.7
+```
+
+这是非 OpenAI 模型的最大兼容路径。
+
+### Fallback 和 Routing
+
+primary provider 失败后，OpenBot 可以尝试 fallback provider。可选 routing 可以在每次 Agent 运行时选择 `simple` 或 `complex` 档位。默认关闭 routing：
+
+```yaml
+model:
+  fallback:
+    provider: openai_compatible
+    model: fallback-model
+    base_url: https://api.example.com/v1
+    api_key_env: FALLBACK_MODEL_API_KEY
+
+  routing:
+    enabled: false
+    default_tier: complex
+```
+
+routing 关闭时，只有 `primary` 和 `fallback` 是 active path。
+
+## 平台适配器
+
+Telegram 最简单的本地用法是 polling：
+
+```yaml
+telegram:
+  enabled: true
+  mode: polling
+  bot_token_env: TELEGRAM_BOT_TOKEN
+  enable_streaming: false
+```
+
+如果当前模型 provider 不支持 streaming，`enable_streaming` 必须保持 `false`。
+
+飞书/Lark webhook 模式需要公网回调地址：
+
+```yaml
+feishu:
+  enabled: true
+  mode: webhook
+  app_id_env: FEISHU_APP_ID
+  app_secret_env: FEISHU_APP_SECRET
+  verification_token_env: FEISHU_VERIFICATION_TOKEN
+  encrypt_key_env: FEISHU_ENCRYPT_KEY
+```
+
+在飞书事件订阅中配置 `https://<your-host>/webhook/feishu`，订阅
+`im.message.receive_v1`。长连接模式不需要公网 webhook：
+
+```yaml
+feishu:
+  enabled: true
+  mode: long_connection
+```
+
+仍需配置 `FEISHU_APP_ID` 和 `FEISHU_APP_SECRET`。
+
+微信适配器面向个人号 iLink 轮询工作流，用于私聊文本：
+
+```yaml
+wechat:
+  enabled: true
+  mode: ilink_polling
+  state_path: data/wechat/ilink_state.json
+```
 
 ```bash
 uv run python -m src.channels.adapters.wechat_login
 ```
 
-3. 扫描生成的二维码，并在微信里确认登录。
-4. 确认 `data/wechat/ilink_state.json` 已生成，日志中出现 `app.wechat_ready`。
+扫描生成的二维码，并确认 `data/wechat/ilink_state.json` 已生成。
 
-当前 v1 限制：
+## 开发
 
-- 入站仅支持私聊文本
-- 出站仅支持基于活跃会话上下文的回复
-- 图片/语音/文件等非文本消息会收到固定提示
-- 定时任务不能投递到 `target_platform="wechat"`；创建和更新会在保存前被拒绝
-
-### 定时任务投递
-
-- 微信不能接收主动定时任务结果；投递到 `target_platform="wechat"` 的
-  schedule 会在保存前被拒绝。
-- Telegram 定时任务的 `target_id` 必须是真实数字 chat id。从 Telegram
-  对话里创建 schedule 时，OpenBot 可以自动使用当前 chat id。
-
-## 项目结构
-
-```
-openbot/
-├── main.py                          # 应用入口
-├── config.example.yaml              # 示例配置；复制为本地 config.yaml 使用
-├── src/
-│   ├── application/                 # 组合根与运行时编排
-│   │   ├── container.py             # Application 对象图
-│   │   ├── bootstrap.py             # 运行时服务与工具注册
-│   │   ├── message_dispatch.py      # 入站消息分发
-│   │   └── lifecycle.py             # API / 适配器 / scheduler 启停
-│   ├── infrastructure/              # Event Bus、Database、Model Gateway
-│   │   ├── event_bus.py             # 支持通配符的异步 pub/sub
-│   │   ├── database.py              # SQLite schema 与 migration
-│   │   ├── storage/                 # Repository 分包
-│   │   ├── model_gateway.py         # 多模型供应商网关（routing / retry / fallback / streaming）
-│   │   ├── model_routing.py         # simple / complex 确定性路由分类器
-│   │   ├── embedding.py             # Embedding 服务（OpenAI-compatible + DashScope）
-│   │   ├── reranker.py              # Reranker 服务（SiliconFlow / Jina / Cohere）
-│   │   └── providers/
-│   │       ├── anthropic.py         # Claude API（chat + streaming）
-│   │       └── openai_compat.py     # OpenAI-compatible（Volcengine、DeepSeek 等）
-│   ├── core/                        # Config、Logging、Monitor
-│   │   ├── config.py                # 使用 Pydantic 的配置与环境变量解析
-│   │   ├── logging.py               # structlog 配置（console / JSON）
-│   │   └── monitor.py               # 指标采集（延迟、token、成本）
-│   ├── tools/                       # Tool 协议与注册表
-│   │   ├── registry.py              # Tool 协议、ToolResult、ToolRegistry
-│   │   └── builtin/
-│   │       ├── web_search.py        # Tavily Web 搜索
-│   │       ├── web_fetch.py         # 网页抓取与正文提取
-│   │       ├── code_executor.py     # 沙箱 Python 执行
-│   │       ├── file_manager.py      # 项目根目录文件操作
-│   │       ├── edit_file.py         # 项目根目录增量文件编辑
-│   │       ├── bash_tool.py         # 本机全权限 shell 执行
-│   │       ├── glob_tool.py         # 基于 ripgrep 的文件搜索
-│   │       ├── grep_tool.py         # 基于 ripgrep 的内容搜索
-│   │       ├── schedule_manager.py  # 定时任务管理
-│   │       ├── deep_research.py     # 延迟激活的多轮研究工具
-│   │       └── tool_search.py       # 延迟工具发现
-│   ├── agent/                       # Agent Core
-│   │   ├── agent.py                 # ReAct 推理主循环（streaming + non-streaming）
-│   │   ├── conversation/            # 会话编排分包
-│   │   │   ├── __init__.py          # 会话包导出
-│   │   │   ├── manager.py           # 会话管理（上下文组装）
-│   │   │   ├── message_flow.py      # 消息持久化流程辅助
-│   │   │   ├── prompt_builder.py    # 结合记忆的 prompt 组装
-│   │   │   ├── shared_timeline.py   # 跨平台最近消息时间线
-│   │   │   └── task_state_store.py  # 单会话受保护状态
-│   │   ├── runtime/                 # Agent 执行期辅助模块
-│   │   │   ├── __init__.py          # Runtime 包导出
-│   │   │   ├── loop_helpers.py      # ReAct 循环辅助函数
-│   │   │   ├── stream.py            # 主 streamed ReAct 循环
-│   │   │   ├── finalize.py          # 回复后持久化与收尾
-│   │   │   └── tool_executor.py     # 工具调用与 hook 集成
-│   │   ├── delegation/              # 子代理委派域
-│   │   │   ├── __init__.py          # Delegation 导出
-│   │   │   └── manager.py           # 带 scoped tools 的并行子任务委派
-│   │   ├── research/                # 研究域
-│   │   │   ├── __init__.py          # Research 导出
-│   │   │   └── engine.py            # 多轮检索与饱和判断研究引擎
-│   │   ├── skills/                  # 技能发现/加载域
-│   │   │   ├── __init__.py          # Skills 导出
-│   │   │   └── registry.py          # Skill registry 与 load_skill 工具
-│   │   ├── scheduling/              # 定时执行域
-│   │   │   ├── __init__.py          # Scheduler 导出
-│   │   │   ├── cron.py              # Cron trigger 与时区辅助
-│   │   │   ├── delivery.py          # 定时结果投递
-│   │   │   ├── delivery_policy.py   # 定时投递约束
-│   │   │   └── scheduler.py         # 基于 APScheduler 的定时任务执行
-│   │   ├── prompts/                 # Prompt 片段域
-│   │   │   ├── __init__.py          # Prompt 导出
-│   │   │   └── fragments.py         # Harness prompt 片段
-│   │   ├── coordination/            # 跨请求执行协调域
-│   │   │   ├── __init__.py          # Coordination 导出
-│   │   │   └── execution.py         # 按用户串行执行协调
-│   │   ├── state/                   # Agent 任务状态域
-│   │   │   ├── __init__.py          # State 导出
-│   │   │   ├── task_contract.py     # 单轮预期结果契约
-│   │   │   └── task_state.py        # 结构化任务状态对象
-│   │   └── verification/            # 最终回复校验域
-│   │       ├── __init__.py          # Verification 导出
-│   │       ├── responses.py         # 模糊回复的未完成提示
-│   │       └── stop.py              # 停止前契约与工具账本校验
-│   ├── memory/                      # 四层记忆系统
-│   │   ├── message_format.py        # 面向 LLM 的带时间消息渲染
-│   │   ├── working.py               # 工作记忆与压缩
-│   │   ├── episodic/                # 对话归档与摘要
-│   │   │   ├── __init__.py          # Episodic facade 导出
-│   │   │   ├── service.py           # Episodic 记忆服务
-│   │   │   └── helpers.py           # Episodic 辅助工具
-│   │   ├── semantic/                # 知识提取与向量检索
-│   │   │   ├── __init__.py          # Semantic facade 导出
-│   │   │   ├── service.py           # Semantic 记忆服务
-│   │   │   ├── queries.py           # Semantic 查询/抽取 mixin
-│   │   │   ├── mutations.py         # Semantic 写入/合并 mixin
-│   │   │   └── helpers.py           # Semantic 辅助工具
-│   │   └── procedural/              # 用户偏好与行为模式
-│   │       ├── __init__.py          # Procedural facade 导出
-│   │       ├── service.py           # Procedural 记忆服务
-│   │       └── helpers.py           # Procedural 辅助工具
-│   ├── channels/                    # 消息平台适配层
-│   │   ├── hub.py                   # 消息路由中心
-│   │   ├── types.py                 # UnifiedMessage、MessageContent、StreamingAdapter
-│   │   ├── markdown.py              # Markdown 转 Telegram HTML
-│   │   ├── table_format.py          # 适合 Telegram 的 Markdown 表格渲染
-│   │   └── adapters/
-│   │       ├── telegram.py          # Telegram（polling + webhook + streaming draft）
-│   │       ├── feishu.py            # 飞书 / Lark（webhook + interactive card）
-│   │       ├── feishu_long_connection.py # 飞书 SDK 长连接模式
-│   │       ├── wechat.py            # 微信 iLink 个人号适配器
-│   │       └── web.py               # 前端 WebSocket 适配器
-│   └── api/                         # REST API
-│       ├── app.py                   # FastAPI app factory
-│       ├── local_access.py          # 本机访问限制
-│       ├── runtime_status.py        # 适配器运行状态
-│       ├── websocket.py             # WebSocket streaming chat handler
-│       └── routes/
-│           ├── chat.py              # POST /api/chat
-│           ├── conversations.py     # CRUD /api/conversations
-│           ├── identities.py        # 账号身份绑定
-│           ├── knowledge.py         # CRUD /api/knowledge + semantic search
-│           ├── logs.py              # 运行日志接口
-│           ├── tools.py             # GET/PUT /api/tools
-│           ├── schedules.py         # CRUD /api/schedules
-│           ├── metrics.py           # GET /api/metrics/*
-│           ├── settings.py          # GET/PUT /api/settings
-│           └── webhook.py           # POST /webhook/telegram, /webhook/feishu
-└── frontend/                        # React 管理面板
-    └── src/
-        ├── app/
-        │   ├── App.tsx              # 路由定义
-        │   ├── Layout.tsx           # 应用壳（侧边栏 + 主题切换）
-        │   └── route-loaders.ts     # 懒加载路由与预加载钩子
-        ├── lib/
-        │   ├── api.ts               # API 客户端与 WebSocket 辅助
-        │   └── markdown.ts          # Chat Markdown 渲染
-        ├── components/
-        │   ├── Icon.tsx             # 共享图标系统
-        │   └── TopbarQuickSearch.tsx # 全局工作区搜索
-        └── pages/
-            ├── dashboard.tsx        # 指标总览与图表
-            ├── chat.tsx             # 流式 Chat 界面
-            ├── conversations.tsx    # 会话历史浏览
-            ├── memory.tsx           # 知识库 CRUD
-            ├── tools.tsx            # 工具状态与配置
-            ├── scheduler.tsx        # 定时任务管理
-            ├── monitoring.tsx       # 延迟 / token / 成本图表
-            ├── logs.tsx             # 运行日志查看
-            ├── help.tsx             # 应用内帮助
-            └── settings.tsx         # 运行时配置
-```
-
-## 功能
-
-### Agent
-
-- ReAct 推理循环，支持多轮工具调用
-- 通过 `run_stream()` 异步生成器输出流式结果
-- 停止前回复校验：工具调用后的模糊完成会变成明确的未完成提示；文件写入类请求会在同一轮继续尝试，直到确认写入效果；有效最终回答会保留正文，并追加非阻断工具失败说明
-- 支持带 scoped tool registry 的子 Agent 委派与并行执行
-- 基于 cron 的定时任务调度，并持久化到数据库
-- 多轮深度研究与信息饱和检测
-
-### Memory
-
-| 层级 | 用途 | 生命周期 |
-|------|------|----------|
-| Working | 当前会话上下文 | 会话期 |
-| Episodic | 对话摘要与向量 | 持久化 |
-| Semantic | 提取出的知识与向量检索 | 持久化（TTL） |
-| Procedural | 用户偏好与行为模式 | 持久化 |
-
-聊天消息会同时保留事件发生时间（`timestamp`）和数据库写入时间
-（`created_at`），同时不改写原始消息正文。
-
-新的用户与助手消息也会按本地日期追加到
-`data/conversations/YYYY/MM/DD.jsonl`，日期来源是消息自身的事件时间。
-当工作记忆压缩较早上下文时，摘要会附带这些 JSONL 文件引用，方便 Agent
-按需重新读取完整细节。
-
-### Tools
-
-| 工具 | 说明 |
-|------|------|
-| `web_search` | 通过 Tavily 进行网页搜索 |
-| `web_fetch` | 抓取网页并提取正文 |
-| `code_executor` | 在沙箱子进程中执行 Python |
-| `file_manager` | 读取、写入、列出项目根目录下的完整文本文件 |
-| `edit_file` | 对项目根目录下的文本文件执行精确文本或行范围增量编辑 |
-| `bash` | 从项目环境执行本机全权限 shell 命令 |
-| `glob` | 使用 ripgrep glob pattern 搜索文件 |
-| `grep` | 使用 ripgrep 进行关键词或正则内容搜索 |
-| `schedule_manager` | 创建、列出、更新、删除定时任务 |
-| `deep_research` | 显式激活后执行多轮深度研究 |
-| `load_skill` | 显式激活后加载项目或用户技能 |
-
-`grep` 和 `glob` 依赖 `PATH` 中存在 `rg`（ripgrep）。`bash` 工具按本机
-全权限执行，不额外应用命令白名单或黑名单。
-
-超过 10,000 字符的工具结果会写入
-`data/tool_outputs/YYYY/MM/DD/`。模型上下文只接收文件路径、行数、字符数和
-预览，而不是完整长输出。
-
-### 平台适配器
-
-| 平台 | 模式 | 特性 |
-|------|------|------|
-| Telegram | Polling / Webhook | Streaming draft、Markdown-to-HTML、自适应表格渲染、访问控制 |
-| Feishu | Webhook / 长连接 | 加密回调校验、interactive card、自动刷新 token |
-| WeChat | iLink 轮询 | 二维码登录、长轮询文本会话、基于 context token 回复 |
-| Web | WebSocket | 流式聊天、REST fallback |
-
-Telegram Markdown 表格较窄时会渲染为对齐的 `<pre>` 代码块；宽表或长文本表格会渲染为字段列表，提升移动端可读性。
-
-### Dashboard
-
-支持亮色 / 暗色主题，共 10 个页面：Dashboard、Chat、Conversations、Memory、Tools、Scheduler、Monitoring、Logs、Help、Settings。
-
-### 模型支持
-
-支持任意 OpenAI-compatible API 端点，包括：
-
-- Volcengine（Doubao / Kimi）
-- DashScope（Qwen）
-- DeepSeek
-- Anthropic（Claude）
-- 通过 Ollama / vLLM 运行的本地模型
-
-支持主模型 + 回退模型，并具备自动重试和指数退避。
-
-可选模型路由可以在每次 Agent 运行时，根据确定性的 prompt / tool 规则选择
-`simple` 或 `complex` 档位。路由负责先选哪个模型档位；fallback 仍只处理
-provider 失败后的回退。
-
-## 测试
+常用命令：
 
 ```bash
 uv run ruff check .
 uv run pytest -q
+cd frontend && npm run build
 ```
+
+开发时可以跑聚焦测试：
+
+```bash
+uv run pytest tests/core/test_config.py
+uv run pytest tests/infrastructure/test_openai_responses_provider.py
+```
+
+以下文件和目录只应保留在本地：
+
+- `.env`
+- `config.yaml`
+- `scripts/openbot-watch.sh`
+- `data/`
+
+不要提交运行时数据、日志、本地 provider endpoint 或本地 API key。
+
+## 架构
+
+OpenBot 分为五个主要区域：
+
+- `src/application/`：组合根、启动生命周期、消息分发
+- `src/agent/`：会话组装、ReAct 运行时、delegation、research、scheduling、verification
+- `src/infrastructure/`：event bus、storage、model gateway、provider adapter、embedding、reranking、monitoring
+- `src/tools/`：工具协议、工具注册表、内置工具
+- `src/api/` 和 `frontend/`：FastAPI 管理 API 和 React 管理面板
+
+持久运行时状态存放在 `data/`，包括 SQLite 数据库、日志、会话导出、工具输出落盘文件和本地适配器状态。
+
+## 常见问题
+
+### `openai_responses base_url must end with /v1`
+
+OpenBot 会把 `base_url` 直接传给 OpenAI Python SDK。请使用 SDK API 根路径：
+
+```yaml
+base_url: https://api.example.com/v1
+```
+
+不要直接照搬 Codex 的 provider URL。Codex 有自己的 provider URL 语义。
+
+### `Missing API key env ... for openai_responses provider`
+
+active provider 已经实例化，但配置的环境变量为空或不存在。把它写入 `.env`：
+
+```env
+OPENAI_API_KEY=sk-...
+```
+
+### `openai_responses` 下 streaming 失败
+
+`openai_responses` 尚未实现 streaming。关闭当前渠道的 streaming：
+
+```yaml
+telegram:
+  enable_streaming: false
+```
+
+### 工具输出过长
+
+超过 10,000 字符的工具结果会写入 `data/tool_outputs/YYYY/MM/DD/`。模型收到的是精简文件引用，而不是完整输出。
+
+## 安全和本地数据
+
+OpenBot 面向可信本机使用。
+
+- `bash` 工具会以本机权限执行 shell 命令。
+- 文件工具在项目根目录下工作。
+- 管理 API 和面板默认只允许本机访问。
+- Webhook endpoint 只有在你明确暴露给平台回调时才有意义。
+- `.env` 包含密钥，必须保持本地。
+- `data/` 包含运行时状态、日志、会话、工具输出和适配器状态；除非明确导出某个文件，否则保持本地。
 
 ## License
 

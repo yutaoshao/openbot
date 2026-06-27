@@ -94,13 +94,17 @@ class ModelGateway:
         """Factory: create provider by config.provider field."""
         from src.infrastructure.providers.anthropic import ClaudeProvider
         from src.infrastructure.providers.openai_compat import OpenAICompatibleProvider
+        from src.infrastructure.providers.openai_responses import OpenAIResponsesProvider
 
         if config.provider == "anthropic":
             return ClaudeProvider(config)
         if config.provider == "openai_compatible":
             return OpenAICompatibleProvider(config)
+        if config.provider == "openai_responses":
+            return OpenAIResponsesProvider(config)
         raise ValueError(
-            f"Unsupported provider: '{config.provider}'. Supported: anthropic, openai_compatible"
+            "Unsupported provider: "
+            f"'{config.provider}'. Supported: anthropic, openai_compatible, openai_responses"
         )
 
     async def chat(
