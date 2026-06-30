@@ -111,8 +111,8 @@ Provider rules:
 - `temperature` is not sent by this provider
 - `base_url` may be omitted for the SDK default; if set, it must end with `/v1`
 - `api_key_env` must name an environment variable that contains the API key
-- Streaming is not implemented for `openai_responses`; keep channel streaming
-  disabled when using it
+- Streaming is not implemented for `openai_responses`; the runtime uses its
+  non-streaming API and still returns normal agent results
 
 ### Chat Completions Provider
 
@@ -165,8 +165,9 @@ telegram:
   enable_streaming: false
 ```
 
-`enable_streaming` must stay `false` when the selected model provider does not
-support streaming.
+`enable_streaming` only controls whether the channel displays partial output.
+The agent runtime separately chooses a streaming or non-streaming model API
+based on the selected provider's capabilities.
 
 Feishu/Lark webhook mode requires a public callback endpoint:
 
@@ -271,10 +272,11 @@ was empty or missing. Add it to `.env`:
 OPENAI_API_KEY=sk-...
 ```
 
-### Streaming fails with `openai_responses`
+### `openai_responses` and streaming
 
-`openai_responses` does not implement streaming yet. Disable streaming for the
-active channel:
+`openai_responses` does not implement the model streaming API yet. OpenBot
+detects that provider capability and uses its non-streaming API for model
+rounds. Channel streaming remains a display setting:
 
 ```yaml
 telegram:

@@ -27,7 +27,7 @@ from .loop_helpers import (
     reply_chunks,
     timeout_text,
 )
-from .rounds import ModelRoundResult, stream_model_round
+from .rounds import ModelRoundResult, model_round_events
 from .tool_calls import ToolExecutionBatch, execute_tool_calls_for_round
 from .write_retry import append_file_write_retry as _append_file_write_retry
 from .write_retry import needs_file_write_retry as _needs_file_write_retry
@@ -115,7 +115,7 @@ async def run_stream_inner(
 
         round_result = None
         round_text_chunks: list[StreamChunk] = []
-        async for event in stream_model_round(
+        async for event in model_round_events(
             agent,
             messages,
             current_tools,

@@ -20,6 +20,8 @@ logger = get_logger(__name__)
 class OpenAIResponsesProvider:
     """Provider for OpenAI-compatible Responses API endpoints."""
 
+    supports_streaming = False
+
     def __init__(self, config: ModelProviderConfig) -> None:
         from openai import AsyncOpenAI
 

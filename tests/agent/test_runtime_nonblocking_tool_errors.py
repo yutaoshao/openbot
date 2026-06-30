@@ -18,7 +18,7 @@ class ReadThenUnknownToolGateway:
     def __init__(self) -> None:
         self.calls = 0
 
-    async def chat_stream(
+    async def model_round_chunks(
         self,
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]] | None = None,

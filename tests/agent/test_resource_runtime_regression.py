@@ -27,7 +27,7 @@ class _TodoAliasGateway:
             )
         )
 
-    async def chat_stream(self, *_args, **_kwargs):
+    async def model_round_chunks(self, *_args, **_kwargs):
         self.stream_calls += 1
         if self.stream_calls == 1:
             yield StreamChunk(

@@ -31,6 +31,8 @@ def _anthropic_cache_read_tokens(raw_usage: Any) -> int | None:
 class ClaudeProvider:
     """Anthropic Claude API provider."""
 
+    supports_streaming = True
+
     # Pricing per 1M tokens
     PRICING = {
         "claude-sonnet-4-20250514": {"input": 3.0, "output": 15.0},

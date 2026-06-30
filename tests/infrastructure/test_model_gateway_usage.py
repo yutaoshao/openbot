@@ -3,7 +3,13 @@ from __future__ import annotations
 from typing import Any
 
 from src.core.config import ModelConfig, ModelProviderConfig
-from src.infrastructure.model_gateway import ModelGateway, ModelResponse, StreamChunk, Usage
+from src.infrastructure.model_gateway import (
+    ModelGateway,
+    ModelResponse,
+    StreamChunk,
+    ToolCall,
+    Usage,
+)
 
 
 class _FakeEventBus:
@@ -144,6 +150,42 @@ async def test_chat_stream_records_route_usage_on_done(monkeypatch: Any) -> None
     assert event_bus.published[-1][1]["route_reason"] == "simple_keyword"
 
 
+async def test_model_round_chunks_use_chat_when_provider_cannot_stream(monkeypatch: Any) -> None:
+    providers = {
+        "primary-model": _NonStreamingProvider("primary-model"),
+        "simple-model": _NonStreamingProvider("simple-model"),
+        "complex-model": _NonStreamingProvider("complex-model"),
+    }
+    monkeypatch.setattr(
+        ModelGateway,
+        "_create_provider",
+        staticmethod(lambda config: providers[config.model]),
+    )
+    event_bus = _FakeEventBus()
+    gateway = ModelGateway(_routing_config(), event_bus)
+
+    chunks = [
+        chunk
+        async for chunk in gateway.model_round_chunks(
+            messages=[{"role": "user", "content": "hi"}],
+            route_tier="simple",
+            route_reason="simple_keyword",
+        )
+    ]
+
+    assert [chunk.type for chunk in chunks] == ["text", "tool_call", "done"]
+    assert chunks[0].text == "ok"
+    assert chunks[1].tool_call is not None
+    assert chunks[1].tool_call.name == "echo_tool"
+    assert chunks[-1].usage is not None
+    assert chunks[-1].usage.cost_usd == 0.00014
+    assert chunks[-1].model == "simple-model"
+    assert providers["simple-model"].chat_calls == 1
+    assert event_bus.published[-1][1]["provider"] == "route:simple"
+    assert event_bus.published[-1][1]["route_tier"] == "simple"
+    assert event_bus.published[-1][1]["route_reason"] == "simple_keyword"
+
+
 class _RecordingProvider:
     def __init__(self, model: str) -> None:
         self.model = model
@@ -158,6 +200,37 @@ class _RecordingProvider:
         self.calls += 1
         return ModelResponse(
             text="ok",
+            usage=Usage(tokens_in=100, tokens_out=20),
+            model=self.model,
+            latency_ms=12,
+        )
+
+    async def chat_stream(
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None = None,
+        **kwargs: Any,
+    ):
+        raise AssertionError("chat_stream should not be called")
+
+
+class _NonStreamingProvider:
+    supports_streaming = False
+
+    def __init__(self, model: str) -> None:
+        self.model = model
+        self.chat_calls = 0
+
+    async def chat(
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None = None,
+        **kwargs: Any,
+    ) -> ModelResponse:
+        self.chat_calls += 1
+        return ModelResponse(
+            text="ok",
+            tool_calls=[ToolCall(id="tc-1", name="echo_tool", arguments={"value": "hi"})],
             usage=Usage(tokens_in=100, tokens_out=20),
             model=self.model,
             latency_ms=12,

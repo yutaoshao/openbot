@@ -106,7 +106,7 @@ Provider 规则：
 - 该 provider 不传 `temperature`
 - `base_url` 可以省略，使用 SDK 默认值；如果显式填写，必须以 `/v1` 结尾
 - `api_key_env` 必须指向包含 API key 的环境变量
-- `openai_responses` 还没有实现 streaming；使用它时请保持渠道 streaming 关闭
+- `openai_responses` 还没有实现模型 streaming；runtime 会使用它的非 streaming API，仍然返回正常 Agent 结果
 
 ### Chat Completions Provider
 
@@ -156,7 +156,7 @@ telegram:
   enable_streaming: false
 ```
 
-如果当前模型 provider 不支持 streaming，`enable_streaming` 必须保持 `false`。
+`enable_streaming` 只控制渠道是否展示部分输出。Agent runtime 会根据当前 provider 能力，单独选择模型 streaming 或非 streaming API。
 
 飞书/Lark webhook 模式需要公网回调地址：
 
@@ -254,9 +254,9 @@ active provider 已经实例化，但配置的环境变量为空或不存在。�
 OPENAI_API_KEY=sk-...
 ```
 
-### `openai_responses` 下 streaming 失败
+### `openai_responses` 和 streaming
 
-`openai_responses` 尚未实现 streaming。关闭当前渠道的 streaming：
+`openai_responses` 尚未实现模型 streaming API。OpenBot 会识别该 provider 能力，并在模型轮次中使用非 streaming API。渠道 streaming 仍只是展示设置：
 
 ```yaml
 telegram:

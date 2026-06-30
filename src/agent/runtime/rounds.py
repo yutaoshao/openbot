@@ -1,4 +1,4 @@
-"""Helpers for one streamed model round inside the ReAct loop."""
+"""Helpers for one model round inside the ReAct event loop."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ if TYPE_CHECKING:
 
 @dataclass(frozen=True)
 class ModelRoundResult:
-    """Collected output of one streamed model round."""
+    """Collected output of one model round."""
 
     accumulated_text: str
     reasoning_content: str
@@ -20,20 +20,20 @@ class ModelRoundResult:
     model: str
 
 
-async def stream_model_round(
+async def model_round_events(
     agent: Any,
     messages: list[dict[str, Any]],
     tools: list[dict[str, Any]] | None,
     route_decision: Any = None,
 ):
-    """Yield streamed text chunks, then a final ``ModelRoundResult`` event."""
+    """Yield visible text chunks, then a final ``ModelRoundResult`` event."""
     accumulated_text = ""
     reasoning_content = ""
     collected_tool_calls: list[Any] = []
     iter_usage: Usage | None = None
     final_model = ""
 
-    async for chunk in agent.model_gateway.chat_stream(
+    async for chunk in agent.model_gateway.model_round_chunks(
         messages=messages,
         tools=tools,
         **_route_kwargs(route_decision),

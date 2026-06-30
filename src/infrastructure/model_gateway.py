@@ -6,11 +6,19 @@ Provider implementations live in src/infrastructure/providers/.
 
 from __future__ import annotations
 
-import asyncio
-import time
 from typing import TYPE_CHECKING, Any
 
 from src.core.logging import get_logger
+from src.infrastructure.model_gateway_events import (
+    handle_model_retry,
+    record_model_completion,
+)
+from src.infrastructure.model_gateway_requests import (
+    GatewayRequestContext,
+    run_chat_request,
+    run_model_round_request,
+    run_stream_request,
+)
 from src.infrastructure.model_provider_selector import ModelProviderSelector, ProviderAttempt
 from src.infrastructure.model_routing import ModelRouter
 from src.infrastructure.model_types import (
@@ -20,7 +28,6 @@ from src.infrastructure.model_types import (
     ToolCall,
     Usage,
 )
-from src.infrastructure.model_usage import llm_completed_fields, model_request_payload
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -115,36 +122,32 @@ class ModelGateway:
     ) -> ModelResponse:
         """Send chat request with retry and fallback."""
         call_kwargs, route_tier, route_reason = _request_options(kwargs)
-        last_error: Exception | None = None
+        return await run_chat_request(
+            context=self._request_context(),
+            messages=messages,
+            tools=tools,
+            call_kwargs=call_kwargs,
+            route_tier=route_tier,
+            route_reason=route_reason,
+        )
 
-        for provider_attempt in self._provider_selector().attempts(
+    async def model_round_chunks(
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None = None,
+        **kwargs: Any,
+    ) -> AsyncIterator[StreamChunk]:
+        """Yield one model round using streaming only when the provider supports it."""
+        call_kwargs, route_tier, route_reason = _request_options(kwargs)
+        async for chunk in run_model_round_request(
+            context=self._request_context(),
+            messages=messages,
+            tools=tools,
+            call_kwargs=call_kwargs,
             route_tier=route_tier,
             route_reason=route_reason,
         ):
-            provider = self._providers[provider_attempt.key]
-            for attempt in range(self.config.max_retries):
-                try:
-                    response = await provider.chat(messages, tools, **call_kwargs)
-                    await self._record_completion(
-                        provider_attempt,
-                        model=response.model,
-                        usage=response.usage,
-                        latency_ms=response.latency_ms,
-                    )
-                    return response
-
-                except Exception as e:
-                    last_error = e
-                    await self._handle_retry(provider_attempt.key, attempt, e, "retry")
-
-            logger.error(
-                "llm_requested",
-                surface="operational",
-                status="exhausted",
-                provider=provider_attempt.key,
-            )
-
-        raise RuntimeError(f"All model providers failed: {last_error}") from last_error
+            yield chunk
 
     async def chat_stream(
         self,
@@ -158,74 +161,24 @@ class ModelGateway:
         begins, errors propagate to the caller (no mid-stream retry).
         """
         call_kwargs, route_tier, route_reason = _request_options(kwargs)
-        last_error: Exception | None = None
-
-        for provider_attempt in self._provider_selector().attempts(
+        async for chunk in run_stream_request(
+            context=self._request_context(),
+            messages=messages,
+            tools=tools,
+            call_kwargs=call_kwargs,
             route_tier=route_tier,
             route_reason=route_reason,
         ):
-            provider = self._providers[provider_attempt.key]
-            for attempt in range(self.config.max_retries):
-                try:
-                    async for chunk in self._stream_provider(
-                        provider_attempt,
-                        provider,
-                        messages,
-                        tools,
-                        call_kwargs,
-                    ):
-                        yield chunk
-                    return  # noqa: B012 — stream consumed, done
-
-                except Exception as e:
-                    last_error = e
-                    await self._handle_retry(
-                        provider_attempt.key,
-                        attempt,
-                        e,
-                        "stream_retry",
-                    )
-
-            logger.error(
-                "llm_requested",
-                surface="operational",
-                status="stream_exhausted",
-                provider=provider_attempt.key,
-            )
-
-        raise RuntimeError(
-            f"All model providers failed (stream): {last_error}",
-        ) from last_error
-
-    async def _stream_provider(
-        self,
-        provider_attempt: ProviderAttempt,
-        provider: ModelProvider,
-        messages: list[dict[str, Any]],
-        tools: list[dict[str, Any]] | None,
-        call_kwargs: dict[str, Any],
-    ) -> AsyncIterator[StreamChunk]:
-        stream = provider.chat_stream(messages, tools, **call_kwargs)
-        first = True
-        stream_start = time.monotonic()
-        async for chunk in stream:
-            if first:
-                first = False
-                logger.info(
-                    "llm_requested",
-                    surface="operational",
-                    status="streaming",
-                    provider=provider_attempt.key,
-                )
-            if chunk.type == "done" and chunk.usage is not None:
-                latency_ms = int((time.monotonic() - stream_start) * 1000)
-                await self._record_completion(
-                    provider_attempt,
-                    model=chunk.model,
-                    usage=chunk.usage,
-                    latency_ms=latency_ms,
-                )
             yield chunk
+
+    def _request_context(self) -> GatewayRequestContext:
+        return GatewayRequestContext(
+            config=self.config,
+            attempts=self._provider_selector().attempts,
+            providers=self._providers,
+            record_completion=self._record_completion,
+            handle_retry=self._handle_retry,
+        )
 
     async def _record_completion(
         self,
@@ -235,27 +188,13 @@ class ModelGateway:
         usage: Usage,
         latency_ms: int,
     ) -> None:
-        usage.cost_usd = self.calculate_usage_cost(provider_attempt.key, usage)
-        route_fields = _route_fields(provider_attempt)
-        logger.info(
-            "llm_completed",
-            **llm_completed_fields(
-                provider=provider_attempt.key,
-                model=model,
-                usage=usage,
-                latency_ms=latency_ms,
-                **route_fields,
-            ),
-        )
-        await self.event_bus.publish(
-            "model.request",
-            model_request_payload(
-                provider=provider_attempt.key,
-                model=model,
-                usage=usage,
-                latency_ms=latency_ms,
-                **route_fields,
-            ),
+        await record_model_completion(
+            event_bus=self.event_bus,
+            provider_attempt=provider_attempt,
+            model=model,
+            usage=usage,
+            latency_ms=latency_ms,
+            cost_usd=self.calculate_usage_cost(provider_attempt.key, usage),
         )
 
     async def _handle_retry(
@@ -265,19 +204,13 @@ class ModelGateway:
         error: Exception,
         status: str,
     ) -> None:
-        delay = self.config.retry_base_delay * (2**attempt)
-        logger.warning(
-            "llm_requested",
-            surface="operational",
+        await handle_model_retry(
+            config=self.config,
+            provider_key=provider_key,
+            attempt=attempt,
+            error=error,
             status=status,
-            provider=provider_key,
-            attempt=attempt + 1,
-            max_retries=self.config.max_retries,
-            delay=delay,
-            error=str(error),
         )
-        if attempt < self.config.max_retries - 1:
-            await asyncio.sleep(delay)
 
 
 def _request_options(kwargs: dict[str, Any]) -> tuple[dict[str, Any], RouteTier | None, str | None]:
@@ -287,11 +220,3 @@ def _request_options(kwargs: dict[str, Any]) -> tuple[dict[str, Any], RouteTier 
     call_kwargs.pop("purpose", None)
     return call_kwargs, route_tier, route_reason
 
-
-def _route_fields(provider_attempt: ProviderAttempt) -> dict[str, str]:
-    fields: dict[str, str] = {}
-    if provider_attempt.route_tier is not None:
-        fields["route_tier"] = provider_attempt.route_tier
-    if provider_attempt.route_reason is not None:
-        fields["route_reason"] = provider_attempt.route_reason
-    return fields

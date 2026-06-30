@@ -78,6 +78,8 @@ class StreamChunk:
 class ModelProvider(Protocol):
     """Protocol for model provider implementations."""
 
+    supports_streaming: bool
+
     async def chat(
         self,
         messages: list[dict[str, Any]],
