@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from src.tools.builtin.file_manager import FileManagerTool
+from src.tools.file_mutation_receipt import content_sha256
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -38,7 +39,22 @@ def test_read_file_reports_directory_paths_explicitly(tmp_path: Path) -> None:
     assert result.effects[0].action == "file.read"
 
 
-async def test_write_file_reports_structured_write_effect(tmp_path: Path) -> None:
+async def test_inspect_file_exposes_hash_required_by_replace_file(tmp_path: Path) -> None:
+    target = tmp_path / "notes.md"
+    target.write_text("current\n", encoding="utf-8")
+    tool = FileManagerTool(root=tmp_path)
+
+    result = await tool.execute({"operation": "inspect_file", "path": "./notes.md"})
+
+    expected_hash = content_sha256(b"current\n")
+    assert not result.is_error
+    assert f"SHA-256: {expected_hash}" in result.content
+    assert result.metadata == {"path": "notes.md", "size": 8, "sha256": expected_hash}
+    assert result.effects[0].action == "file.inspect"
+    assert result.effects[0].effect == "file_inspected"
+
+
+async def test_file_manager_rejects_removed_write_operation(tmp_path: Path) -> None:
     tool = FileManagerTool(root=tmp_path)
 
     result = await tool.execute(
@@ -49,11 +65,10 @@ async def test_write_file_reports_structured_write_effect(tmp_path: Path) -> Non
         }
     )
 
-    assert not result.is_error
-    assert result.effects[0].action == "file.write"
-    assert result.effects[0].target == "notes/example.md"
-    assert result.effects[0].effect == "file_written"
-    assert result.effects[0].status == "completed"
+    assert result.is_error
+    assert "Unknown operation: write_file" in result.content
+    assert "write_file" not in tool.parameters["properties"]["operation"]["enum"]
+    assert not (tmp_path / "notes/example.md").exists()
 
 
 def test_file_manager_reads_large_files_without_internal_truncation(tmp_path: Path) -> None:

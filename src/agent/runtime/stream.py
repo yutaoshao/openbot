@@ -9,16 +9,18 @@ from src.agent.state.task_contract_planner import (
     plan_scheduled_task_contract,
     plan_task_contract,
 )
-from src.agent.state.task_contract_resources import resolve_agent_contract_resources
-from src.agent.verification import verify_final_response
+from src.agent.state.task_contract_resources import (
+    agent_project_root,
+    resolve_agent_contract_resources,
+)
 from src.agent.verification.stop import ledger_from_tool_calls, verify_stop
 from src.core.logging import get_logger
 from src.infrastructure.model_gateway import StreamChunk, Usage
-from src.infrastructure.model_routing import RouteRequest
 from src.memory.message_format import strip_internal_timestamp_prefixes
 
 from . import prompting
-from .finalize import finalize_agent_run
+from .file_write_verification import file_write_verification_failure
+from .finalize import finalize_agent_run, verify_and_publish_final_response
 from .loop_helpers import (
     accumulate_usage,
     append_assistant_tool_calls,
@@ -28,16 +30,14 @@ from .loop_helpers import (
     timeout_text,
 )
 from .rounds import ModelRoundResult, model_round_events
+from .stream_context import choose_route, current_task_state
 from .tool_calls import ToolExecutionBatch, execute_tool_calls_for_round
-from .write_retry import append_file_write_retry as _append_file_write_retry
-from .write_retry import needs_file_write_retry as _needs_file_write_retry
 
 logger = get_logger(__name__)
 if TYPE_CHECKING:
     from datetime import datetime
 build_system_prompt = prompting.build_system_prompt
 prepare_agent_turn = prompting.prepare_agent_turn
-resolve_route_tool_names = prompting.resolve_route_tool_names
 resolve_tools = prompting.resolve_tools
 
 
@@ -64,7 +64,11 @@ async def run_stream_inner(
         source_message_id,
         platform_user_id,
     )
-    route_decision = _route_decision(agent, input_text, _task_state(agent, conversation_id))
+    route_decision = choose_route(
+        agent,
+        input_text,
+        current_task_state(agent, conversation_id),
+    )
     await agent.event_bus.publish(
         "agent.think.start",
         {"conversation_id": conversation_id, "input_length": len(input_text)},
@@ -90,14 +94,15 @@ async def run_stream_inner(
             agent.model_gateway,
             input_text,
             messages=messages,
-            task_state=_task_state(agent, conversation_id),
+            task_state=current_task_state(agent, conversation_id),
         ),
         agent,
     )
+    project_root = agent_project_root(agent)
 
     while iterations < agent.max_iterations:
-        current_task_state = _task_state(agent, conversation_id)
-        current_tools = resolve_tools(agent, input_text, task_state=current_task_state)
+        task_state = current_task_state(agent, conversation_id)
+        current_tools = resolve_tools(agent, input_text, task_state=task_state)
         timeout_message = timeout_text(agent, task_start, iterations)
         if timeout_message:
             final_text = timeout_message
@@ -142,9 +147,21 @@ async def run_stream_inner(
                 decision="final_reply",
                 iteration=iterations,
             )
-            if _needs_file_write_retry(contract, all_tool_calls):
-                _append_file_write_retry(messages, round_result.accumulated_text)
-                continue
+            file_write_failure = file_write_verification_failure(
+                contract,
+                all_tool_calls,
+                project_root=project_root,
+            )
+            if file_write_failure:
+                final_text = file_write_failure
+                emit_final_text = True
+                logger.warning(
+                    "task_failed",
+                    surface="operational",
+                    reason="file_mutation_unverified",
+                    iterations=iterations,
+                )
+                break
             final_text = round_result.accumulated_text
             pending_final_text = final_text
             pending_final_chunks = round_text_chunks
@@ -177,7 +194,7 @@ async def run_stream_inner(
             collected_tool_calls=round_result.collected_tool_calls,
             conversation_id=conversation_id,
             platform=platform,
-            task_state=current_task_state,
+            task_state=task_state,
             task_start=task_start,
             task_timeout=agent.config.task_timeout,
             iterations=iterations,
@@ -214,7 +231,7 @@ async def run_stream_inner(
             iterations=iterations,
         )
 
-    final_text = await _finalize_text(
+    final_text = await verify_and_publish_final_response(
         agent,
         conversation_id=conversation_id,
         platform=platform,
@@ -223,7 +240,12 @@ async def run_stream_inner(
         all_tool_calls=all_tool_calls,
     )
     final_text = strip_internal_timestamp_prefixes(final_text)
-    stop_decision = verify_stop(contract, final_text, ledger_from_tool_calls(all_tool_calls))
+    stop_decision = verify_stop(
+        contract,
+        final_text,
+        ledger_from_tool_calls(all_tool_calls),
+        project_root=project_root,
+    )
     if stop_decision.message:
         final_text = stop_decision.message
         emit_final_text = True
@@ -257,42 +279,3 @@ async def run_stream_inner(
         model=final_model,
         iterations=iterations,
     )
-
-
-def _task_state(agent: Any, conversation_id: str) -> Any:
-    if not agent.conversation_manager or not conversation_id:
-        return None
-    return agent.conversation_manager.get_task_state(conversation_id)
-
-
-def _route_decision(agent: Any, input_text: str, task_state: Any) -> Any:
-    decide_route = getattr(agent.model_gateway, "decide_route", None)
-    if not callable(decide_route):
-        return None
-    tool_names = resolve_route_tool_names(agent, input_text, task_state=task_state)
-    return decide_route(RouteRequest(input_text=input_text, tool_names=tool_names))
-
-
-async def _finalize_text(
-    agent: Any,
-    *,
-    conversation_id: str,
-    platform: str,
-    final_text: str,
-    iterations: int,
-    all_tool_calls: list[dict[str, Any]],
-) -> str:
-    task_state = _task_state(agent, conversation_id)
-    verified_text, verified = verify_final_response(
-        final_text,
-        tool_calls_made=all_tool_calls,
-        task_state=task_state,
-    )
-    if verified:
-        data = {
-            "conversation_id": conversation_id,
-            "platform": platform,
-            "iterations": iterations,
-        }
-        await agent.event_bus.publish("harness.completion_verified", data)
-    return verified_text

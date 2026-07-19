@@ -7,11 +7,12 @@ from src.agent.skills import LoadSkillTool, SkillMeta
 from src.tools.builtin.bash_tool import BashTool
 from src.tools.builtin.code_executor import CodeExecutorTool
 from src.tools.builtin.deep_research import DeepResearchTool
-from src.tools.builtin.file_manager import FileManagerTool
+from src.tools.builtin.file_mutation_tools import CreateFileTool
 from src.tools.builtin.schedule_manager import ScheduleManagerTool
 from src.tools.builtin.tool_search import ToolSearchTool
 from src.tools.builtin.web_fetch import WebFetchTool
 from src.tools.builtin.web_search import WebSearchTool
+from src.tools.file_mutation_service import FileMutationService
 from src.tools.registry import DEFERRED_VISIBILITY, ToolRegistry, ToolResult
 from src.tools.runtime import ToolExecutionContext, tool_execution_context
 
@@ -90,16 +91,17 @@ def _effect(result: ToolResult):
     return result.effects[0]
 
 
-async def test_file_manager_write_returns_file_written_effect(tmp_path) -> None:
-    result = await FileManagerTool(root=tmp_path).execute(
-        {"operation": "write_file", "path": "notes/example.md", "content": "hello"}
+async def test_create_file_returns_verified_file_written_effect(tmp_path) -> None:
+    result = await CreateFileTool(FileMutationService(tmp_path)).execute(
+        {"path": "notes/example.md", "content": "hello"}
     )
 
     effect = _effect(result)
-    assert effect.action == "file.write"
+    assert effect.action == "file.create"
     assert effect.effect == "file_written"
     assert effect.target_type == "file"
     assert effect.target == "notes/example.md"
+    assert effect.details["file_mutation"]["postcondition"] == "verified"
 
 
 async def test_schedule_manager_update_returns_schedule_updated_effect() -> None:

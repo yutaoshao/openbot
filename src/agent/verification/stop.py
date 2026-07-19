@@ -26,8 +26,11 @@ from src.tools.effects import (
     STATUS_ERROR,
     ToolEffect,
 )
+from src.tools.file_mutation_receipt import FILE_MUTATION_ACTIONS, verified_file_mutation
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from src.agent.state.task_contract import TaskContract
 
 EFFECT_FILE_WRITTEN = "file_written"
@@ -87,9 +90,14 @@ class ToolLedger:
 
     events: tuple[ToolEffect, ...] = ()
 
-    def satisfies(self, requirement: TaskRequirement) -> bool:
+    def satisfies(
+        self,
+        requirement: TaskRequirement,
+        *,
+        project_root: Path | None = None,
+    ) -> bool:
         if requirement.action == ACTION_FILE_WRITE:
-            return self._satisfies_file_write(requirement)
+            return self._satisfies_file_write(requirement, project_root)
         expected_effect = _ACTION_EFFECTS.get(requirement.action)
         if expected_effect is None:
             return True
@@ -121,15 +129,20 @@ class ToolLedger:
             unresolved.append(event)
         return tuple(unresolved)
 
-    def _satisfies_file_write(self, requirement: TaskRequirement) -> bool:
+    def _satisfies_file_write(
+        self,
+        requirement: TaskRequirement,
+        project_root: Path | None,
+    ) -> bool:
         if any(resource.error for resource in requirement.resources):
             return False
         writes = [
             event
             for event in self.events
             if event.status == STATUS_COMPLETED
-            and event.action in {ACTION_FILE_WRITE, "file.edit"}
+            and event.action in FILE_MUTATION_ACTIONS
             and event.effect == EFFECT_FILE_WRITTEN
+            and verified_file_mutation(event, project_root)
         ]
         if not requirement.target_paths and not requirement.allowed_write_dirs:
             return bool(writes)
@@ -167,13 +180,15 @@ def verify_stop(
     contract: TaskContract,
     final_text: str,
     ledger: ToolLedger,
+    *,
+    project_root: Path | None = None,
 ) -> StopDecision:
     """Check that the reply exposes failures and satisfies required actions."""
     cleaned = " ".join(final_text.strip().split())
     if _is_vague(cleaned) or _is_internal_summary(cleaned):
         return StopDecision(False, "本轮未完成：模型调用工具后没有生成有效最终回复。")
     for requirement in contract.required_actions:
-        if not ledger.satisfies(requirement):
+        if not ledger.satisfies(requirement, project_root=project_root):
             return StopDecision(
                 False,
                 missing_requirement_message(requirement, _ACTION_EFFECTS, ledger.events),

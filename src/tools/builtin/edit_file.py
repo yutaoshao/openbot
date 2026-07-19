@@ -7,19 +7,19 @@ from typing import TYPE_CHECKING, Any, Self
 
 from pydantic import Field, field_validator, model_validator
 
-from src.tools.builtin.path_utils import project_root, relative_to_root, resolve_project_path
+from src.tools.builtin.path_utils import relative_to_root, resolve_project_path
 from src.tools.builtin.validation import StrictToolInput, schema_for, validate_args
-from src.tools.effects import EFFECT_NONE, STATUS_COMPLETED, STATUS_ERROR, tool_effect
+from src.tools.effects import EFFECT_NONE, STATUS_ERROR, tool_effect
+from src.tools.file_mutation_receipt import FILE_WRITTEN, FileMutationReceipt, content_sha256
+from src.tools.file_mutation_service import FileMutationError, FileMutationService
 from src.tools.registry import ToolResult
 
 if TYPE_CHECKING:
     from pathlib import Path
 
-EFFECT_FILE_WRITTEN = "file_written"
-
 
 class EditFileInput(StrictToolInput):
-    """Input model for incremental file edits."""
+    """Input model for targeted file edits."""
 
     file_path: str = Field(min_length=1)
     old_text: str | None = None
@@ -38,24 +38,24 @@ class EditFileInput(StrictToolInput):
         return value
 
     @model_validator(mode="after")
-    def _validate_mode(self) -> Self:
-        text_mode = self.old_text is not None or self.new_text is not None
-        line_mode = any(
+    def _validate_edit_shape(self) -> Self:
+        has_exact_text = self.old_text is not None or self.new_text is not None
+        has_line_range = any(
             value is not None for value in (self.line_start, self.line_end, self.replacement)
         )
-        if text_mode == line_mode:
-            raise ValueError("provide exactly one edit mode")
-        if text_mode:
-            self._require_text_mode()
-        if line_mode:
-            self._require_line_mode()
+        if has_exact_text == has_line_range:
+            raise ValueError("provide exactly one edit form")
+        if has_exact_text:
+            self._require_exact_text_fields()
+        if has_line_range:
+            self._require_line_range_fields()
         return self
 
-    def _require_text_mode(self) -> None:
+    def _require_exact_text_fields(self) -> None:
         if self.old_text is None or self.new_text is None:
             raise ValueError("old_text and new_text are required together")
 
-    def _require_line_mode(self) -> None:
+    def _require_line_range_fields(self) -> None:
         if self.line_start is None or self.line_end is None or self.replacement is None:
             raise ValueError("line_start, line_end, and replacement are required together")
         if self.line_end < self.line_start:
@@ -63,10 +63,14 @@ class EditFileInput(StrictToolInput):
 
 
 class EditFileTool:
-    """Apply targeted edits to text files under the project root."""
+    """Apply targeted edits through the shared file mutation service."""
 
-    def __init__(self, root: Path | None = None) -> None:
-        self._root = root
+    def __init__(self, mutation_service: FileMutationService) -> None:
+        self._mutations = mutation_service
+
+    @property
+    def project_root(self) -> Path:
+        return self._mutations.project_root
 
     @property
     def name(self) -> str:
@@ -75,12 +79,10 @@ class EditFileTool:
     @property
     def description(self) -> str:
         return (
-            f"Edits a specific text file under project root {project_root(self._root)} "
+            f"Edits a specific UTF-8 text file under project root {self.project_root} "
             "by exact old/new text replacement or an inclusive line range. "
-            "Use when only a targeted file section should change and a whole-file rewrite "
-            "would waste context or risk unrelated edits. "
-            "Do not use when the file is binary, outside the project root, missing, a "
-            "directory, or when codebase-wide search or shell commands are needed."
+            "Use when only a targeted section should change. "
+            "Do not use when Bash or whole-file replacement would be required."
         )
 
     @property
@@ -92,91 +94,131 @@ class EditFileTool:
         return "filesystem"
 
     async def execute(self, args: dict[str, Any]) -> ToolResult:
-        data, error = validate_args(EditFileInput, args, tool_name=self.name)
-        if error or data is None:
-            return error or ToolResult(content="Invalid arguments", is_error=True)
-        target, error = resolve_project_path(self._root, data.file_path, operation=self.name)
-        if error or target is None:
-            return error or ToolResult(content="Invalid path", is_error=True)
-        return self._edit_target(target, data, project_root(self._root))
+        request, validation_error = validate_args(EditFileInput, args, tool_name=self.name)
+        if validation_error is not None:
+            return validation_error
+        assert request is not None
+        target, path_error = resolve_project_path(
+            self.project_root,
+            request.file_path,
+            operation=self.name,
+        )
+        if path_error is not None:
+            return path_error
+        assert target is not None
+        return self._edit_target(target, request)
 
-    def _edit_target(self, target: Path, data: EditFileInput, root: Path) -> ToolResult:
+    def _edit_target(self, target: Path, request: EditFileInput) -> ToolResult:
+        source_content, read_error = self._read_target(target, request.file_path)
+        if read_error:
+            return read_error
+        assert source_content is not None
+        if request.old_text is not None:
+            return self._replace_exact_text(target, request, source_content)
+        return self._replace_line_range(target, request, source_content)
+
+    def _read_target(self, target: Path, path: str) -> tuple[str | None, ToolResult | None]:
         if target.is_dir():
-            return _error(data.file_path, "Path is a directory", mode=_mode(data), root=root)
+            return None, self._error(target, "Path is a directory")
         if not target.is_file():
-            return _error(
-                data.file_path,
-                f"File not found: {data.file_path}",
-                mode=_mode(data),
-                root=root,
-            )
+            return None, self._error(target, f"File not found: {path}")
         try:
-            content = target.read_text(encoding="utf-8")
+            return target.read_text(encoding="utf-8"), None
         except UnicodeDecodeError:
-            return _error(
-                data.file_path,
-                f"Cannot edit binary file: {data.file_path}",
-                mode=_mode(data),
-                root=root,
-            )
+            return None, self._error(target, f"Cannot edit binary file: {path}")
         except OSError as exc:
-            return _error(data.file_path, f"Read failed: {exc}", mode=_mode(data), root=root)
-        return self._apply_edit(target, data, content, root)
+            return None, self._error(target, f"Read failed: {exc}")
 
-    def _apply_edit(
+    def _replace_exact_text(
         self,
         target: Path,
-        data: EditFileInput,
-        content: str,
-        root: Path,
+        request: EditFileInput,
+        source_content: str,
     ) -> ToolResult:
-        if data.old_text is not None:
-            return _apply_old_text_edit(target, data, content, root)
-        return _apply_line_range_edit(target, data, content, root)
+        old_text = request.old_text or ""
+        match_count = source_content.count(old_text)
+        if match_count == 0:
+            return self._error(target, "old_text not found")
+        if match_count > 1:
+            return self._error(
+                target,
+                f"old_text matched {match_count} times",
+                match_count=match_count,
+            )
+        updated_content = source_content.replace(old_text, request.new_text or "", 1)
+        return self._commit(target, source_content, updated_content)
 
+    def _replace_line_range(
+        self,
+        target: Path,
+        request: EditFileInput,
+        source_content: str,
+    ) -> ToolResult:
+        lines = source_content.splitlines(keepends=True)
+        line_start = request.line_start or 1
+        line_end = request.line_end or 1
+        if line_start > len(lines) or line_end > len(lines):
+            return self._error(target, "line range is outside file")
+        selected = lines[line_start - 1 : line_end]
+        replacement = _line_replacement_text(request.replacement or "", selected)
+        updated_content = "".join([*lines[: line_start - 1], replacement, *lines[line_end:]])
+        return self._commit(target, source_content, updated_content)
 
-def _apply_old_text_edit(
-    target: Path,
-    data: EditFileInput,
-    content: str,
-    root: Path,
-) -> ToolResult:
-    old_text = data.old_text or ""
-    match_count = content.count(old_text)
-    if match_count == 0:
-        return _error(data.file_path, "old_text not found", mode="old_text", root=root)
-    if match_count > 1:
-        return _error(
-            data.file_path,
-            f"old_text matched {match_count} times",
-            mode="old_text",
-            root=root,
-            match_count=match_count,
+    def _commit(
+        self,
+        target: Path,
+        source_content: str,
+        updated_content: str,
+    ) -> ToolResult:
+        expected_sha256 = content_sha256(source_content.encode("utf-8"))
+        try:
+            receipt = self._mutations.edit(target, expected_sha256, updated_content)
+        except FileMutationError as exc:
+            return self._error(target, str(exc))
+        return _edit_success(receipt, source_content, updated_content)
+
+    def _error(self, target: Path, message: str, **details: Any) -> ToolResult:
+        canonical_path = relative_to_root(self.project_root, target)
+        return ToolResult(
+            content=message,
+            is_error=True,
+            effects=(
+                tool_effect(
+                    "file.edit",
+                    EFFECT_NONE,
+                    status=STATUS_ERROR,
+                    target_type="file",
+                    target=canonical_path,
+                    name=self.name,
+                    **details,
+                ),
+            ),
         )
-    new_content = content.replace(old_text, data.new_text or "", 1)
-    return _write_edit(target, data, content, new_content, "old_text", root)
 
 
-def _apply_line_range_edit(
-    target: Path,
-    data: EditFileInput,
-    content: str,
-    root: Path,
+def _edit_success(
+    receipt: FileMutationReceipt,
+    source_content: str,
+    updated_content: str,
 ) -> ToolResult:
-    lines = content.splitlines(keepends=True)
-    line_start = data.line_start or 1
-    line_end = data.line_end or 1
-    if line_start > len(lines) or line_end > len(lines):
-        return _error(
-            data.file_path,
-            "line range is outside file",
-            mode="line_range",
-            root=root,
-        )
-    selected = lines[line_start - 1 : line_end]
-    replacement = _line_replacement_text(data.replacement or "", selected)
-    new_content = "".join([*lines[: line_start - 1], replacement, *lines[line_end:]])
-    return _write_edit(target, data, content, new_content, "line_range", root)
+    receipt_payload = receipt.to_dict()
+    return ToolResult(
+        content=(
+            f"Edited {receipt.canonical_path}\n"
+            f"{_diff(receipt.canonical_path, source_content, updated_content)}"
+        ),
+        metadata={"file_mutation": receipt_payload},
+        effects=(
+            tool_effect(
+                receipt.operation,
+                FILE_WRITTEN,
+                target_type="file",
+                target=receipt.canonical_path,
+                name="edit_file",
+                file_mutation=receipt_payload,
+            ),
+        ),
+    )
 
 
 def _line_replacement_text(replacement: str, selected: list[str]) -> str:
@@ -188,33 +230,6 @@ def _line_replacement_text(replacement: str, selected: list[str]) -> str:
     return replacement
 
 
-def _write_edit(
-    target: Path,
-    data: EditFileInput,
-    content: str,
-    new_content: str,
-    mode: str,
-    root: Path,
-) -> ToolResult:
-    try:
-        target.write_text(new_content, encoding="utf-8")
-    except OSError as exc:
-        return _error(data.file_path, f"Write failed: {exc}", mode=mode, root=root)
-    canonical_path = relative_to_root(root, target)
-    return ToolResult(
-        content=f"Edited {data.file_path}\n{_diff(data.file_path, content, new_content)}",
-        effects=(
-            _effect(
-                canonical_path,
-                STATUS_COMPLETED,
-                EFFECT_FILE_WRITTEN,
-                mode,
-                **_line_metadata(data),
-            ),
-        ),
-    )
-
-
 def _diff(path: str, before: str, after: str) -> str:
     return "\n".join(
         difflib.unified_diff(
@@ -224,53 +239,4 @@ def _diff(path: str, before: str, after: str) -> str:
             tofile=f"{path} after",
             lineterm="",
         )
-    )
-
-
-def _mode(data: EditFileInput) -> str:
-    return "old_text" if data.old_text is not None else "line_range"
-
-
-def _line_metadata(data: EditFileInput) -> dict[str, int]:
-    if data.line_start is None or data.line_end is None:
-        return {}
-    return {"line_start": data.line_start, "line_end": data.line_end}
-
-
-def _error(
-    path: str,
-    content: str,
-    *,
-    mode: str,
-    root: Path,
-    **extra: Any,
-) -> ToolResult:
-    canonical_path = _canonical_path(path, root)
-    return ToolResult(
-        content=content,
-        is_error=True,
-        effects=(_effect(canonical_path, STATUS_ERROR, EFFECT_NONE, mode, **extra),),
-    )
-
-
-def _canonical_path(path: str, root: Path) -> str:
-    try:
-        target = (root / path).resolve()
-    except (OSError, RuntimeError):
-        return path
-    if not target.is_relative_to(root):
-        return path
-    return relative_to_root(root, target)
-
-
-def _effect(path: str, status: str, effect: str, mode: str, **details: Any):
-    return tool_effect(
-        "file.edit",
-        effect,
-        status=status,
-        target_type="file",
-        target=path,
-        name="edit_file",
-        mode=mode,
-        **details,
     )

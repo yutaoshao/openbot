@@ -15,18 +15,22 @@ from src.core.monitor import MetricsCollector
 from src.infrastructure.embedding import EmbeddingService, NullEmbeddingService
 from src.infrastructure.reranker import NullRerankerService, RerankerService
 from src.tools.builtin import (
+    AppendFileTool,
     BashTool,
     CodeExecutorTool,
+    CreateFileTool,
     DeepResearchTool,
     EditFileTool,
     FileManagerTool,
     GlobTool,
     GrepTool,
+    ReplaceFileTool,
     ScheduleManagerTool,
     ToolSearchTool,
     WebFetchTool,
     WebSearchTool,
 )
+from src.tools.file_mutation_service import FileMutationService
 from src.tools.registry import CORE_VISIBILITY, DEFERRED_VISIBILITY
 
 
@@ -70,6 +74,7 @@ def init_runtime_services(app: Any) -> None:
 
 def register_builtin_tools(app: Any) -> None:
     """Register all built-in tools."""
+    file_mutations = FileMutationService(Path("."))
     app.tool_registry.register(
         ToolSearchTool(app.tool_registry),
         visibility=CORE_VISIBILITY,
@@ -92,12 +97,27 @@ def register_builtin_tools(app: Any) -> None:
     app.tool_registry.register(
         FileManagerTool(root=Path(".")),
         visibility=CORE_VISIBILITY,
-        keywords=["file", "workspace", "read file", "write file", "文件"],
+        keywords=["file", "workspace", "read file", "文件"],
     )
     app.tool_registry.register(
-        EditFileTool(root=Path(".")),
+        CreateFileTool(file_mutations),
+        visibility=CORE_VISIBILITY,
+        keywords=["create file", "new file", "新建文件"],
+    )
+    app.tool_registry.register(
+        AppendFileTool(file_mutations),
+        visibility=CORE_VISIBILITY,
+        keywords=["append file", "add notes", "追加", "补充笔记"],
+    )
+    app.tool_registry.register(
+        EditFileTool(file_mutations),
         visibility=CORE_VISIBILITY,
         keywords=["edit file", "replace text", "patch", "修改文件", "增量编辑"],
+    )
+    app.tool_registry.register(
+        ReplaceFileTool(file_mutations),
+        visibility=CORE_VISIBILITY,
+        keywords=["replace file", "rewrite file", "完整替换", "重写文件"],
     )
     app.tool_registry.register(
         BashTool(root=Path(".")),

@@ -1,7 +1,17 @@
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from src.agent.state.task_contract import build_task_contract
 from src.agent.verification.stop import ledger_from_tool_calls, verify_stop
+from tests.file_mutation_facts import (
+    created_file_effect,
+    edited_file_effect,
+    executed_mutation_call,
+)
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 def test_stop_verifier_allows_recovered_tool_validation_error() -> None:
@@ -44,8 +54,14 @@ def test_stop_verifier_allows_recovered_tool_validation_error() -> None:
     assert decision.allow
 
 
-def test_stop_verifier_allows_recovered_edit_file_error_on_same_file() -> None:
+def test_stop_verifier_allows_recovered_edit_file_error_on_same_file(tmp_path: Path) -> None:
     contract = build_task_contract("帮我更新学习笔记")
+    target = tmp_path / "data/workspace/leetcode/day1.md"
+    target.parent.mkdir(parents=True)
+    target.write_text("old\n", encoding="utf-8")
+    successful_call = executed_mutation_call(
+        edited_file_effect(tmp_path, "data/workspace/leetcode/day1.md", "updated\n")
+    )
     ledger = ledger_from_tool_calls(
         [
             {
@@ -63,31 +79,30 @@ def test_stop_verifier_allows_recovered_edit_file_error_on_same_file() -> None:
                     },
                 ],
             },
-            {
-                "name": "edit_file",
-                "is_error": False,
-                "result_preview": "Edited data/workspace/leetcode/day1.md",
-                "effects": [
-                    {
-                        "action": "file.edit",
-                        "status": "completed",
-                        "effect": "file_written",
-                        "target_type": "file",
-                        "target": "data/workspace/leetcode/day1.md",
-                        "name": "edit_file",
-                    },
-                ],
-            },
+            successful_call,
         ],
     )
 
-    decision = verify_stop(contract, "已更新到学习笔记。", ledger)
+    decision = verify_stop(
+        contract,
+        "已更新到学习笔记。",
+        ledger,
+        project_root=tmp_path,
+    )
 
     assert decision.allow
 
 
-def test_stop_verifier_keeps_edit_file_error_when_retry_writes_other_file() -> None:
+def test_stop_verifier_keeps_edit_file_error_when_retry_writes_other_file(
+    tmp_path: Path,
+) -> None:
     contract = build_task_contract("帮我更新学习笔记")
+    target = tmp_path / "data/workspace/leetcode/day2.md"
+    target.parent.mkdir(parents=True)
+    target.write_text("old\n", encoding="utf-8")
+    successful_call = executed_mutation_call(
+        edited_file_effect(tmp_path, "data/workspace/leetcode/day2.md", "updated\n")
+    )
     ledger = ledger_from_tool_calls(
         [
             {
@@ -105,33 +120,30 @@ def test_stop_verifier_keeps_edit_file_error_when_retry_writes_other_file() -> N
                     },
                 ],
             },
-            {
-                "name": "edit_file",
-                "is_error": False,
-                "result_preview": "Edited data/workspace/leetcode/day2.md",
-                "effects": [
-                    {
-                        "action": "file.edit",
-                        "status": "completed",
-                        "effect": "file_written",
-                        "target_type": "file",
-                        "target": "data/workspace/leetcode/day2.md",
-                        "name": "edit_file",
-                    },
-                ],
-            },
+            successful_call,
         ],
     )
 
-    decision = verify_stop(contract, "已更新到学习笔记。", ledger)
+    decision = verify_stop(
+        contract,
+        "已更新到学习笔记。",
+        ledger,
+        project_root=tmp_path,
+    )
 
     assert not decision.allow
     assert "old_text not found" in decision.message
 
 
-def test_stop_verifier_discloses_non_blocking_tool_error_after_required_write() -> None:
+def test_stop_verifier_discloses_non_blocking_tool_error_after_required_write(
+    tmp_path: Path,
+) -> None:
     contract = build_task_contract(
         "查询资料，保存到 data/workspace/research/openbot-daily/YYYY-MM-DD-topic.md"
+    )
+    file_effect = created_file_effect(
+        tmp_path,
+        "data/workspace/research/openbot-daily/2026-05-31-topic.md",
     )
     ledger = ledger_from_tool_calls(
         [
@@ -141,25 +153,16 @@ def test_stop_verifier_discloses_non_blocking_tool_error_after_required_write() 
                 "result_preview": "HTTP error: 403",
                 "effects": [],
             },
-            {
-                "name": "file_manager",
-                "is_error": False,
-                "result_preview": "Written report",
-                "effects": [
-                    {
-                        "action": "file.write",
-                        "status": "completed",
-                        "effect": "file_written",
-                        "target_type": "file",
-                        "target": "data/workspace/research/openbot-daily/2026-05-31-topic.md",
-                        "name": "file_manager",
-                    },
-                ],
-            },
+            executed_mutation_call(file_effect),
         ],
     )
 
-    decision = verify_stop(contract, "已保存到每日技术调研报告。", ledger)
+    decision = verify_stop(
+        contract,
+        "已保存到每日技术调研报告。",
+        ledger,
+        project_root=tmp_path,
+    )
 
     assert decision.allow
     assert "已保存到每日技术调研报告。" in decision.message

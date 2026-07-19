@@ -17,7 +17,7 @@ logger = get_logger(__name__)
 
 def resolve_agent_contract_resources(contract: TaskContract, agent: Any) -> TaskContract:
     """Resolve resources with the project root used by registered file tools."""
-    resolved = resolve_contract_resources(contract, _agent_project_root(agent))
+    resolved = resolve_contract_resources(contract, agent_project_root(agent))
     _log_resolved_contract(resolved)
     return resolved
 
@@ -35,9 +35,7 @@ def resolve_contract_resources(contract: TaskContract, root: Path | None) -> Tas
 def _resolve_requirement(requirement: TaskRequirement, root: Path | None) -> TaskRequirement:
     if requirement.action != ACTION_FILE_WRITE:
         return requirement
-    resources = tuple(
-        resolve_file_resource(root, path) for path in requirement.target_paths
-    )
+    resources = tuple(resolve_file_resource(root, path) for path in requirement.target_paths)
     directory_resources = tuple(
         resolve_file_resource(root, directory) for directory in requirement.allowed_write_dirs
     )
@@ -53,7 +51,8 @@ def _resolve_requirement(requirement: TaskRequirement, root: Path | None) -> Tas
     )
 
 
-def _agent_project_root(agent: Any) -> Path | None:
+def agent_project_root(agent: Any) -> Path | None:
+    """Return the canonical project root shared by registered file tools."""
     registry = getattr(agent, "tool_registry", None)
     if registry is None:
         return None
@@ -95,9 +94,7 @@ def _canonical_dirs(
     if not resources:
         return raw_dirs
     return tuple(
-        _with_trailing_slash(resource.canonical)
-        for resource in resources
-        if resource.canonical
+        _with_trailing_slash(resource.canonical) for resource in resources if resource.canonical
     )
 
 

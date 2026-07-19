@@ -289,12 +289,19 @@ OpenBot is designed for trusted local use.
 
 - The `bash` tool runs local shell commands with host permissions.
 - File tools operate under the project root.
+- File mutations use explicit `create_file`, `append_file`, `edit_file`, and
+  `replace_file` operations. `replace_file` requires the current SHA-256, which
+  is available through `file_manager`'s `inspect_file` operation.
+- Existing files are snapshotted under `data/file_snapshots/YYYY/MM/DD/` before
+  mutation, and successful mutations are verified against their final content.
+  A successful `bash` command is not treated as a structured file mutation.
 - Management APIs and dashboard access are local-only by default.
 - Webhook endpoints are only useful when explicitly exposed for platform
   callbacks.
 - `.env` contains secrets and must stay local.
-- `data/` contains runtime state, logs, conversations, tool outputs, and adapter
-  state; keep it local unless you intentionally export a specific file.
+- `data/` contains runtime state, logs, conversations, file snapshots, tool
+  outputs, and adapter state; keep it local unless you intentionally export a
+  specific file.
 
 ## License
 

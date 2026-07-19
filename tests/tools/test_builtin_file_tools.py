@@ -5,13 +5,15 @@ from typing import TYPE_CHECKING
 from src.tools.builtin.edit_file import EditFileTool
 from src.tools.builtin.glob_tool import GlobTool
 from src.tools.builtin.grep_tool import GrepTool
+from src.tools.file_mutation_receipt import verified_file_mutation
+from src.tools.file_mutation_service import FileMutationService
 
 if TYPE_CHECKING:
     from pathlib import Path
 
 
 async def test_edit_file_rejects_unknown_arguments(tmp_path: Path) -> None:
-    tool = EditFileTool(root=tmp_path)
+    tool = EditFileTool(FileMutationService(tmp_path))
 
     result = await tool.execute({"file_path": "notes.txt", "unexpected": "value"})
 
@@ -24,7 +26,7 @@ async def test_edit_file_rejects_unknown_arguments(tmp_path: Path) -> None:
 async def test_edit_file_replaces_exact_old_text_once(tmp_path: Path) -> None:
     target = tmp_path / "sample.txt"
     target.write_text("one\nneedle\nthree\n", encoding="utf-8")
-    tool = EditFileTool(root=tmp_path)
+    tool = EditFileTool(FileMutationService(tmp_path))
 
     result = await tool.execute(
         {
@@ -37,7 +39,13 @@ async def test_edit_file_replaces_exact_old_text_once(tmp_path: Path) -> None:
     assert not result.is_error
     assert target.read_text(encoding="utf-8") == "one\nchanged\nthree\n"
     assert result.effects[0].effect == "file_written"
-    assert result.effects[0].details["mode"] == "old_text"
+    receipt = result.effects[0].details["file_mutation"]
+    assert receipt["operation"] == "file.edit"
+    assert receipt["before_sha256"] != receipt["after_sha256"]
+    assert (tmp_path / receipt["snapshot_path"]).read_text(encoding="utf-8") == (
+        "one\nneedle\nthree\n"
+    )
+    assert verified_file_mutation(result.effects[0], tmp_path)
     assert result.effects[0].target == "sample.txt"
     assert "-needle" in result.content
     assert "+changed" in result.content
@@ -47,7 +55,7 @@ async def test_edit_file_reports_missing_old_text_without_writing(tmp_path: Path
     target = tmp_path / "sample.txt"
     original = "one\ntwo\n"
     target.write_text(original, encoding="utf-8")
-    tool = EditFileTool(root=tmp_path)
+    tool = EditFileTool(FileMutationService(tmp_path))
 
     result = await tool.execute(
         {
@@ -67,7 +75,7 @@ async def test_edit_file_reports_multiple_old_text_matches(tmp_path: Path) -> No
     target = tmp_path / "sample.txt"
     original = "needle\nneedle\n"
     target.write_text(original, encoding="utf-8")
-    tool = EditFileTool(root=tmp_path)
+    tool = EditFileTool(FileMutationService(tmp_path))
 
     result = await tool.execute(
         {
@@ -86,7 +94,7 @@ async def test_edit_file_reports_multiple_old_text_matches(tmp_path: Path) -> No
 async def test_edit_file_replaces_inclusive_line_range(tmp_path: Path) -> None:
     target = tmp_path / "sample.txt"
     target.write_text("alpha\nbeta\ngamma\ndelta\n", encoding="utf-8")
-    tool = EditFileTool(root=tmp_path)
+    tool = EditFileTool(FileMutationService(tmp_path))
 
     result = await tool.execute(
         {
@@ -99,15 +107,22 @@ async def test_edit_file_replaces_inclusive_line_range(tmp_path: Path) -> None:
 
     assert not result.is_error
     assert target.read_text(encoding="utf-8") == "alpha\nBETA\nGAMMA\ndelta\n"
-    assert result.effects[0].details["mode"] == "line_range"
-    assert result.effects[0].details["line_start"] == 2
-    assert result.effects[0].details["line_end"] == 3
+    changed_ranges = result.effects[0].details["file_mutation"]["changed_ranges"]
+    assert changed_ranges == [
+        {
+            "kind": "replace",
+            "before_start": 2,
+            "before_end": 3,
+            "after_start": 2,
+            "after_end": 3,
+        }
+    ]
 
 
 async def test_edit_file_rejects_directory_binary_and_path_escape(tmp_path: Path) -> None:
     (tmp_path / "dir").mkdir()
     (tmp_path / "binary.bin").write_bytes(b"\xff\xfe\x00")
-    tool = EditFileTool(root=tmp_path)
+    tool = EditFileTool(FileMutationService(tmp_path))
 
     directory = await tool.execute({"file_path": "dir", "old_text": "x", "new_text": "y"})
     binary = await tool.execute({"file_path": "binary.bin", "old_text": "x", "new_text": "y"})

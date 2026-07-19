@@ -1,22 +1,25 @@
-"""Workspace file management tool."""
+"""Read-only workspace file inspection tool."""
 
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from src.tools.effects import EFFECT_NONE, STATUS_COMPLETED, STATUS_ERROR, tool_effect
+from src.tools.file_mutation_receipt import content_sha256
 from src.tools.registry import ToolResult
 
-# Project root for file operations
+if TYPE_CHECKING:
+    from src.tools.effects import ToolEffect
+
 DEFAULT_PROJECT_ROOT = Path(".")
 EFFECT_FILE_READ = "file_read"
-EFFECT_FILE_WRITTEN = "file_written"
 EFFECT_FILE_LISTED = "file_listed"
+EFFECT_FILE_INSPECTED = "file_inspected"
 
 
 class FileManagerTool:
-    """Manage files within the project root."""
+    """Read and inspect files within the project root."""
 
     def __init__(self, root: Path | None = None) -> None:
         self._root = root or DEFAULT_PROJECT_ROOT
@@ -38,11 +41,10 @@ class FileManagerTool:
     @property
     def description(self) -> str:
         return (
-            f"Reads, writes, and lists complete files under project root {self.project_root_text}. "
-            "Use when the task involves project files, runtime data files, skill reference "
-            "files, or saved tool outputs relative to that project root. "
-            "Do not use when the path is outside the project root, the file is binary, "
-            "or the task needs shell commands, codebase-wide search, or incremental edits."
+            "Reads files, reports file hashes, and lists directories under project root "
+            f"{self.project_root_text}. Use when inspecting files or obtaining the current "
+            "SHA-256 required by replace_file. Do not use when modifying files; use "
+            "create_file, append_file, edit_file, or replace_file instead."
         )
 
     @property
@@ -52,8 +54,8 @@ class FileManagerTool:
             "properties": {
                 "operation": {
                     "type": "string",
-                    "enum": ["read_file", "write_file", "list_directory"],
-                    "description": "The file operation to perform",
+                    "enum": ["read_file", "inspect_file", "list_directory"],
+                    "description": "The read-only file operation to perform",
                 },
                 "path": {
                     "type": "string",
@@ -62,10 +64,6 @@ class FileManagerTool:
                         f"{self.project_root_text} (default: '.' for list)"
                     ),
                     "default": ".",
-                },
-                "content": {
-                    "type": "string",
-                    "description": "Content to write (required for write_file)",
                 },
             },
             "required": ["operation"],
@@ -80,198 +78,183 @@ class FileManagerTool:
         project_root = self.project_root
         try:
             target = (project_root / relative).resolve()
-            if not target.is_relative_to(project_root):
-                return None
-            return target
         except (OSError, RuntimeError):
             return None
+        return target if target.is_relative_to(project_root) else None
 
     async def execute(self, args: dict[str, Any]) -> ToolResult:
         operation = args.get("operation", "")
-
-        dispatch = {
+        operations = {
             "read_file": self._read_file,
-            "write_file": self._write_file,
+            "inspect_file": self._inspect_file,
             "list_directory": self._list_directory,
         }
-
-        handler = dispatch.get(operation)
-        if not handler:
+        file_operation = operations.get(operation)
+        if not file_operation:
             return ToolResult(
-                content=f"Unknown operation: {operation}. "
-                "Use: read_file, write_file, list_directory",
+                content=(
+                    f"Unknown operation: {operation}. Use: read_file, inspect_file, list_directory"
+                ),
                 is_error=True,
             )
-
-        return handler(args)
+        return file_operation(args)
 
     def _read_file(self, args: dict[str, Any]) -> ToolResult:
         path = args.get("path", "")
-        if not path:
-            return ToolResult(
-                content="Path is required for read_file",
-                is_error=True,
-                effects=(_effect("file.read", EFFECT_NONE, STATUS_ERROR, path, self.project_root),),
-            )
-
-        target = self._resolve_safe_path(path)
-        if target is None:
-            return ToolResult(
-                content="Invalid path: outside project root",
-                is_error=True,
-                effects=(_effect("file.read", EFFECT_NONE, STATUS_ERROR, path, self.project_root),),
-            )
-
-        if target.is_dir():
-            return ToolResult(
-                content=(
-                    f"Path is a directory: {path}. Use list_directory to inspect it, "
-                    "or read_file with a concrete file path."
-                ),
-                is_error=True,
-                effects=(_effect("file.read", EFFECT_NONE, STATUS_ERROR, path, self.project_root),),
-            )
-
-        if not target.is_file():
-            return ToolResult(
-                content=f"File not found: {path}",
-                is_error=True,
-                effects=(_effect("file.read", EFFECT_NONE, STATUS_ERROR, path, self.project_root),),
-            )
-
+        target, path_error = self._existing_file(path, action="file.read")
+        if path_error is not None:
+            return path_error
+        assert target is not None
         try:
-            size = target.stat().st_size
-            content = target.read_text(encoding="utf-8")
-            return ToolResult(
-                content=content,
-                metadata={"size": size},
-                effects=(
-                    _effect(
-                        "file.read",
-                        EFFECT_FILE_READ,
-                        STATUS_COMPLETED,
-                        path,
-                        self.project_root,
-                    ),
-                ),
-            )
+            file_content = target.read_bytes()
+            content = file_content.decode("utf-8")
         except UnicodeDecodeError:
-            return ToolResult(
-                content=f"Cannot read binary file: {path}",
-                is_error=True,
-                effects=(_effect("file.read", EFFECT_NONE, STATUS_ERROR, path, self.project_root),),
+            return self._file_error(
+                f"Cannot read binary file: {path}",
+                action="file.read",
+                path=path,
             )
+        except OSError as exc:
+            return self._file_error(f"Read failed: {exc}", action="file.read", path=path)
+        return ToolResult(
+            content=content,
+            metadata={"size": len(file_content)},
+            effects=(self._file_effect("file.read", EFFECT_FILE_READ, path=path),),
+        )
 
-    def _write_file(self, args: dict[str, Any]) -> ToolResult:
+    def _inspect_file(self, args: dict[str, Any]) -> ToolResult:
         path = args.get("path", "")
-        content = args.get("content", "")
+        target, path_error = self._existing_file(path, action="file.inspect")
+        if path_error is not None:
+            return path_error
+        assert target is not None
+        try:
+            file_content = target.read_bytes()
+        except OSError as exc:
+            return self._file_error(f"Inspect failed: {exc}", action="file.inspect", path=path)
+        sha256 = content_sha256(file_content)
+        canonical_path = target.relative_to(self.project_root).as_posix()
+        return ToolResult(
+            content=f"Path: {canonical_path}\nSize: {len(file_content)} bytes\nSHA-256: {sha256}",
+            metadata={"path": canonical_path, "size": len(file_content), "sha256": sha256},
+            effects=(self._file_effect("file.inspect", EFFECT_FILE_INSPECTED, path=path),),
+        )
 
+    def _existing_file(
+        self,
+        path: str,
+        *,
+        action: str,
+    ) -> tuple[Path | None, ToolResult | None]:
         if not path:
-            return ToolResult(
-                content="Path is required for write_file",
-                is_error=True,
-                effects=(
-                    _effect("file.write", EFFECT_NONE, STATUS_ERROR, path, self.project_root),
-                ),
-            )
-
+            return None, self._file_error("Path is required", action=action, path=path)
         target = self._resolve_safe_path(path)
         if target is None:
-            return ToolResult(
-                content="Invalid path: outside project root",
-                is_error=True,
-                effects=(
-                    _effect("file.write", EFFECT_NONE, STATUS_ERROR, path, self.project_root),
-                ),
+            return None, self._file_error(
+                "Invalid path: outside project root",
+                action=action,
+                path=path,
             )
-
-        try:
-            target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_text(content, encoding="utf-8")
-            return ToolResult(
-                content=f"Written {len(content)} chars to {path}",
-                metadata={"size": len(content)},
-                effects=(
-                    _effect(
-                        "file.write",
-                        EFFECT_FILE_WRITTEN,
-                        STATUS_COMPLETED,
-                        path,
-                        self.project_root,
-                    ),
-                ),
+        if target.is_dir():
+            return None, self._file_error(
+                f"Path is a directory: {path}. Use list_directory to inspect it.",
+                action=action,
+                path=path,
             )
-        except OSError as e:
-            return ToolResult(
-                content=f"Write failed: {e}",
-                is_error=True,
-                effects=(
-                    _effect("file.write", EFFECT_NONE, STATUS_ERROR, path, self.project_root),
-                ),
-            )
+        if not target.is_file():
+            return None, self._file_error(f"File not found: {path}", action=action, path=path)
+        return target, None
 
     def _list_directory(self, args: dict[str, Any]) -> ToolResult:
         path = args.get("path", ".")
-
         target = self._resolve_safe_path(path)
         if target is None:
-            return ToolResult(
-                content="Invalid path: outside project root",
-                is_error=True,
-                effects=(_effect("file.list", EFFECT_NONE, STATUS_ERROR, path, self.project_root),),
+            return self._file_error(
+                "Invalid path: outside project root",
+                action="file.list",
+                path=path,
             )
-
         if not target.is_dir():
-            return ToolResult(
-                content=f"Not a directory: {path}",
-                is_error=True,
-                effects=(_effect("file.list", EFFECT_NONE, STATUS_ERROR, path, self.project_root),),
+            return self._file_error(
+                f"Not a directory: {path}",
+                action="file.list",
+                path=path,
             )
-
         try:
             lines = _directory_lines(target, self.project_root)
-            return _list_result(path, self.project_root_text, lines, self.project_root)
-        except OSError as e:
-            return ToolResult(
-                content=f"List failed: {e}",
-                is_error=True,
-                effects=(_effect("file.list", EFFECT_NONE, STATUS_ERROR, path, self.project_root),),
-            )
+        except OSError as exc:
+            return self._file_error(f"List failed: {exc}", action="file.list", path=path)
+        return _directory_listing(
+            path,
+            self.project_root_text,
+            lines,
+            root=self.project_root,
+        )
+
+    def _file_error(self, message: str, *, action: str, path: str) -> ToolResult:
+        return ToolResult(
+            content=message,
+            is_error=True,
+            effects=(
+                self._file_effect(
+                    action,
+                    EFFECT_NONE,
+                    path=path,
+                    status=STATUS_ERROR,
+                ),
+            ),
+        )
+
+    def _file_effect(
+        self,
+        action: str,
+        effect: str,
+        *,
+        path: str,
+        status: str = STATUS_COMPLETED,
+    ) -> ToolEffect:
+        canonical_path = _canonical_path(path, self.project_root)
+        return tool_effect(
+            action,
+            effect,
+            status=status,
+            target_type="file",
+            target=canonical_path,
+            name=self.name,
+        )
 
 
 def _directory_lines(target: Path, project_root: Path) -> list[str]:
-    entries = sorted(target.iterdir(), key=lambda p: (not p.is_dir(), p.name))
-    lines = []
+    entries = sorted(target.iterdir(), key=lambda path: (not path.is_dir(), path.name))
+    lines: list[str] = []
     for entry in entries:
-        rel = entry.relative_to(project_root)
+        relative_path = entry.relative_to(project_root)
         suffix = "/" if entry.is_dir() else f"  ({entry.stat().st_size} bytes)"
-        lines.append(f"  {rel}{suffix}")
+        lines.append(f"  {relative_path}{suffix}")
     return lines
 
 
-def _list_result(path: str, project_root_text: str, lines: list[str], root: Path) -> ToolResult:
-    if not lines:
-        return ToolResult(
-            content=f"Project root: {project_root_text}\nPath: {path}\n(empty directory)",
-            metadata={"path": path, "project_root": project_root_text},
-            effects=(_effect("file.list", EFFECT_FILE_LISTED, STATUS_COMPLETED, path, root),),
-        )
+def _directory_listing(
+    path: str,
+    project_root_text: str,
+    lines: list[str],
+    *,
+    root: Path,
+) -> ToolResult:
+    header = f"Project root: {project_root_text}\nPath: {path}\n"
+    content = header + ("\n".join(lines) if lines else "(empty directory)")
     return ToolResult(
-        content=f"Project root: {project_root_text}\nPath: {path}\n" + "\n".join(lines),
+        content=content,
         metadata={"path": path, "count": len(lines), "project_root": project_root_text},
-        effects=(_effect("file.list", EFFECT_FILE_LISTED, STATUS_COMPLETED, path, root),),
-    )
-
-
-def _effect(action: str, effect: str, status: str, path: str, root: Path):
-    canonical_path = _canonical_path(path, root)
-    return tool_effect(
-        action,
-        effect,
-        status=status,
-        target_type="file",
-        target=canonical_path,
-        name="file_manager",
+        effects=(
+            tool_effect(
+                "file.list",
+                EFFECT_FILE_LISTED,
+                target_type="file",
+                target=_canonical_path(path, root),
+                name="file_manager",
+            ),
+        ),
     )
 
 

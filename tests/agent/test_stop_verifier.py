@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from src.agent.runtime.stream import _needs_file_write_retry
+from typing import TYPE_CHECKING
+
+from src.agent.runtime.file_write_verification import file_write_verification_failure
 from src.agent.state.task_contract import (
     ACTION_FILE_WRITE,
     ACTION_SCHEDULE_UPDATE,
@@ -12,6 +14,10 @@ from src.agent.verification.stop import (
     verify_stop,
 )
 from src.tools.effects import ToolEffect
+from tests.file_mutation_facts import created_file_effect, executed_mutation_call
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 RESEARCH_PROMPT = """每天早上 3 点，针对 OpenBot 的一个具体功能点做一次技术调研。
 
@@ -49,7 +55,7 @@ def test_stop_verifier_rejects_required_write_without_confirmed_write() -> None:
     )
 
     assert not decision.allow
-    assert "未确认写入成功" in decision.message
+    assert "没有结构化文件修改凭证" in decision.message
 
 
 def test_stop_verifier_allows_analysis_after_read_only_tool_use() -> None:
@@ -77,23 +83,16 @@ def test_stop_verifier_allows_analysis_after_read_only_tool_use() -> None:
     assert decision.allow
 
 
-def test_stop_verifier_allows_concrete_write_for_template_path() -> None:
+def test_stop_verifier_allows_concrete_write_for_template_path(tmp_path: Path) -> None:
     contract = build_task_contract("保存到文件 data/diaries/YYYY/MM/YYYY-MM-DD.md")
-    ledger = ToolLedger(
-        (
-            ToolEffect(
-                action="file.write",
-                effect="file_written",
-                name="file_manager",
-                status="completed",
-                target_type="file",
-                target="data/diaries/2026/05/2026-05-10.md",
-                summary="Written diary",
-            ),
-        )
-    )
+    ledger = ToolLedger((created_file_effect(tmp_path, "data/diaries/2026/05/2026-05-10.md"),))
 
-    decision = verify_stop(contract, "已保存到 data/diaries/2026/05/2026-05-10.md。", ledger)
+    decision = verify_stop(
+        contract,
+        "已保存到 data/diaries/2026/05/2026-05-10.md。",
+        ledger,
+        project_root=tmp_path,
+    )
 
     assert decision.allow
 
@@ -118,28 +117,19 @@ def test_task_contract_ignores_chinese_date_format_as_exact_path() -> None:
     assert file_requirement.allowed_write_dirs == ()
 
 
-def test_stop_verifier_allows_actual_write_for_chinese_date_format() -> None:
+def test_stop_verifier_allows_actual_write_for_chinese_date_format(tmp_path: Path) -> None:
     contract = build_task_contract(
         "我想保存下来类似日报，保存格式也是/年/月/日.md。今天早上看了一眼小林 coding。"
     )
     ledger = ToolLedger(
-        (
-            ToolEffect(
-                action="file.write",
-                effect="file_written",
-                name="file_manager",
-                status="completed",
-                target_type="file",
-                target="data/workspace/daily/2026/05/2026-05-28.md",
-                summary="Written daily report",
-            ),
-        )
+        (created_file_effect(tmp_path, "data/workspace/daily/2026/05/2026-05-28.md"),)
     )
 
     decision = verify_stop(
         contract,
         "已保存到 data/workspace/daily/2026/05/2026-05-28.md。",
         ledger,
+        project_root=tmp_path,
     )
 
     assert decision.allow
@@ -178,70 +168,52 @@ print("保存到", path)
     assert not contract.requires_file_write
 
 
-def test_stop_verifier_allows_write_inside_template_save_dir() -> None:
+def test_stop_verifier_allows_write_inside_template_save_dir(tmp_path: Path) -> None:
     contract = build_task_contract(RESEARCH_PROMPT)
     ledger = ToolLedger(
         (
-            ToolEffect(
-                action="file.write",
-                effect="file_written",
-                name="file_manager",
-                status="completed",
-                target_type="file",
-                target="data/workspace/research/openbot-daily/2026-05-20-01-topic.md",
-                summary="Written report",
+            created_file_effect(
+                tmp_path,
+                "data/workspace/research/openbot-daily/2026-05-20-01-topic.md",
             ),
         )
     )
 
-    decision = verify_stop(contract, "已保存到每日技术调研报告。", ledger)
+    decision = verify_stop(
+        contract,
+        "已保存到每日技术调研报告。",
+        ledger,
+        project_root=tmp_path,
+    )
 
     assert decision.allow
 
 
-def test_stop_verifier_rejects_write_outside_template_save_dir() -> None:
+def test_stop_verifier_rejects_write_outside_template_save_dir(tmp_path: Path) -> None:
     contract = build_task_contract(RESEARCH_PROMPT)
-    ledger = ToolLedger(
-        (
-            ToolEffect(
-                action="file.write",
-                effect="file_written",
-                name="file_manager",
-                status="completed",
-                target_type="file",
-                target="data/diaries/2026/05/2026-05-20.md",
-                summary="Written unrelated file",
-            ),
-        )
-    )
+    ledger = ToolLedger((created_file_effect(tmp_path, "data/diaries/2026/05/2026-05-20.md"),))
 
-    decision = verify_stop(contract, "已保存。", ledger)
+    decision = verify_stop(contract, "已保存。", ledger, project_root=tmp_path)
 
     assert not decision.allow
-    assert "未确认写入成功" in decision.message
+    assert "写入目标不匹配" in decision.message
 
 
-def test_runtime_retry_accepts_write_inside_template_save_dir() -> None:
+def test_file_write_verification_accepts_write_inside_template_save_dir(tmp_path: Path) -> None:
     contract = build_task_contract(RESEARCH_PROMPT)
-    tool_calls = [
-        {
-            "name": "file_manager",
-            "is_error": False,
-            "result_preview": "Written report",
-            "effects": [
-                {
-                    "action": "file.write",
-                    "effect": "file_written",
-                    "name": "file_manager",
-                    "status": "completed",
-                    "target_type": "file",
-                    "target": "data/workspace/research/openbot-daily/2026-05-20-01-topic.md",
-                }
-            ],
-        }
-    ]
+    effect = created_file_effect(
+        tmp_path,
+        "data/workspace/research/openbot-daily/2026-05-20-01-topic.md",
+    )
 
-    assert not _needs_file_write_retry(contract, tool_calls)
+    assert (
+        file_write_verification_failure(
+            contract,
+            [executed_mutation_call(effect)],
+            project_root=tmp_path,
+        )
+        is None
+    )
 
 
 def test_ledger_ignores_successful_tool_business_status() -> None:

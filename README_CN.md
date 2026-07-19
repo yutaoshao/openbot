@@ -273,10 +273,15 @@ OpenBot 面向可信本机使用。
 
 - `bash` 工具会以本机权限执行 shell 命令。
 - 文件工具在项目根目录下工作。
+- 文件修改使用职责明确的 `create_file`、`append_file`、`edit_file` 和
+  `replace_file`。`replace_file` 必须提供当前 SHA-256，可先通过
+  `file_manager` 的 `inspect_file` 操作获取。
+- 修改现有文件前会在 `data/file_snapshots/YYYY/MM/DD/` 下创建快照，成功后会按最终
+  文件内容验证修改结果。`bash` 命令执行成功不等同于结构化文件修改成功。
 - 管理 API 和面板默认只允许本机访问。
 - Webhook endpoint 只有在你明确暴露给平台回调时才有意义。
 - `.env` 包含密钥，必须保持本地。
-- `data/` 包含运行时状态、日志、会话、工具输出和适配器状态；除非明确导出某个文件，否则保持本地。
+- `data/` 包含运行时状态、日志、会话、文件快照、工具输出和适配器状态；除非明确导出某个文件，否则保持本地。
 
 ## License
 

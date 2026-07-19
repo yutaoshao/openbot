@@ -7,8 +7,11 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
+from src.agent.verification import verify_final_response
 from src.core.logging import get_logger
 from src.core.trace import TraceContext, current_trace
+
+from .stream_context import current_task_state
 
 logger = get_logger(__name__)
 
@@ -18,6 +21,32 @@ class _BackgroundTraceInfo:
     interaction_id: str
     platform: str
     parent_trace_id: str
+
+
+async def verify_and_publish_final_response(
+    agent: Any,
+    *,
+    conversation_id: str,
+    platform: str,
+    final_text: str,
+    iterations: int,
+    all_tool_calls: list[dict[str, Any]],
+) -> str:
+    """Verify the response and publish successful harness completion."""
+    task_state = current_task_state(agent, conversation_id)
+    verified_text, verified = verify_final_response(
+        final_text,
+        tool_calls_made=all_tool_calls,
+        task_state=task_state,
+    )
+    if verified:
+        event_payload = {
+            "conversation_id": conversation_id,
+            "platform": platform,
+            "iterations": iterations,
+        }
+        await agent.event_bus.publish("harness.completion_verified", event_payload)
+    return verified_text
 
 
 async def finalize_agent_run(

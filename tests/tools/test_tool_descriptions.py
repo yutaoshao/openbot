@@ -16,6 +16,8 @@ from src.tools.builtin import (
     WebFetchTool,
     WebSearchTool,
 )
+from src.tools.builtin.file_mutation_tools import AppendFileTool, CreateFileTool, ReplaceFileTool
+from src.tools.file_mutation_service import FileMutationService
 from src.tools.registry import ToolRegistry
 
 if TYPE_CHECKING:
@@ -26,13 +28,17 @@ DESCRIPTION_PHRASES = ("Use when", "Do not use when")
 
 def test_builtin_tool_descriptions_use_three_part_contract(tmp_path: Path) -> None:
     registry = ToolRegistry()
+    mutation_service = FileMutationService(tmp_path)
     tools = [
         ToolSearchTool(registry),
         WebSearchTool(),
         WebFetchTool(),
         CodeExecutorTool(),
         FileManagerTool(root=tmp_path),
-        EditFileTool(root=tmp_path),
+        CreateFileTool(mutation_service),
+        AppendFileTool(mutation_service),
+        EditFileTool(mutation_service),
+        ReplaceFileTool(mutation_service),
         BashTool(root=tmp_path),
         GlobTool(root=tmp_path),
         GrepTool(root=tmp_path),

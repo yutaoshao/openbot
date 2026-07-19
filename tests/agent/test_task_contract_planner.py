@@ -1,12 +1,18 @@
 from __future__ import annotations
 
-from src.agent.runtime.write_retry import needs_file_write_retry
+from typing import TYPE_CHECKING
+
+from src.agent.runtime.file_write_verification import file_write_verification_failure
 from src.agent.state.task_contract import ACTION_FILE_WRITE, ACTION_SCHEDULE_CREATE
 from src.agent.state.task_contract_planner import (
     plan_scheduled_task_contract,
     plan_task_contract,
 )
 from src.infrastructure.model_gateway import ModelResponse
+from tests.file_mutation_facts import created_file_effect, executed_mutation_call
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 class PlannerGateway:
@@ -80,7 +86,7 @@ async def test_planner_does_not_enforce_model_guessed_file_path() -> None:
     assert requirement.target_paths == ()
 
 
-async def test_planner_accepts_actual_write_when_model_path_was_guessed() -> None:
+async def test_planner_accepts_actual_write_when_model_path_was_guessed(tmp_path: Path) -> None:
     contract = await plan_task_contract(
         GuessedPathGateway(),
         "#人类简史－读书笔记\n第二章 我们最早的先人\n没人知道当时真实的情况是什么样的。",
@@ -90,24 +96,16 @@ async def test_planner_accepts_actual_write_when_model_path_was_guessed() -> Non
         ],
         task_state=None,
     )
-    tool_calls = [
-        {
-            "name": "file_manager",
-            "is_error": False,
-            "effects": [
-                {
-                    "action": "file.write",
-                    "effect": "file_written",
-                    "name": "file_manager",
-                    "status": "completed",
-                    "target_type": "file",
-                    "target": "data/reading_notes/人类简史.md",
-                }
-            ],
-        }
-    ]
+    effect = created_file_effect(tmp_path, "data/reading_notes/人类简史.md")
 
-    assert not needs_file_write_retry(contract, tool_calls)
+    assert (
+        file_write_verification_failure(
+            contract,
+            [executed_mutation_call(effect)],
+            project_root=tmp_path,
+        )
+        is None
+    )
 
 
 async def test_scheduled_task_planner_does_not_require_schedule_creation() -> None:
