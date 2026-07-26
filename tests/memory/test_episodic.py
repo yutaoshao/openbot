@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import json
 from types import SimpleNamespace
+from typing import Any
 
+from src.agent.turn_outcome import FailedTurn
 from src.infrastructure.model_gateway import ModelResponse
 from src.memory.episodic import EpisodicMemory, _normalize_embedding
 from src.memory.episodic.helpers import sanitize_title
@@ -52,6 +54,22 @@ class _RecordingGateway:
     async def chat(self, messages: list[dict[str, str]]) -> ModelResponse:
         self.calls.append(messages)
         return ModelResponse(text=self.text)
+
+
+class _MessageStorage:
+    def __init__(self, messages: list[dict[str, Any]]) -> None:
+        self._messages = messages
+
+    async def get_by_conversation(self, _conversation_id: str) -> list[dict[str, Any]]:
+        return list(self._messages)
+
+
+class _ConversationStorage:
+    def __init__(self) -> None:
+        self.updates: list[tuple[str, dict[str, str]]] = []
+
+    async def update(self, conversation_id: str, **fields: str) -> None:
+        self.updates.append((conversation_id, fields))
 
 
 def test_normalize_embedding_returns_unit_vector() -> None:
@@ -114,6 +132,39 @@ async def test_generate_summary_sends_transcript_as_final_user_message() -> None
     assert summary == "Two sentence summary."
     assert gateway.calls[0][-1]["role"] == "user"
     assert "Conversation transcript:" in gateway.calls[0][-1]["content"]
+
+
+async def test_conversation_archive_excludes_failed_turns() -> None:
+    failure_metadata = FailedTurn("failed reply", reason="stop_verification").message_metadata()
+    message_storage = _MessageStorage(
+        [
+            {"role": "user", "content": "failed request"},
+            {
+                "role": "assistant",
+                "content": "failed reply",
+                "metadata": failure_metadata,
+            },
+            {"role": "user", "content": "completed request"},
+            {"role": "assistant", "content": "completed reply"},
+        ]
+    )
+    conversation_storage = _ConversationStorage()
+    gateway = _RecordingGateway("Archived conversation")
+    episodic = EpisodicMemory(
+        storage=SimpleNamespace(messages=message_storage, conversations=conversation_storage),
+        model_gateway=gateway,
+        embedding_service=_FakeEmbeddingService(),
+        db=_FakeDatabase(_FakeConnection()),
+    )
+
+    await episodic.on_conversation_end("conv-1", "user-1")
+
+    prompts = "\n".join(message["content"] for call in gateway.calls for message in call)
+    assert "failed request" not in prompts
+    assert "failed reply" not in prompts
+    assert "completed request" in prompts
+    assert "completed reply" in prompts
+    assert conversation_storage.updates
 
 
 def test_sanitize_title_normalizes_markdown_and_whitespace() -> None:

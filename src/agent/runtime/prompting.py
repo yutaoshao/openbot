@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from src.agent.conversation.message_flow import UserMessageArchiveMetadata
 from src.agent.prompts import build_prompt_fragments
 from src.core.user_scope import SINGLE_USER_ID
 from src.memory.message_format import render_llm_message
+
+if TYPE_CHECKING:
+    from src.agent.runtime.turn_request import TurnRequest
 
 DEFAULT_SYSTEM_PROMPT = """You are OpenBot, a helpful personal AI assistant.
 
@@ -57,55 +60,62 @@ def build_system_prompt(
 
 async def prepare_agent_turn(
     agent: Any,
-    input_text: str,
-    conversation_id: str,
-    platform: str,
-    user_id: str,
-    message_timestamp: datetime,
-    source_message_id: str = "",
-    platform_user_id: str = "",
-) -> tuple[list[dict[str, Any]], list[dict[str, Any]] | None]:
-    """Build messages and tool schemas for the current turn."""
-    resolved_user_id = user_id or SINGLE_USER_ID
-    if agent.conversation_manager and conversation_id:
-        await agent.conversation_manager.get_or_create_conversation(
-            conversation_id,
-            platform,
-            resolved_user_id,
-            agent.config.token_budget,
-        )
-        await agent.conversation_manager.add_user_message(
-            conversation_id,
-            input_text,
-            timestamp=message_timestamp,
-            archive_metadata=UserMessageArchiveMetadata(
-                source_message_id=source_message_id,
-                platform_user_id=platform_user_id,
-                user_id=resolved_user_id,
-            ),
-        )
-        task_state = agent.conversation_manager.get_task_state(conversation_id)
-        messages = await agent.conversation_manager.build_messages(
-            conversation_id,
-            build_system_prompt(agent, input_text=input_text, task_state=task_state),
-            input_text,
-            resolved_user_id,
-            message_timestamp=message_timestamp,
-        )
-    else:
-        task_state = None
-        messages = [
-            {
-                "role": "system",
-                "content": build_system_prompt(agent, input_text=input_text, task_state=task_state),
-            },
-            render_llm_message(
-                {"role": "user", "content": input_text, "timestamp": message_timestamp}
-            ),
-        ]
+    request: TurnRequest,
+) -> list[dict[str, Any]]:
+    """Build model messages for the current turn."""
+    if not agent.conversation_manager or not request.conversation_id:
+        return _standalone_turn_messages(agent, request)
+    return await _conversation_turn_messages(agent, request)
 
-    tools = resolve_tools(agent, input_text, task_state=task_state)
-    return messages, tools
+
+async def _conversation_turn_messages(
+    agent: Any,
+    request: TurnRequest,
+) -> list[dict[str, Any]]:
+    resolved_user_id = request.user_id or SINGLE_USER_ID
+    await agent.conversation_manager.get_or_create_conversation(
+        request.conversation_id,
+        request.platform,
+        resolved_user_id,
+        agent.config.token_budget,
+    )
+    await agent.conversation_manager.add_user_message(
+        request.conversation_id,
+        request.input_text,
+        timestamp=request.message_timestamp,
+        archive_metadata=UserMessageArchiveMetadata(
+            source_message_id=request.source_message_id,
+            platform_user_id=request.platform_user_id,
+            user_id=resolved_user_id,
+        ),
+    )
+    task_state = agent.conversation_manager.get_task_state(request.conversation_id)
+    return await agent.conversation_manager.build_messages(
+        request.conversation_id,
+        build_system_prompt(agent, input_text=request.input_text, task_state=task_state),
+        request.input_text,
+        resolved_user_id,
+        message_timestamp=request.message_timestamp,
+    )
+
+
+def _standalone_turn_messages(
+    agent: Any,
+    request: TurnRequest,
+) -> list[dict[str, Any]]:
+    return [
+        {
+            "role": "system",
+            "content": build_system_prompt(agent, input_text=request.input_text),
+        },
+        render_llm_message(
+            {
+                "role": "user",
+                "content": request.input_text,
+                "timestamp": request.message_timestamp,
+            }
+        ),
+    ]
 
 
 def resolve_tools(

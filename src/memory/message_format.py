@@ -10,13 +10,14 @@ if TYPE_CHECKING:
     from collections.abc import Mapping
 
 _TIMESTAMPED_ROLES = {"user", "assistant"}
+_INTERNAL_MESSAGE_FIELDS = {"metadata", "timestamp"}
 _INTERNAL_TIMESTAMP_PREFIX = re.compile(r"^(?:\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}\]\s*)+")
 
 
 def render_llm_message(message: Mapping[str, Any]) -> dict[str, Any]:
     """Return a provider-safe message with timestamp rendered into content."""
     role = str(message.get("role", ""))
-    rendered = {key: value for key, value in message.items() if key != "timestamp"}
+    rendered = {key: value for key, value in message.items() if key not in _INTERNAL_MESSAGE_FIELDS}
     if role in _TIMESTAMPED_ROLES:
         rendered["content"] = timestamped_content(message)
     return rendered

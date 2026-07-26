@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import time
 from typing import TYPE_CHECKING, Any
 
 from src.agent.state.task_contract_planner import (
@@ -13,29 +12,23 @@ from src.agent.state.task_contract_resources import (
     agent_project_root,
     resolve_agent_contract_resources,
 )
+from src.agent.turn_outcome import CompletedTurn, FailedTurn, TurnOutcome, replace_turn_content
 from src.agent.verification.stop import ledger_from_tool_calls, verify_stop
-from src.core.logging import get_logger
 from src.infrastructure.model_gateway import StreamChunk, Usage
 from src.memory.message_format import strip_internal_timestamp_prefixes
 
 from . import prompting
-from .file_write_verification import file_write_verification_failure
 from .finalize import finalize_agent_run, verify_and_publish_final_response
-from .loop_helpers import (
-    accumulate_usage,
-    append_assistant_tool_calls,
-    cost_limit_text,
-    is_stuck,
-    reply_chunks,
-    timeout_text,
-)
-from .rounds import ModelRoundResult, model_round_events
+from .loop_helpers import reply_chunks
 from .stream_context import choose_route, current_task_state
-from .tool_calls import ToolExecutionBatch, execute_tool_calls_for_round
+from .turn_loop import TurnLoopExecution
+from .turn_loop_types import LoopCompletion, TurnLoopContext, TurnLoopSnapshot
 
-logger = get_logger(__name__)
 if TYPE_CHECKING:
-    from datetime import datetime
+    from collections.abc import AsyncIterator
+
+    from .turn_request import TurnRequest
+
 build_system_prompt = prompting.build_system_prompt
 prepare_agent_turn = prompting.prepare_agent_turn
 resolve_tools = prompting.resolve_tools
@@ -43,239 +36,119 @@ resolve_tools = prompting.resolve_tools
 
 async def run_stream_inner(
     agent: Any,
-    input_text: str,
-    conversation_id: str,
-    platform: str,
-    user_id: str,
-    ctx: Any,
-    *,
-    message_timestamp: datetime,
-    source_message_id: str = "",
-    platform_user_id: str = "",
-):
-    """Inner streaming loop with trace context active."""
-    messages, _ = await prepare_agent_turn(
-        agent,
-        input_text,
-        conversation_id,
-        platform,
-        user_id,
-        message_timestamp,
-        source_message_id,
-        platform_user_id,
-    )
-    route_decision = choose_route(
-        agent,
-        input_text,
-        current_task_state(agent, conversation_id),
-    )
-    await agent.event_bus.publish(
-        "agent.think.start",
-        {"conversation_id": conversation_id, "input_length": len(input_text)},
-    )
-
-    iterations = 0
-    total_tokens_in = 0
-    total_tokens_out = 0
-    total_cost_usd = 0.0
-    all_tool_calls: list[dict[str, Any]] = []
-    final_text = ""
-    final_model = ""
-    pending_final_chunks: list[StreamChunk] = []
-    pending_final_text = ""
-    task_start = time.monotonic()
-    recent_tool_sigs: list[str] = []
-    emit_final_text = False
-    contract_planner = (
-        plan_scheduled_task_contract if platform == "scheduler" else plan_task_contract
-    )
-    contract = resolve_agent_contract_resources(
-        await contract_planner(
-            agent.model_gateway,
-            input_text,
-            messages=messages,
-            task_state=current_task_state(agent, conversation_id),
-        ),
-        agent,
-    )
-    project_root = agent_project_root(agent)
-
-    while iterations < agent.max_iterations:
-        task_state = current_task_state(agent, conversation_id)
-        current_tools = resolve_tools(agent, input_text, task_state=task_state)
-        timeout_message = timeout_text(agent, task_start, iterations)
-        if timeout_message:
-            final_text = timeout_message
-            emit_final_text = True
-            break
-
-        iterations += 1
-        ctx.iteration = iterations
-        logger.info(
-            "thought_step",
-            surface="cognitive",
-            iteration=iterations,
-            max_iterations=agent.max_iterations,
-        )
-
-        round_result = None
-        round_text_chunks: list[StreamChunk] = []
-        async for event in model_round_events(
-            agent,
-            messages,
-            current_tools,
-            route_decision=route_decision,
-        ):
-            if isinstance(event, StreamChunk):
-                if event.type == "text":
-                    round_text_chunks.append(event)
-            else:
-                round_result = event
-        assert isinstance(round_result, ModelRoundResult)
-        final_model = round_result.model or final_model
-        total_tokens_in, total_tokens_out, total_cost_usd = accumulate_usage(
-            total_tokens_in,
-            total_tokens_out,
-            total_cost_usd,
-            round_result.usage,
-        )
-
-        if not round_result.collected_tool_calls:
-            logger.info(
-                "decision_made",
-                surface="cognitive",
-                decision="final_reply",
-                iteration=iterations,
-            )
-            file_write_failure = file_write_verification_failure(
-                contract,
-                all_tool_calls,
-                project_root=project_root,
-            )
-            if file_write_failure:
-                final_text = file_write_failure
-                emit_final_text = True
-                logger.warning(
-                    "task_failed",
-                    surface="operational",
-                    reason="file_mutation_unverified",
-                    iterations=iterations,
-                )
-                break
-            final_text = round_result.accumulated_text
-            pending_final_text = final_text
-            pending_final_chunks = round_text_chunks
-            break
-
-        cost_limit_message = cost_limit_text(agent, total_cost_usd, iterations)
-        if cost_limit_message:
-            final_text = cost_limit_message
-            emit_final_text = True
-            break
-
-        logger.info(
-            "decision_made",
-            surface="cognitive",
-            decision="tool_calls",
-            tool_count=len(round_result.collected_tool_calls),
-            tools=[tool_call.name for tool_call in round_result.collected_tool_calls],
-            iteration=iterations,
-        )
-        append_assistant_tool_calls(
-            messages,
-            accumulated_text=round_result.accumulated_text,
-            reasoning_content=round_result.reasoning_content,
-            collected_tool_calls=round_result.collected_tool_calls,
-        )
-
-        batch = None
-        async for event in execute_tool_calls_for_round(
-            agent,
-            collected_tool_calls=round_result.collected_tool_calls,
-            conversation_id=conversation_id,
-            platform=platform,
-            task_state=task_state,
-            task_start=task_start,
-            task_timeout=agent.config.task_timeout,
-            iterations=iterations,
-            messages=messages,
-        ):
-            if isinstance(event, StreamChunk):
-                yield event
-            else:
-                batch = event
-        assert isinstance(batch, ToolExecutionBatch)
-        all_tool_calls.extend(batch.executed_calls)
-
-        if is_stuck(agent.config.stuck_detection_threshold, recent_tool_sigs, round_result):
-            final_text = (
-                "Agent appears stuck — repeating the same tool calls. "
-                "Stopping to avoid wasting resources."
-            )
-            emit_final_text = True
-            logger.warning(
-                "task_failed",
-                surface="operational",
-                reason="stuck_loop",
-                repeated_sig=recent_tool_sigs[-1][:200],
-                iterations=iterations,
-            )
-            break
-    else:
-        final_text = "Task exceeded maximum iterations."
-        emit_final_text = True
-        logger.warning(
-            "task_failed",
-            surface="operational",
-            reason="max_iterations",
-            iterations=iterations,
-        )
-
-    final_text = await verify_and_publish_final_response(
-        agent,
-        conversation_id=conversation_id,
-        platform=platform,
-        final_text=final_text,
-        iterations=iterations,
-        all_tool_calls=all_tool_calls,
-    )
-    final_text = strip_internal_timestamp_prefixes(final_text)
-    stop_decision = verify_stop(
-        contract,
-        final_text,
-        ledger_from_tool_calls(all_tool_calls),
-        project_root=project_root,
-    )
-    if stop_decision.message:
-        final_text = stop_decision.message
-        emit_final_text = True
-    final_text = strip_internal_timestamp_prefixes(final_text)
-    for chunk in reply_chunks(
-        final_text,
-        pending_final_text=pending_final_text,
-        pending_final_chunks=pending_final_chunks,
-        force_single_chunk=emit_final_text,
-    ):
-        yield chunk
+    request: TurnRequest,
+    trace_context: Any,
+) -> AsyncIterator[StreamChunk]:
+    """Prepare, execute, verify, persist, and stream one turn."""
+    execution = await _prepare_turn_loop(agent, request, trace_context)
+    completion: LoopCompletion | None = None
+    async for event in execution.events():
+        if isinstance(event, StreamChunk):
+            yield event
+        else:
+            completion = event
+    assert completion is not None
+    outcome = await _verified_stop_outcome(agent, completion)
+    snapshot = completion.snapshot
     await finalize_agent_run(
         agent,
-        conversation_id=conversation_id,
-        user_id=user_id,
-        content=final_text,
-        model=final_model,
-        tokens_in=total_tokens_in,
-        tokens_out=total_tokens_out,
+        conversation_id=snapshot.request.conversation_id,
+        outcome=outcome,
+        model=snapshot.final_model,
+        tokens_in=snapshot.tokens_in,
+        tokens_out=snapshot.tokens_out,
         latency_ms=0,
-        iterations=iterations,
-        all_tool_calls=all_tool_calls,
+        iterations=snapshot.iterations,
+        all_tool_calls=list(snapshot.tool_calls),
     )
-    yield StreamChunk(
+    for chunk in reply_chunks(
+        outcome.content,
+        pending_final_text=completion.pending_text,
+        pending_final_chunks=list(completion.pending_chunks),
+    ):
+        yield chunk
+    yield _done_chunk(snapshot)
+
+
+async def _prepare_turn_loop(
+    agent: Any,
+    request: TurnRequest,
+    trace_context: Any,
+) -> TurnLoopExecution:
+    messages = await prepare_agent_turn(agent, request)
+    task_state = current_task_state(agent, request.conversation_id)
+    route_decision = choose_route(agent, request.input_text, task_state)
+    await agent.event_bus.publish(
+        "agent.think.start",
+        {
+            "conversation_id": request.conversation_id,
+            "input_length": len(request.input_text),
+        },
+    )
+    planner = (
+        plan_scheduled_task_contract if request.platform == "scheduler" else plan_task_contract
+    )
+    contract = await planner(
+        agent.model_gateway,
+        request.input_text,
+        messages=messages,
+        task_state=task_state,
+    )
+    return TurnLoopExecution(
+        TurnLoopContext(
+            agent=agent,
+            request=request,
+            trace_context=trace_context,
+            messages=tuple(messages),
+            route_decision=route_decision,
+            contract=resolve_agent_contract_resources(contract, agent),
+            project_root=agent_project_root(agent),
+        )
+    )
+
+
+async def _verified_stop_outcome(
+    agent: Any,
+    completion: LoopCompletion,
+) -> TurnOutcome:
+    snapshot = completion.snapshot
+    outcome = await verify_and_publish_final_response(
+        agent,
+        conversation_id=snapshot.request.conversation_id,
+        platform=snapshot.request.platform,
+        outcome=completion.outcome,
+        iterations=snapshot.iterations,
+        all_tool_calls=list(snapshot.tool_calls),
+    )
+    outcome = _strip_internal_timestamps(outcome)
+    stop_decision = verify_stop(
+        snapshot.contract,
+        outcome.content,
+        ledger_from_tool_calls(list(snapshot.tool_calls)),
+        project_root=snapshot.project_root,
+    )
+    if stop_decision.message:
+        outcome = replace_turn_content(outcome, stop_decision.message)
+    if not stop_decision.allow and isinstance(outcome, CompletedTurn):
+        outcome = FailedTurn(outcome.content, reason="stop_verification")
+    return _strip_internal_timestamps(outcome)
+
+
+def _strip_internal_timestamps(outcome: TurnOutcome) -> TurnOutcome:
+    return replace_turn_content(
+        outcome,
+        strip_internal_timestamp_prefixes(outcome.content),
+    )
+
+
+def _done_chunk(snapshot: TurnLoopSnapshot) -> StreamChunk:
+    return StreamChunk(
         type="done",
         usage=Usage(
-            tokens_in=total_tokens_in,
-            tokens_out=total_tokens_out,
-            cost_usd=total_cost_usd,
+            tokens_in=snapshot.tokens_in,
+            tokens_out=snapshot.tokens_out,
+            cost_usd=snapshot.cost_usd,
         ),
-        model=final_model,
-        iterations=iterations,
+        model=snapshot.final_model,
+        iterations=snapshot.iterations,
     )

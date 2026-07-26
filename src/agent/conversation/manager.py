@@ -7,14 +7,10 @@ from typing import TYPE_CHECKING, Any
 from src.core.logging import get_logger
 from src.core.user_scope import SINGLE_USER_ID
 
+from . import archive_helpers as archive
 from . import message_flow as flow
-from .archive_helpers import (
-    background_trace_scope,
-    conversation_llm_messages,
-    conversation_platform,
-    pending_llm_messages,
-)
 from .compression import maybe_compress_shared_timeline
+from .memory_sync import sync_eligible_long_term_memory
 from .prompt_builder import PromptBuilder
 from .shared_timeline import SharedTimelineMemory
 from .task_state_store import TaskStateStore
@@ -25,6 +21,7 @@ if TYPE_CHECKING:
 
     from src.agent.conversation.journal import ConversationJournal
     from src.agent.state import TaskState
+    from src.agent.turn_outcome import FailedTurn
     from src.infrastructure.model_gateway import ModelGateway
     from src.infrastructure.storage import Storage
     from src.memory.episodic import EpisodicMemory
@@ -121,18 +118,40 @@ class ConversationManager:
         latency_ms: int = 0,
         tool_calls: list[dict[str, Any]] | None = None,
     ) -> None:
-        await flow.store_assistant_message(
+        await flow.store_completed_assistant_message(
             self._message_write_context(),
             conversation_id=conversation_id,
             content=content,
             timestamp=timestamp,
-            metadata={
-                "model": model,
-                "tokens_in": tokens_in,
-                "tokens_out": tokens_out,
-                "latency_ms": latency_ms,
-                "tool_calls": tool_calls,
-            },
+            model=model,
+            tokens_in=tokens_in,
+            tokens_out=tokens_out,
+            latency_ms=latency_ms,
+            tool_calls=tool_calls,
+        )
+
+    async def add_failed_assistant_message(
+        self,
+        conversation_id: str,
+        failed_turn: FailedTurn,
+        *,
+        timestamp: datetime,
+        model: str = "",
+        tokens_in: int = 0,
+        tokens_out: int = 0,
+        latency_ms: int = 0,
+        tool_calls: list[dict[str, Any]] | None = None,
+    ) -> None:
+        await flow.store_failed_assistant_message(
+            self._message_write_context(),
+            conversation_id=conversation_id,
+            failed_turn=failed_turn,
+            timestamp=timestamp,
+            model=model,
+            tokens_in=tokens_in,
+            tokens_out=tokens_out,
+            latency_ms=latency_ms,
+            tool_calls=tool_calls,
         )
 
     async def maybe_compress(self, conversation_id: str) -> None:
@@ -149,8 +168,8 @@ class ConversationManager:
             now=now,
         )
         for conversation_id in stale_ids:
-            platform = await conversation_platform(self._storage, conversation_id)
-            with background_trace_scope(
+            platform = await archive.conversation_platform(self._storage, conversation_id)
+            with archive.background_trace_scope(
                 conversation_id,
                 platform,
                 trigger="idle_prune",
@@ -162,35 +181,13 @@ class ConversationManager:
             logger.debug("conversation.evicted_idle", conversation_id=conversation_id)
 
     async def sync_memory_after_turn(self, conversation_id: str) -> None:
-        llm_messages, total_count = await pending_llm_messages(
-            self._storage,
-            conversation_id,
-            self._last_memory_sync_count.get(conversation_id, 0),
-        )
-        if total_count == self._last_memory_sync_count.get(conversation_id, 0):
-            logger.info(
-                "conversation.memory_sync_skipped",
-                conversation_id=conversation_id,
-                reason="no_new_messages",
-            )
-            return
-
-        await self._semantic.extract_knowledge(
-            llm_messages,
-            conversation_id,
-            SINGLE_USER_ID,
-        )
-        await self._procedural.observe(
-            llm_messages,
-            conversation_id,
-            SINGLE_USER_ID,
-        )
-        self._last_memory_sync_count[conversation_id] = total_count
-        logger.info(
-            "conversation.memory_synced",
+        cursor = self._last_memory_sync_count.get(conversation_id, 0)
+        self._last_memory_sync_count[conversation_id] = await sync_eligible_long_term_memory(
+            storage=self._storage,
+            semantic_memory=self._semantic,
+            procedural_memory=self._procedural,
             conversation_id=conversation_id,
-            user_id=SINGLE_USER_ID,
-            message_count=total_count,
+            cursor=cursor,
         )
 
     async def archive_idle_conversation(
@@ -199,7 +196,7 @@ class ConversationManager:
         *,
         clear_working_memory: bool,
     ) -> None:
-        llm_messages, total_count = await conversation_llm_messages(
+        llm_messages, total_count = await archive.conversation_llm_messages(
             self._storage,
             conversation_id,
         )

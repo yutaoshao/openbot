@@ -7,6 +7,12 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
+from src.agent.turn_outcome import (
+    CompletedTurn,
+    FailedTurn,
+    TurnOutcome,
+    replace_turn_content,
+)
 from src.agent.verification import verify_final_response
 from src.core.logging import get_logger
 from src.core.trace import TraceContext, current_trace
@@ -28,33 +34,33 @@ async def verify_and_publish_final_response(
     *,
     conversation_id: str,
     platform: str,
-    final_text: str,
+    outcome: TurnOutcome,
     iterations: int,
     all_tool_calls: list[dict[str, Any]],
-) -> str:
-    """Verify the response and publish successful harness completion."""
+) -> TurnOutcome:
+    """Turn vague post-tool responses into explicit failed outcomes."""
     task_state = current_task_state(agent, conversation_id)
-    verified_text, verified = verify_final_response(
-        final_text,
+    verified_text, rewritten = verify_final_response(
+        outcome.content,
         tool_calls_made=all_tool_calls,
         task_state=task_state,
     )
-    if verified:
+    if rewritten:
         event_payload = {
             "conversation_id": conversation_id,
             "platform": platform,
             "iterations": iterations,
         }
         await agent.event_bus.publish("harness.completion_verified", event_payload)
-    return verified_text
+        return FailedTurn(verified_text, reason="response_verification")
+    return replace_turn_content(outcome, verified_text)
 
 
 async def finalize_agent_run(
     agent: Any,
     *,
     conversation_id: str,
-    user_id: str,
-    content: str,
+    outcome: TurnOutcome,
     model: str,
     tokens_in: int,
     tokens_out: int,
@@ -73,14 +79,17 @@ async def finalize_agent_run(
             "tokens_in": tokens_in,
             "tokens_out": tokens_out,
             "tool_calls": len(all_tool_calls),
+            "turn_outcome": _outcome_name(outcome),
+            "failure_reason": _failure_reason(outcome),
         },
     )
 
     if agent.conversation_manager and conversation_id:
         timestamp = assistant_timestamp or datetime.now(UTC)
-        await agent.conversation_manager.add_assistant_message(
-            conversation_id,
-            content=content,
+        await _persist_turn(
+            agent,
+            conversation_id=conversation_id,
+            outcome=outcome,
             timestamp=timestamp,
             model=model,
             tokens_in=tokens_in,
@@ -88,7 +97,49 @@ async def finalize_agent_run(
             latency_ms=latency_ms,
             tool_calls=all_tool_calls or None,
         )
-        schedule_memory_finalize(agent, conversation_id)
+
+
+async def _persist_turn(
+    agent: Any,
+    *,
+    conversation_id: str,
+    outcome: TurnOutcome,
+    timestamp: datetime,
+    model: str,
+    tokens_in: int,
+    tokens_out: int,
+    latency_ms: int,
+    tool_calls: list[dict[str, Any]] | None,
+) -> None:
+    message_fields = {
+        "timestamp": timestamp,
+        "model": model,
+        "tokens_in": tokens_in,
+        "tokens_out": tokens_out,
+        "latency_ms": latency_ms,
+        "tool_calls": tool_calls,
+    }
+    if isinstance(outcome, FailedTurn):
+        await agent.conversation_manager.add_failed_assistant_message(
+            conversation_id,
+            failed_turn=outcome,
+            **message_fields,
+        )
+        return
+    await agent.conversation_manager.add_assistant_message(
+        conversation_id,
+        content=outcome.content,
+        **message_fields,
+    )
+    schedule_memory_finalize(agent, conversation_id)
+
+
+def _outcome_name(outcome: TurnOutcome) -> str:
+    return "completed" if isinstance(outcome, CompletedTurn) else "failed"
+
+
+def _failure_reason(outcome: TurnOutcome) -> str:
+    return outcome.reason if isinstance(outcome, FailedTurn) else ""
 
 
 def schedule_memory_finalize(agent: Any, conversation_id: str) -> None:
@@ -114,7 +165,6 @@ async def run_memory_finalize(
     wait_for: asyncio.Task[None] | None,
     trace_info: _BackgroundTraceInfo,
 ) -> None:
-    """Serialize post-response memory work per conversation."""
     if wait_for is not None:
         try:
             await wait_for

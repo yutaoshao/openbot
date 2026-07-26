@@ -17,6 +17,7 @@ if TYPE_CHECKING:
     from src.agent.conversation.journal import ConversationJournal
     from src.agent.conversation.shared_timeline import SharedTimelineMemory
     from src.agent.conversation.task_state_store import TaskStateStore
+    from src.agent.turn_outcome import FailedTurn
     from src.infrastructure.storage import Storage
 
 
@@ -68,7 +69,66 @@ async def store_user_message(
     )
 
 
-async def store_assistant_message(
+async def store_completed_assistant_message(
+    context: MessageWriteContext,
+    *,
+    conversation_id: str,
+    content: str,
+    timestamp: datetime,
+    model: str,
+    tokens_in: int,
+    tokens_out: int,
+    latency_ms: int,
+    tool_calls: list[dict[str, Any]] | None,
+) -> None:
+    clean_content = strip_internal_timestamp_prefixes(content)
+    context.task_store.note_assistant_reply(conversation_id, clean_content)
+    await _store_assistant_message(
+        context,
+        conversation_id=conversation_id,
+        content=clean_content,
+        timestamp=timestamp,
+        metadata=_execution_metadata(
+            model=model,
+            tokens_in=tokens_in,
+            tokens_out=tokens_out,
+            latency_ms=latency_ms,
+            tool_calls=tool_calls,
+        ),
+    )
+
+
+async def store_failed_assistant_message(
+    context: MessageWriteContext,
+    *,
+    conversation_id: str,
+    failed_turn: FailedTurn,
+    timestamp: datetime,
+    model: str,
+    tokens_in: int,
+    tokens_out: int,
+    latency_ms: int,
+    tool_calls: list[dict[str, Any]] | None,
+) -> None:
+    clean_content = strip_internal_timestamp_prefixes(failed_turn.content)
+    execution_metadata = _execution_metadata(
+        model=model,
+        tokens_in=tokens_in,
+        tokens_out=tokens_out,
+        latency_ms=latency_ms,
+        tool_calls=tool_calls,
+    )
+    execution_metadata["metadata"] = failed_turn.message_metadata()
+    await _store_assistant_message(
+        context,
+        conversation_id=conversation_id,
+        content=clean_content,
+        timestamp=timestamp,
+        metadata=execution_metadata,
+    )
+
+
+async def _store_assistant_message(
     context: MessageWriteContext,
     *,
     conversation_id: str,
@@ -77,29 +137,59 @@ async def store_assistant_message(
     metadata: dict[str, Any],
 ) -> None:
     storage_message_id = uuid.uuid4().hex
-    clean_content = strip_internal_timestamp_prefixes(content)
-    context.task_store.note_assistant_reply(conversation_id, clean_content)
     await _append_to_shared_timeline(
         context,
         conversation_id=conversation_id,
-        message={"role": "assistant", "content": clean_content, "timestamp": timestamp},
+        message=_assistant_timeline_message(content, timestamp, metadata),
     )
     await context.storage.messages.add(
         id=storage_message_id,
         conversation_id=conversation_id,
         role="assistant",
-        content=clean_content,
+        content=content,
         timestamp=timestamp,
         **metadata,
     )
     await _append_assistant_journal(
         context,
         conversation_id=conversation_id,
-        content=clean_content,
+        content=content,
         timestamp=timestamp,
         storage_message_id=storage_message_id,
         metadata=metadata,
     )
+
+
+def _assistant_timeline_message(
+    content: str,
+    timestamp: datetime,
+    execution_metadata: dict[str, Any],
+) -> dict[str, Any]:
+    timeline_message: dict[str, Any] = {
+        "role": "assistant",
+        "content": content,
+        "timestamp": timestamp,
+    }
+    if "metadata" in execution_metadata:
+        timeline_message["metadata"] = execution_metadata["metadata"]
+    return timeline_message
+
+
+def _execution_metadata(
+    *,
+    model: str,
+    tokens_in: int,
+    tokens_out: int,
+    latency_ms: int,
+    tool_calls: list[dict[str, Any]] | None,
+) -> dict[str, Any]:
+    return {
+        "model": model,
+        "tokens_in": tokens_in,
+        "tokens_out": tokens_out,
+        "latency_ms": latency_ms,
+        "tool_calls": tool_calls,
+    }
 
 
 async def _append_to_shared_timeline(

@@ -6,6 +6,7 @@ import json
 from typing import TYPE_CHECKING, Any
 
 from src.core.logging import get_logger
+from src.memory.turn_selection import select_memory_batch
 
 from .helpers import (
     SUMMARY_SYSTEM_PROMPT,
@@ -56,12 +57,13 @@ class EpisodicMemory:
             )
             return
 
-        llm_messages = format_messages_for_llm(messages)
+        archivable_turns = select_memory_batch(messages, cursor=0)
+        llm_messages = format_messages_for_llm(list(archivable_turns.messages))
         if not llm_messages:
             logger.warning(
                 "episodic.archive_skipped",
                 conversation_id=conversation_id,
-                reason="no_content",
+                reason="no_eligible_turns",
             )
             return
 

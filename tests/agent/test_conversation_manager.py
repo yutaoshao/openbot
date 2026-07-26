@@ -201,8 +201,8 @@ async def test_prune_idle_conversations_archives_stale_working_memories() -> Non
     assert manager.get_task_state("stale-conv") is None
     assert manager.get_task_state("fresh-conv") is not None
     assert episodic.ended == [("stale-conv", SINGLE_USER_ID)]
-    assert [item[:2] for item in semantic.extracted] == [("stale-conv", SINGLE_USER_ID)]
-    assert [item[:2] for item in procedural.observed] == [("stale-conv", SINGLE_USER_ID)]
+    assert semantic.extracted == []
+    assert procedural.observed == []
 
 
 async def test_build_messages_uses_shared_cross_platform_timeline() -> None:

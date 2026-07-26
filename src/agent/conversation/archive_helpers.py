@@ -6,6 +6,7 @@ from typing import Any
 
 from src.core.trace import TraceContext
 from src.memory.message_format import render_llm_message
+from src.memory.turn_selection import select_memory_batch
 
 
 async def conversation_platform(storage: Any, conversation_id: str) -> str:
@@ -21,8 +22,8 @@ async def pending_llm_messages(
     cursor: int,
 ) -> tuple[list[dict[str, Any]], int]:
     messages = await storage.messages.get_by_conversation(conversation_id)
-    total_count = len(messages)
-    return llm_messages(messages[cursor:]), total_count
+    memory_batch = select_memory_batch(messages, cursor)
+    return llm_messages(list(memory_batch.messages)), memory_batch.next_cursor
 
 
 async def conversation_llm_messages(

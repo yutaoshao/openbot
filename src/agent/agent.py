@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
-from src.agent.runtime import execute_tool_call, run_stream_inner
+from src.agent.runtime import TurnRequest, execute_tool_call, run_stream_inner
 from src.core.trace import TraceContext, current_trace
 from src.tools.hooks import ToolHookManager, ToolSearchActivationHook
 
@@ -82,9 +82,9 @@ class Agent:
 
         async for chunk in self.run_stream(
             input_text,
-            conversation_id,
-            platform,
-            user_id,
+            conversation_id=conversation_id,
+            platform=platform,
+            user_id=user_id,
             message_timestamp=message_timestamp,
             source_message_id=source_message_id,
             platform_user_id=platform_user_id,
@@ -134,14 +134,16 @@ class Agent:
             try:
                 async for chunk in run_stream_inner(
                     self,
-                    input_text,
-                    conversation_id,
-                    platform,
-                    user_id,
+                    TurnRequest(
+                        input_text=input_text,
+                        conversation_id=conversation_id,
+                        platform=platform,
+                        user_id=user_id,
+                        message_timestamp=resolved_timestamp,
+                        source_message_id=source_message_id,
+                        platform_user_id=platform_user_id,
+                    ),
                     ctx,
-                    message_timestamp=resolved_timestamp,
-                    source_message_id=source_message_id,
-                    platform_user_id=platform_user_id,
                 ):
                     yield chunk
             finally:

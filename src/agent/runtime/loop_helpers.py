@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-import time
+from dataclasses import dataclass
 from typing import Any
 
 from src.core.logging import get_logger
@@ -12,25 +12,30 @@ from src.infrastructure.model_gateway import StreamChunk, Usage
 logger = get_logger(__name__)
 
 
+@dataclass(frozen=True, kw_only=True)
+class UsageTotals:
+    tokens_in: int = 0
+    tokens_out: int = 0
+    cost_usd: float = 0.0
+
+
 def reply_chunks(
     final_text: str,
     *,
     pending_final_text: str,
     pending_final_chunks: list[StreamChunk],
-    force_single_chunk: bool,
 ) -> list[StreamChunk]:
     if not final_text:
         return []
-    if not force_single_chunk and final_text == pending_final_text:
+    if final_text == pending_final_text:
         return pending_final_chunks or [StreamChunk(type="text", text=final_text)]
     return [StreamChunk(type="text", text=final_text)]
 
 
-def timeout_text(agent: Any, task_start: float, iterations: int) -> str:
+def timeout_text(agent: Any, elapsed: float, iterations: int) -> str:
     task_timeout = agent.config.task_timeout
     if task_timeout <= 0:
         return ""
-    elapsed = time.monotonic() - task_start
     if elapsed < task_timeout:
         return ""
     logger.warning(
@@ -44,17 +49,15 @@ def timeout_text(agent: Any, task_start: float, iterations: int) -> str:
 
 
 def accumulate_usage(
-    tokens_in: int,
-    tokens_out: int,
-    cost_usd: float,
+    totals: UsageTotals,
     usage: Usage | None,
-) -> tuple[int, int, float]:
+) -> UsageTotals:
     if usage is None:
-        return tokens_in, tokens_out, cost_usd
-    return (
-        tokens_in + usage.tokens_in,
-        tokens_out + usage.tokens_out,
-        cost_usd + usage.cost_usd,
+        return totals
+    return UsageTotals(
+        tokens_in=totals.tokens_in + usage.tokens_in,
+        tokens_out=totals.tokens_out + usage.tokens_out,
+        cost_usd=totals.cost_usd + usage.cost_usd,
     )
 
 

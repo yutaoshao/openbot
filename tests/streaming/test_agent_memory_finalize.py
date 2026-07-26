@@ -5,6 +5,9 @@ from datetime import UTC, datetime
 from typing import Any
 
 from src.agent.agent import Agent
+from src.agent.runtime.finalize import verify_and_publish_final_response
+from src.agent.state import TaskState
+from src.agent.turn_outcome import CompletedTurn, FailedTurn
 from src.core.config import AgentConfig
 from src.core.trace import current_trace, trace_scope
 from src.infrastructure.model_gateway import StreamChunk, Usage
@@ -36,6 +39,12 @@ class FakeStreamingGateway:
         )
 
 
+class VagueReplyGateway:
+    async def model_round_chunks(self, *_args: object, **_kwargs: object):
+        yield StreamChunk(type="text", text="done")
+        yield StreamChunk(type="done", usage=Usage(tokens_in=3, tokens_out=1))
+
+
 class FakeConversationManager:
     def __init__(self) -> None:
         self.compress_started = asyncio.Event()
@@ -47,6 +56,8 @@ class FakeConversationManager:
         self.sync_triggers: list[str] = []
         self.user_timestamps: list[datetime] = []
         self.assistant_timestamps: list[datetime] = []
+        self.failed_turns: list[FailedTurn] = []
+        self.task_state: TaskState | None = None
 
     async def get_or_create_conversation(
         self,
@@ -81,12 +92,21 @@ class FakeConversationManager:
             {"role": "user", "content": user_input},
         ]
 
-    def get_task_state(self, conversation_id: str) -> None:
-        return None
+    def get_task_state(self, conversation_id: str) -> TaskState | None:
+        return self.task_state
 
     async def add_assistant_message(self, conversation_id: str, **kwargs: Any) -> None:
         self.assistant_timestamps.append(kwargs["timestamp"])
         return None
+
+    async def add_failed_assistant_message(
+        self,
+        conversation_id: str,
+        failed_turn: FailedTurn,
+        **kwargs: Any,
+    ) -> None:
+        self.assistant_timestamps.append(kwargs["timestamp"])
+        self.failed_turns.append(failed_turn)
 
     async def maybe_compress(self, conversation_id: str) -> None:
         self.compress_started.set()
@@ -206,3 +226,71 @@ async def test_background_memory_sync_uses_child_trace_context() -> None:
     assert conversation_manager.sync_trace_ids[0] != trace.trace_id
     assert conversation_manager.sync_interaction_ids == ["conv-1"]
     assert conversation_manager.sync_triggers == ["post_reply_sync"]
+
+
+async def test_failed_turn_is_persisted_without_background_memory_sync() -> None:
+    conversation_manager = FakeConversationManager()
+    agent = Agent(
+        model_gateway=VagueReplyGateway(),
+        event_bus=FakeEventBus(),
+        config=AgentConfig(max_iterations=3),
+        tool_registry=None,
+        conversation_manager=conversation_manager,
+    )
+
+    response = await agent.run("hello", conversation_id="conv-failed", platform="wechat")
+
+    assert "本轮未完成" in response.content
+    assert [failure.reason for failure in conversation_manager.failed_turns] == [
+        "stop_verification"
+    ]
+    assert "conv-failed" not in agent._memory_finalize_tasks
+    assert conversation_manager.compress_calls == []
+    assert conversation_manager.sync_calls == []
+
+
+async def test_failed_turn_is_persisted_before_final_text_is_consumed() -> None:
+    conversation_manager = FakeConversationManager()
+    agent = Agent(
+        model_gateway=VagueReplyGateway(),
+        event_bus=FakeEventBus(),
+        config=AgentConfig(max_iterations=3),
+        conversation_manager=conversation_manager,
+    )
+    stream = agent.run_stream(
+        "hello",
+        conversation_id="conv-cancelled",
+        platform="wechat",
+    )
+
+    first_chunk = await anext(stream)
+    assert first_chunk.type == "text"
+    assert [failure.reason for failure in conversation_manager.failed_turns] == [
+        "stop_verification"
+    ]
+
+    await stream.aclose()
+    assert "conv-cancelled" not in agent._memory_finalize_tasks
+
+
+async def test_vague_post_tool_reply_becomes_typed_failed_outcome() -> None:
+    conversation_manager = FakeConversationManager()
+    conversation_manager.task_state = TaskState(objective="inspect logs")
+    agent = Agent(
+        model_gateway=FakeStreamingGateway(),
+        event_bus=FakeEventBus(),
+        config=AgentConfig(max_iterations=3),
+        conversation_manager=conversation_manager,
+    )
+
+    outcome = await verify_and_publish_final_response(
+        agent,
+        conversation_id="conv-1",
+        platform="wechat",
+        outcome=CompletedTurn("done"),
+        iterations=1,
+        all_tool_calls=[{"name": "file_manager"}],
+    )
+
+    assert isinstance(outcome, FailedTurn)
+    assert outcome.reason == "response_verification"

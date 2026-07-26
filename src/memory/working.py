@@ -14,7 +14,8 @@ from typing import TYPE_CHECKING, Any
 from src.core.logging import get_logger
 from src.memory.history_references import history_file_references
 from src.memory.message_format import render_llm_message
-from src.memory.structured_json import parse_json_array_response
+from src.memory.turn_selection import select_long_term_memory_prefix
+from src.memory.working_compaction import extract_memory_items, summarize_messages
 
 if TYPE_CHECKING:
     from src.infrastructure.model_gateway import ModelGateway
@@ -22,56 +23,6 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 CHARS_PER_TOKEN = 4
-
-_COMPRESS_PROMPT = """\
-Summarise the following conversation messages concisely.
-Preserve:
-- Key decisions and action items
-- Important facts and conclusions
-- Entity names, technical terms, and specific values
-- User preferences and constraints
-
-Discard greetings, filler, and redundant exchanges.
-Return ONLY the summary text, nothing else.
-
-Messages:
-{messages}
-"""
-
-_EXTRACT_PROMPT = """\
-Analyse the following conversation messages and extract important \
-knowledge items that should be remembered long-term.
-
-For each item, classify it into exactly one category:
-- fact      : concrete information, data points, stated truths
-- concept   : ideas, explanations, mental models
-- procedure : how-to steps, workflows, user preferences on process
-
-Filter out noise (greetings, filler, acknowledgements).
-
-Return ONLY a raw JSON array of objects with keys "category" and "content".
-Example:
-[
-  {{"category": "fact", "content": "User's timezone is Asia/Shanghai"}},
-  {{"category": "procedure", "content": "Deploy via 'make release' then tag"}}
-]
-
-Do not include markdown fences, explanations, or tool calls.
-If nothing worth extracting, return an empty array: []
-
-Messages:
-{messages}
-"""
-
-
-def _format_messages(messages: list[dict[str, Any]]) -> str:
-    """Render a message list into a compact text block for LLM prompts."""
-    parts: list[str] = []
-    for msg in messages:
-        role = msg.get("role", "unknown")
-        content = render_llm_message(msg).get("content", "")
-        parts.append(f"[{role}] {content}")
-    return "\n".join(parts)
 
 
 class WorkingMemory:
@@ -88,10 +39,6 @@ class WorkingMemory:
         self._pinned: list[dict[str, Any]] = []  # never compressed
         self._protected: OrderedDict[str, str] = OrderedDict()
         self._summary: str | None = None  # compressed summary
-
-    # ------------------------------------------------------------------
-    # Public interface
-    # ------------------------------------------------------------------
 
     def add(self, message: dict[str, Any]) -> None:
         """Add a message (role, content) to working memory."""
@@ -171,6 +118,23 @@ class WorkingMemory:
         """True if estimated tokens exceed the budget."""
         return self.estimate_tokens() > self._token_budget
 
+    def _compression_segments(
+        self,
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]] | None:
+        midpoint = len(self._messages) // 2
+        memory_prefix = select_long_term_memory_prefix(self._messages, midpoint)
+        if memory_prefix.next_cursor == 0:
+            logger.info(
+                "working_memory.compress.skip",
+                conversation_id=self._conversation_id,
+                reason="no_closed_turn",
+            )
+            return None
+        return (
+            list(memory_prefix.messages),
+            self._messages[memory_prefix.next_cursor :],
+        )
+
     async def compress(self, model_gateway: ModelGateway) -> str:
         """Compress older messages via LLM summarisation.
 
@@ -186,41 +150,39 @@ class WorkingMemory:
             )
             return self._summary or ""
 
-        midpoint = len(self._messages) // 2
-        older = self._messages[:midpoint]
-        recent = self._messages[midpoint:]
-
-        prompt = _COMPRESS_PROMPT.format(
-            messages=_format_messages(older),
-        )
-
+        segments = self._compression_segments()
+        if segments is None:
+            return self._summary or ""
+        older, recent = segments
+        if not older:
+            self._messages = recent
+            logger.info(
+                "working_memory.compress.skip_summary",
+                conversation_id=self._conversation_id,
+                reason="no_eligible_messages",
+            )
+            return self._summary or ""
         logger.info(
             "working_memory.compress.start",
             conversation_id=self._conversation_id,
             older_count=len(older),
             recent_count=len(recent),
         )
-
-        response = await model_gateway.chat(
-            messages=[{"role": "user", "content": prompt}],
+        summary = await summarize_messages(
+            model_gateway=model_gateway,
+            messages=older,
         )
-
-        new_summary = _summary_with_history_references(response.text.strip(), older)
-
-        # Merge with any existing summary
+        new_summary = _summary_with_history_references(summary, older)
         if self._summary:
             new_summary = f"{self._summary}\n\n{new_summary}"
-
         self._summary = new_summary
         self._messages = recent
-
         logger.info(
             "working_memory.compress.done",
             conversation_id=self._conversation_id,
             summary_len=len(new_summary),
             tokens_est=self.estimate_tokens(),
         )
-
         return new_summary
 
     async def extract_before_compression(
@@ -237,56 +199,15 @@ class WorkingMemory:
             return []
 
         midpoint = len(self._messages) // 2
-        older = self._messages[:midpoint]
-
-        prompt = _EXTRACT_PROMPT.format(
-            messages=_format_messages(older),
-        )
-
-        logger.info(
-            "working_memory.extract.start",
-            conversation_id=self._conversation_id,
-            message_count=len(older),
-        )
-
-        response = await model_gateway.chat(
-            messages=[{"role": "user", "content": prompt}],
-        )
-
-        result = parse_json_array_response(response.text)
-        if not result.ok:
-            logger.warning(
-                "working_memory.extract.parse_failed",
-                conversation_id=self._conversation_id,
-                raw_length=len(response.text.strip()),
-                reason=result.reason,
-            )
+        memory_prefix = select_long_term_memory_prefix(self._messages, midpoint)
+        older = list(memory_prefix.messages)
+        if not older:
             return []
-
-        valid: list[dict[str, str]] = []
-        allowed_categories = {"fact", "concept", "procedure"}
-        for item in result.items:
-            if (
-                isinstance(item, dict)
-                and isinstance(item.get("category"), str)
-                and isinstance(item.get("content"), str)
-                and item["category"] in allowed_categories
-            ):
-                valid.append(
-                    {
-                        "category": item["category"],
-                        "content": item["content"],
-                    }
-                )
-
-        logger.info(
-            "working_memory.extract.done",
+        return await extract_memory_items(
+            model_gateway=model_gateway,
+            messages=older,
             conversation_id=self._conversation_id,
-            extracted=len(valid),
-            discarded=len(result.items) - len(valid),
         )
-
-        return valid
 
 
 def _validate_message_timestamp(message: dict[str, Any]) -> None:

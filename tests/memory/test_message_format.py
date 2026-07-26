@@ -47,3 +47,20 @@ def test_render_user_message_preserves_literal_timestamp_text(monkeypatch) -> No
     rendered = render_llm_message(message)
 
     assert rendered["content"] == ("[2026-05-11 11:50] [2026-05-11 11:49] 这就是我发的正文")
+
+
+def test_render_message_removes_internal_turn_failure_metadata(monkeypatch) -> None:
+    monkeypatch.setattr(message_format, "_local_timezone", lambda: UTC)
+    message = {
+        "role": "assistant",
+        "content": "本轮未完成",
+        "timestamp": datetime(2026, 5, 11, 11, 50, tzinfo=UTC),
+        "metadata": {"turn_failure": {"reason": "stop_verification"}},
+    }
+
+    rendered = render_llm_message(message)
+
+    assert rendered == {
+        "role": "assistant",
+        "content": "[2026-05-11 11:50] 本轮未完成",
+    }
