@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from src.agent.state.task_contract import ACTION_FILE_WRITE, TaskRequirement
+from src.agent.state.task_contract_resources import canonical_path_within_directory
 from src.tools.file_mutation_receipt import FILE_MUTATION_ACTIONS
 
 if TYPE_CHECKING:
@@ -77,6 +78,6 @@ def _observed_write_targets(events: tuple[ToolEffect, ...]) -> tuple[str, ...]:
 
 def _covers_allowed_dirs(directories: tuple[str, ...], paths: tuple[str, ...]) -> bool:
     return all(
-        any(path.rstrip("/").startswith(f"{directory.rstrip('/')}/") for path in paths)
+        any(canonical_path_within_directory(path, directory) for path in paths)
         for directory in directories
     )

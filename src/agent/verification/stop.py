@@ -14,6 +14,7 @@ from src.agent.state.task_contract import (
     ACTION_SCHEDULE_UPDATE,
     TaskRequirement,
 )
+from src.agent.state.task_contract_resources import canonical_path_within_directory
 from src.agent.verification.stop_messages import missing_requirement_message
 from src.agent.verification.tool_problem_messages import (
     blocking_tool_problem_message,
@@ -152,7 +153,9 @@ class ToolLedger:
         ):
             return False
         return all(
-            any(_path_inside_dir(_event_target(event), directory) for event in writes)
+            any(
+                canonical_path_within_directory(_event_target(event), directory) for event in writes
+            )
             for directory in requirement.allowed_write_dirs
         )
 
@@ -283,14 +286,6 @@ def _mentions_problem(text: str) -> bool:
 def _has_required_operation_problem(events: tuple[ToolEffect, ...]) -> bool:
     operation_actions = {ACTION_FILE_WRITE, "file.edit", *_ACTION_EFFECTS}
     return any(event.action in operation_actions for event in events)
-
-
-def _path_inside_dir(path: str, directory: str) -> bool:
-    normalized_path = path.strip().rstrip("/")
-    normalized_dir = directory.strip().rstrip("/")
-    if not normalized_path or not normalized_dir:
-        return False
-    return normalized_path.startswith(f"{normalized_dir}/")
 
 
 def _event_target(event: ToolEffect) -> str:

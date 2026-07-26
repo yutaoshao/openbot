@@ -19,6 +19,7 @@ from src.agent.state.task_contract import (
 )
 from src.agent.state.task_contract_constraints import (
     filter_model_file_constraints,
+    trusted_model_requirements,
     without_schedule_requirements,
 )
 from src.agent.state.task_contract_prompt import PLANNER_SYSTEM_PROMPT
@@ -135,6 +136,7 @@ def _contract_from_text(
         filter_model_file_constraints(requirement, constraint_evidence)
         for requirement in _requirements_from_payload(payload)
     )
+    model_requirements = trusted_model_requirements(model_requirements, baseline.objective)
     return _merge_contracts(baseline, model_requirements)
 
 
@@ -293,7 +295,5 @@ def _requirement_index(requirements: list[TaskRequirement], action: str) -> int 
 
 
 def _log_planned_contract(contract: TaskContract) -> None:
-    logger.info(
-        "task_contract_planned",
-        actions=[requirement.action for requirement in contract.required_actions],
-    )
+    actions = [requirement.action for requirement in contract.required_actions]
+    logger.info("task_contract_planned", actions=actions)

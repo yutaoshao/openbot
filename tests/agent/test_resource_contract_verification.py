@@ -11,6 +11,7 @@ from src.agent.state.task_contract import (
 )
 from src.agent.state.task_contract_resources import resolve_contract_resources
 from src.agent.verification.stop import ToolLedger, verify_stop
+from src.tools.effects import ToolEffect
 from tests.file_mutation_facts import (
     appended_file_effect,
     created_file_effect,
@@ -27,6 +28,22 @@ def _contract_for(path: str) -> TaskContract:
         (
             TaskRequirement(ACTION_ANSWER),
             TaskRequirement(ACTION_FILE_WRITE, "file", "", (path,)),
+        ),
+    )
+
+
+def _contract_for_file_and_directory(path: str, directory: str) -> TaskContract:
+    return TaskContract(
+        "write target in directory",
+        (
+            TaskRequirement(ACTION_ANSWER),
+            TaskRequirement(
+                ACTION_FILE_WRITE,
+                "file",
+                "",
+                (path,),
+                (directory,),
+            ),
         ),
     )
 
@@ -90,3 +107,54 @@ def test_file_write_verification_accepts_unique_alias_mutation(tmp_path: Path) -
         )
         is None
     )
+
+
+def test_exact_target_and_project_root_accept_verified_append(tmp_path: Path) -> None:
+    target = tmp_path / "data" / "AI 八股.md"
+    target.parent.mkdir()
+    target.write_text("existing\n", encoding="utf-8")
+    contract = resolve_contract_resources(
+        _contract_for_file_and_directory("data/AI 八股.md", "."),
+        tmp_path,
+    )
+    effect = appended_file_effect(tmp_path, "data/AI 八股.md")
+    ledger = ToolLedger((effect,))
+
+    decision = verify_stop(contract, "已追加到 data/AI 八股.md。", ledger, project_root=tmp_path)
+
+    assert contract.allowed_write_dirs == ("./",)
+    assert decision.allow
+    assert (
+        file_write_verification_failure(
+            contract,
+            [executed_mutation_call(effect)],
+            project_root=tmp_path,
+        )
+        is None
+    )
+
+
+def test_project_root_failure_message_does_not_report_target_mismatch(tmp_path: Path) -> None:
+    contract = resolve_contract_resources(
+        _contract_for_file_and_directory("data/AI 八股.md", "./"),
+        tmp_path,
+    )
+    unverified_write = ToolEffect(
+        action="file.append",
+        status="completed",
+        effect="file_written",
+        target_type="file",
+        target="data/AI 八股.md",
+        name="append_file",
+    )
+
+    decision = verify_stop(
+        contract,
+        "已追加。",
+        ToolLedger((unverified_write,)),
+        project_root=tmp_path,
+    )
+
+    assert not decision.allow
+    assert "凭证或最终后置条件验证失败" in decision.message
+    assert "写入目标不匹配" not in decision.message

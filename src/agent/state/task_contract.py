@@ -6,6 +6,12 @@ import re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from src.agent.state.file_write_intent import (
+    FileWriteIntent,
+    classify_trusted_file_write_intent,
+    contains_file_write_action,
+)
+
 if TYPE_CHECKING:
     from src.tools.effects import ResourceRef
 
@@ -17,7 +23,6 @@ ACTION_SCHEDULE_DELETE = "schedule.delete"
 ACTION_SCHEDULE_LIST = "schedule.list"
 ACTION_SCHEDULE_UPDATE = "schedule.update"
 
-_FILE_WRITE_KEYWORDS = ("保存", "写入", "追加", "补上", "存到", "save", "write", "append")
 _DIAGNOSIS_KEYWORDS = ("为什么", "原因", "排查", "问题", "debug", "investigate")
 _SCHEDULE_WORDS = ("定时任务", "schedule", "scheduled task")
 _SCHEDULE_CREATE_WORDS = ("创建", "新增", "新建", "添加", "create", "add")
@@ -26,7 +31,10 @@ _SCHEDULE_DELETE_WORDS = ("删除", "移除", "取消", "delete", "remove", "can
 _SCHEDULE_LIST_WORDS = ("列出", "查看", "有哪些", "list", "show")
 _PAYLOAD_MARKERS = ("改成：", "改为：", "更新为：", "改成:", "改为:", "更新为:")
 _QUESTION_MARKERS = ("?", "？", "是不是", "是否", "要不要", "需不需要", "需要哪些", "怎么")
-_PATH_PATTERN = re.compile(r"`([^`]+)`|([A-Za-z0-9_./~-]+\.[A-Za-z0-9_]+)")
+_PATH_PATTERN = re.compile(
+    r"`([^`\n]+)`|((?:[A-Za-z0-9_.~-]+/)+"
+    r"[^`\n，。！？；;:'\"<>|]*\.[A-Za-z0-9_]+|[A-Za-z0-9_./~-]+\.[A-Za-z0-9_]+)"
+)
 _CODE_FENCE_PATTERN = re.compile(r"```.*?```", re.DOTALL)
 _QUOTE_BLOCK_PATTERN = re.compile(r"(?m)^>.*$")
 _SCHEDULE_ID_PATTERN = re.compile(r"(?:定时任务\s+|schedule\s+)([A-Za-z0-9_-]+)")
@@ -91,7 +99,7 @@ def build_task_contract(user_input: str) -> TaskContract:
     schedule_requirement = _schedule_requirement(trusted_text)
     if schedule_requirement is not None:
         requirements.append(schedule_requirement)
-    elif _contains_any(parse_text.lower(), _FILE_WRITE_KEYWORDS):
+    elif classify_trusted_file_write_intent(parse_text) is FileWriteIntent.COMMAND:
         requirements.append(_file_write_requirement(parse_text))
     if _contains_any(parse_text.lower(), _DIAGNOSIS_KEYWORDS):
         requirements.append(TaskRequirement(ACTION_DIAGNOSE))
@@ -165,6 +173,12 @@ def _clauses_contain(clauses: tuple[str, ...], keywords: tuple[str, ...]) -> boo
     return any(_contains_any(clause.lower(), keywords) for clause in clauses)
 
 
+def classify_file_write_intent(user_input: str) -> FileWriteIntent:
+    """Classify explicit write commands and explicit write-only discussion."""
+    trusted_text = _strip_example_list_blocks(_strip_untrusted_blocks(user_input))
+    return classify_trusted_file_write_intent(_command_before_payload(trusted_text))
+
+
 def _file_write_requirement(text: str) -> TaskRequirement:
     targets = _extract_write_targets(text)
     return TaskRequirement(ACTION_FILE_WRITE, "file", "", **targets)
@@ -200,7 +214,7 @@ def _extract_write_targets(text: str) -> dict[str, tuple[str, ...]]:
 
 
 def _is_write_context(text: str) -> bool:
-    return _contains_any(text.lower(), _FILE_WRITE_KEYWORDS)
+    return contains_file_write_action(text)
 
 
 def _is_template_path(path: str) -> bool:

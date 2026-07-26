@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any
 
 from src.agent.state.task_contract import ACTION_FILE_WRITE, TaskContract, TaskRequirement
@@ -13,6 +13,20 @@ if TYPE_CHECKING:
     from src.tools.effects import ResourceRef
 
 logger = get_logger(__name__)
+
+
+def canonical_path_within_directory(file_path: str, directory_path: str) -> bool:
+    """Return whether a canonical project-relative file is below a directory."""
+    file_parts = _canonical_relative_parts(file_path)
+    directory_parts = _canonical_relative_parts(directory_path)
+    if file_parts is None or directory_parts is None or not file_parts:
+        return False
+    if not directory_parts:
+        return True
+    return (
+        len(file_parts) > len(directory_parts)
+        and file_parts[: len(directory_parts)] == directory_parts
+    )
 
 
 def resolve_agent_contract_resources(contract: TaskContract, agent: Any) -> TaskContract:
@@ -100,3 +114,13 @@ def _canonical_dirs(
 
 def _with_trailing_slash(path: str) -> str:
     return path if path.endswith("/") else f"{path}/"
+
+
+def _canonical_relative_parts(path: str) -> tuple[str, ...] | None:
+    stripped = path.strip().rstrip("/")
+    if not stripped:
+        return None
+    candidate = PurePosixPath(stripped)
+    if candidate.is_absolute() or ".." in candidate.parts:
+        return None
+    return tuple(part for part in candidate.parts if part != ".")
