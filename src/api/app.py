@@ -10,6 +10,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 
+from src.agent.coordination import UserExecutionCoordinator
 from src.api.local_access import enforce_local_request
 from src.api.routes.chat import router as chat_router
 from src.api.routes.conversations import router as conversations_router
@@ -47,6 +48,43 @@ _DEFAULT_CORS_ORIGINS = [
 ]
 
 
+@asynccontextmanager
+async def _api_lifespan(_app: FastAPI):
+    logger.info("api.starting")
+    yield
+    logger.info("api.stopping")
+
+
+async def _handle_unexpected_error(request: Request, _exc: Exception) -> JSONResponse:
+    logger.exception("api.unhandled_exception", path=str(request.url.path))
+    return JSONResponse(
+        status_code=500,
+        content={"detail": "Internal server error"},
+    )
+
+
+def _create_base_app(config: AppConfig | None) -> FastAPI:
+    app = FastAPI(title="OpenBot API", version="0.1.0", lifespan=_api_lifespan)
+    cors_origins = config.api.cors_origins if config else _DEFAULT_CORS_ORIGINS
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=cors_origins,
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+    app.middleware("http")(enforce_local_request)
+    app.add_exception_handler(Exception, _handle_unexpected_error)
+    return app
+
+
+def _request_execution_coordinator(application: Application | None) -> UserExecutionCoordinator:
+    execution_coordinator = getattr(application, "execution_coordinator", None)
+    if execution_coordinator is None:
+        return UserExecutionCoordinator()
+    return execution_coordinator
+
+
 def create_api_app(
     *,
     agent: Agent | None = None,
@@ -66,14 +104,7 @@ def create_api_app(
     The ``agent`` dependency is optional at startup time to allow running
     API smoke tests and wiring runtime dependencies in the application layer.
     """
-
-    @asynccontextmanager
-    async def lifespan(_app: FastAPI):
-        logger.info("api.starting")
-        yield
-        logger.info("api.stopping")
-
-    app = FastAPI(title="OpenBot API", version="0.1.0", lifespan=lifespan)
+    app = _create_base_app(config)
     app.state.agent = agent
     app.state.storage = storage
     app.state.config = config
@@ -86,6 +117,7 @@ def create_api_app(
     app.state.identity_service = identity_service
     app.state.settings_service = settings_service
     app.state.application = application
+    app.state.execution_coordinator = _request_execution_coordinator(application)
     app.state.restart_required = False
     app.state.restart_reasons = []
     # Populated later by Application.start() for webhook routes
@@ -93,52 +125,37 @@ def create_api_app(
     app.state.feishu = None
     app.state.wechat = None
     app.state.wechat_runtime_status = None
+    _register_api_routes(app)
+    _register_frontend_route(app, config)
+    return app
 
-    cors_origins = config.api.cors_origins if config else _DEFAULT_CORS_ORIGINS
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=cors_origins,
-        allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
-    )
-    app.middleware("http")(enforce_local_request)
 
-    @app.exception_handler(Exception)
-    async def unhandled_exception_handler(
-        request: Request,
-        exc: Exception,
-    ) -> JSONResponse:
-        logger.exception("api.unhandled_exception", path=str(request.url.path))
-        return JSONResponse(
-            status_code=500,
-            content={"detail": "Internal server error"},
-        )
-
+def _register_api_routes(app: FastAPI) -> None:
     @app.get("/health", response_model=HealthResponse, tags=["system"])
     async def health() -> HealthResponse:
         return HealthResponse(status="ok", runtime=build_runtime_status(app))
 
-    app.include_router(chat_router)
-    app.include_router(conversations_router)
-    app.include_router(identities_router)
-    app.include_router(knowledge_router)
-    app.include_router(logs_router)
-    app.include_router(tools_router)
-    app.include_router(schedules_router)
-    app.include_router(metrics_router)
-    app.include_router(settings_router)
-    app.include_router(websocket_router)
-    app.include_router(webhook_router)
+    for api_router in (
+        chat_router,
+        conversations_router,
+        identities_router,
+        knowledge_router,
+        logs_router,
+        tools_router,
+        schedules_router,
+        metrics_router,
+        settings_router,
+        websocket_router,
+        webhook_router,
+    ):
+        app.include_router(api_router)
 
-    frontend_dist: Path | None = None
-    frontend_index: Path | None = None
-    if config and config.api.serve_frontend:
-        frontend_dist = Path(config.api.frontend_dist)
-        frontend_index = frontend_dist / "index.html"
+
+def _register_frontend_route(app: FastAPI, config: AppConfig | None) -> None:
+    frontend_dist, frontend_index = _frontend_paths(config)
 
     @app.get("/{full_path:path}", include_in_schema=False, response_model=None)
-    async def spa_fallback(full_path: str):
+    async def spa_fallback(full_path: str) -> FileResponse | JSONResponse:
         if full_path.startswith("api/"):
             return JSONResponse(status_code=404, content={"detail": "Not found"})
         if frontend_dist and full_path:
@@ -153,4 +170,9 @@ def create_api_app(
             content={"detail": "Frontend assets not built. Run frontend build first."},
         )
 
-    return app
+
+def _frontend_paths(config: AppConfig | None) -> tuple[Path | None, Path | None]:
+    if config is None or not config.api.serve_frontend:
+        return None, None
+    frontend_dist = Path(config.api.frontend_dist)
+    return frontend_dist, frontend_dist / "index.html"

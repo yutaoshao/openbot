@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 from fastapi import APIRouter, HTTPException, Request
 
 from src.api.schemas import ChatRequest, ChatResponse
+from src.core.user_scope import SINGLE_USER_ID
 
 if TYPE_CHECKING:
     from src.agent.agent import Agent
@@ -32,17 +33,18 @@ async def post_chat(payload: ChatRequest, request: Request) -> ChatResponse:
     agent = _get_agent(request)
     conversation_id = payload.conversation_id or uuid.uuid4().hex
 
-    result = await agent.run(
-        input_text=payload.message,
-        conversation_id=conversation_id,
-        platform=payload.platform,
-    )
+    async with request.app.state.execution_coordinator.serialize(SINGLE_USER_ID):
+        agent_response = await agent.run(
+            input_text=payload.message,
+            conversation_id=conversation_id,
+            platform=payload.platform,
+        )
 
     return ChatResponse(
-        reply=result.content,
+        reply=agent_response.content,
         conversation_id=conversation_id,
-        model=result.model,
-        latency_ms=result.latency_ms,
-        tokens_in=result.tokens_in,
-        tokens_out=result.tokens_out,
+        model=agent_response.model,
+        latency_ms=agent_response.latency_ms,
+        tokens_in=agent_response.tokens_in,
+        tokens_out=agent_response.tokens_out,
     )

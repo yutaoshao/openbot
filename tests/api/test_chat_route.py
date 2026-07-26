@@ -1,10 +1,16 @@
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
+from types import SimpleNamespace
 
+from fastapi import Request
 from fastapi.testclient import TestClient
 
+from src.agent.coordination import UserExecutionCoordinator
 from src.api.app import create_api_app
+from src.api.routes.chat import post_chat
+from src.api.schemas import ChatRequest
 
 
 @dataclass
@@ -34,6 +40,31 @@ class _FakeAgent:
             tokens_in=3,
             tokens_out=5,
         )
+
+
+class _ConcurrentAgent:
+    def __init__(self) -> None:
+        self.active_calls = 0
+        self.max_active_calls = 0
+        self.first_turn_started = asyncio.Event()
+        self.release_first_turn = asyncio.Event()
+
+    async def run(
+        self,
+        input_text: str,
+        conversation_id: str = "",
+        platform: str = "unknown",
+    ) -> _FakeAgentResponse:
+        self.active_calls += 1
+        self.max_active_calls = max(self.max_active_calls, self.active_calls)
+        try:
+            if input_text == "first":
+                self.first_turn_started.set()
+                await self.release_first_turn.wait()
+            await asyncio.sleep(0)
+            return _FakeAgentResponse(input_text, "fake-model", 1, 1, 1)
+        finally:
+            self.active_calls -= 1
 
 
 def test_health_returns_ok() -> None:
@@ -81,6 +112,29 @@ def test_chat_returns_agent_output() -> None:
         "tokens_out": 5,
     }
     assert fake_agent.calls == [("hi", "conv-123", "web")]
+
+
+async def test_chat_serializes_single_user_turns_across_conversations() -> None:
+    concurrent_agent = _ConcurrentAgent()
+    shared_coordinator = UserExecutionCoordinator()
+    application = SimpleNamespace(execution_coordinator=shared_coordinator)
+    app = create_api_app(agent=concurrent_agent, application=application)
+    request = Request({"type": "http", "app": app})
+    first_payload = ChatRequest(message="first", conversation_id="first-conv")
+    second_payload = ChatRequest(message="second", conversation_id="second-conv")
+
+    assert app.state.execution_coordinator is shared_coordinator
+    first_turn = asyncio.create_task(post_chat(first_payload, request))
+    await concurrent_agent.first_turn_started.wait()
+    second_turn = asyncio.create_task(post_chat(second_payload, request))
+    await asyncio.sleep(0)
+
+    assert concurrent_agent.max_active_calls == 1
+    concurrent_agent.release_first_turn.set()
+    first_response, second_response = await asyncio.gather(first_turn, second_turn)
+    assert first_response.reply == "first"
+    assert second_response.reply == "second"
+    assert concurrent_agent.max_active_calls == 1
 
 
 def test_chat_generates_conversation_id_when_missing() -> None:
