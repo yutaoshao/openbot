@@ -38,4 +38,7 @@ scripts/openbot-watch.sh
 /.agents/
 /skills-lock.json
 .impeccable.md
-/docs/
+# Private SoloSpec documents live in a separate Git repository.
+/docs
+/AGENTS.md
+/CLAUDE.md
