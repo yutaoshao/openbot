@@ -64,7 +64,7 @@ async def prepare_agent_turn(
 ) -> list[dict[str, Any]]:
     """Build model messages for the current turn."""
     if not agent.conversation_manager or not request.conversation_id:
-        return _standalone_turn_messages(agent, request)
+        return await _standalone_turn_messages(agent, request)
     return await _conversation_turn_messages(agent, request)
 
 
@@ -77,7 +77,7 @@ async def _conversation_turn_messages(
         request.conversation_id,
         request.platform,
         resolved_user_id,
-        agent.config.token_budget,
+        agent.config.recent_token_budget,
     )
     await agent.conversation_manager.add_user_message(
         request.conversation_id,
@@ -90,19 +90,28 @@ async def _conversation_turn_messages(
         ),
     )
     task_state = agent.conversation_manager.get_task_state(request.conversation_id)
-    return await agent.conversation_manager.build_messages(
+    return await agent.conversation_manager.prepare_context_budget(
         request.conversation_id,
         build_system_prompt(agent, input_text=request.input_text, task_state=task_state),
         request.input_text,
         resolved_user_id,
+        config=agent.config,
         message_timestamp=request.message_timestamp,
     )
 
 
-def _standalone_turn_messages(
+async def _standalone_turn_messages(
     agent: Any,
     request: TurnRequest,
 ) -> list[dict[str, Any]]:
+    if agent.conversation_manager:
+        return await agent.conversation_manager.build_messages(
+            request.conversation_id or "standalone",
+            build_system_prompt(agent, input_text=request.input_text),
+            request.input_text,
+            request.user_id or SINGLE_USER_ID,
+            request.message_timestamp,
+        )
     return [
         {
             "role": "system",

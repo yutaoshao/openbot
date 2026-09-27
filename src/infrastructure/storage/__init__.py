@@ -6,11 +6,14 @@ from typing import TYPE_CHECKING
 
 from ._base import json_dumps, json_loads
 from .conversations_repo import ConversationRepo
+from .followups_repo import FollowupsRepo
 from .identities_repo import UserIdentityRepo
 from .knowledge_repo import KnowledgeRepo
 from .logs_repo import LogRepo
 from .messages_repo import MessageRepo
 from .metrics_repo import MetricsRepo
+from .personal_index_repo import PersonalIndexRepo
+from .personal_progress_repo import PersonalProgressRepo
 from .preferences_repo import PreferenceRepo
 from .schedules_repo import ScheduleRepo
 
@@ -24,6 +27,9 @@ class Storage:
     def __init__(self, db: Database) -> None:
         self.conversations = ConversationRepo(db)
         self.messages = MessageRepo(db)
+        self.personal_progress = PersonalProgressRepo(db)
+        self.personal_index = PersonalIndexRepo(db)
+        self.followups = FollowupsRepo(db)
         self.knowledge = KnowledgeRepo(db)
         self.preferences = PreferenceRepo(db)
         self.user_identities = UserIdentityRepo(db)

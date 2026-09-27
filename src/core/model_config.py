@@ -19,6 +19,7 @@ class ModelProviderConfig(BaseModel):
     model: str = "claude-sonnet-4-20250514"
     base_url: str | None = None
     max_tokens: int = 4096
+    context_window: int | None = Field(default=None, gt=0)
     temperature: float = 0.7
     api_key_env: str = "ANTHROPIC_API_KEY"
     pricing_input: float | None = None
@@ -35,6 +36,8 @@ class ModelProviderConfig(BaseModel):
 
     @model_validator(mode="after")
     def _validate_provider_specific_fields(self) -> ModelProviderConfig:
+        if self.context_window is not None and self.context_window <= self.max_tokens:
+            raise ValueError("context_window must exceed max_tokens output reserve")
         if self.provider != "openai_responses":
             return self
         if self.base_url is not None and not self.base_url.rstrip("/").endswith("/v1"):

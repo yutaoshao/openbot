@@ -16,9 +16,10 @@ async def maybe_compress_shared_timeline(
     semantic_memory: Any,
     *,
     conversation_id: str,
+    force: bool = False,
 ) -> None:
     """Compress the shared timeline when it exceeds the token budget."""
-    if shared_timeline is None or not shared_timeline.needs_compression():
+    if shared_timeline is None or (not force and not shared_timeline.needs_compression()):
         return
     logger.info(
         "conversation.compression_triggered",

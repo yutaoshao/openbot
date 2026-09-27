@@ -47,6 +47,15 @@ class UnifiedMessage:
     timestamp: datetime = field(default_factory=lambda: datetime.now(UTC))
 
 
+@dataclass(frozen=True)
+class StreamingDelivery:
+    """Final text and transport acknowledgement for a streamed reply."""
+
+    delivered: bool
+    text: str
+    delivery_id: str = ""
+
+
 @runtime_checkable
 class StreamingAdapter(Protocol):
     """Protocol for adapters that support streaming output."""
@@ -55,4 +64,4 @@ class StreamingAdapter(Protocol):
         self,
         chat_id: str,
         stream: AsyncIterator[StreamChunk],
-    ) -> None: ...
+    ) -> StreamingDelivery: ...

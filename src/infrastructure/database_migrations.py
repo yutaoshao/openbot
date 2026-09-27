@@ -23,6 +23,12 @@ class DatabaseMigrationMixin:
             await self._migrate_to_v7()
         if current_version < 8:
             await self._migrate_to_v8()
+        if current_version < 9:
+            await self._ensure_message_timestamp()
+        if current_version < 10:
+            await self._ensure_column(
+                "knowledge", "memory_type", "TEXT NOT NULL DEFAULT 'legacy_unreviewed'"
+            )
 
     async def _migrate_to_v5(self) -> None:
         await self._ensure_column(

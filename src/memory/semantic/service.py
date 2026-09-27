@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 from typing import TYPE_CHECKING
 
 from src.core.logging import get_logger
@@ -47,6 +48,15 @@ class SemanticMemory(SemanticMutationMixin, SemanticQueryMixin):
             return []
 
         raw_items = await self._call_extraction_llm(messages)
+        return await self.store_extracted_knowledge(raw_items, conversation_id, user_id)
+
+    async def extract_items(self, messages: list[dict]) -> list[dict]:
+        return await self._call_extraction_llm(messages)
+
+    async def store_extracted_knowledge(
+        self, raw_items: list[dict], conversation_id: str, user_id: str,
+        *, source: str | None = None,
+    ) -> list[dict]:
         if not raw_items:
             return []
 
@@ -65,7 +75,15 @@ class SemanticMemory(SemanticMutationMixin, SemanticQueryMixin):
                 priority = "P1"
 
             embedding = await self._embedding.embed(content)
-            duplicate = await self._find_duplicate(embedding, content, user_id)
+            knowledge_id = (hashlib.sha256(f"{source}\n{content}".encode()).hexdigest()
+                            if source else None)
+            existing = await self._storage.knowledge.get(knowledge_id) if knowledge_id else None
+            if existing:
+                await self._update_embedding(knowledge_id, embedding)
+                results.append(existing)
+                continue
+            duplicate = (await self._find_duplicate(embedding, content, user_id)
+                         if source is None else None)
             if duplicate is not None:
                 merged = await self._merge_knowledge(duplicate, content, tags, priority)
                 results.append(merged)
@@ -79,6 +97,7 @@ class SemanticMemory(SemanticMutationMixin, SemanticQueryMixin):
                 embedding=embedding,
                 user_id=user_id,
                 source_conversation_id=conversation_id,
+                knowledge_id=knowledge_id,
             )
             results.append(entry)
 

@@ -6,6 +6,7 @@ import json
 from typing import Any
 
 from src.core.logging import get_logger
+from src.memory.structured_json import parse_json_array_response
 
 from .helpers import (
     DUPLICATE_THRESHOLD,
@@ -14,7 +15,6 @@ from .helpers import (
     format_messages,
     l2_distance_to_cosine_similarity,
     normalize_embedding,
-    parse_extraction_response,
 )
 
 logger = get_logger(__name__)
@@ -39,6 +39,7 @@ class SemanticQueryMixin:
                 limit=limit * 3 if self._reranker else limit,
                 user_id=user_id,
                 include_legacy=True,
+                memory_type="general",
             )
 
         if self._reranker and items:
@@ -75,8 +76,11 @@ class SemanticQueryMixin:
             response = await self._gateway.chat([{"role": "user", "content": prompt}])
         except Exception:
             logger.error("semantic.extraction_llm_failed", exc_info=True)
-            return []
-        return parse_extraction_response(response.text)
+            raise
+        parsed = parse_json_array_response(response.text)
+        if not parsed.ok:
+            raise ValueError(f"Semantic extraction failed: {parsed.reason}")
+        return parsed.items
 
     async def _find_duplicate(
         self,
@@ -88,17 +92,21 @@ class SemanticQueryMixin:
         if not normalized_embedding:
             return None
 
+        # Exact filtered distance avoids vec0 text-ID IN filtering inconsistencies
+        # across existing vector-table chunks; filter authority before the limit.
         try:
             async with self._db.get_connection() as conn:
                 cursor = await conn.execute(
                     """
-                    SELECT knowledge_id, distance
-                    FROM knowledge_embeddings
-                    WHERE embedding MATCH ?
+                    SELECT embeddings.knowledge_id,
+                           vec_distance_L2(embeddings.embedding, ?) AS distance
+                    FROM knowledge_embeddings AS embeddings
+                    JOIN knowledge ON knowledge.id = embeddings.knowledge_id
+                    WHERE knowledge.memory_type = 'general' AND knowledge.user_id IN ('', ?)
                     ORDER BY distance
                     LIMIT 1
                     """,
-                    (json.dumps(normalized_embedding),),
+                    (json.dumps(normalized_embedding), user_id),
                 )
                 row = await cursor.fetchone()
         except Exception:
@@ -137,13 +145,15 @@ class SemanticQueryMixin:
             async with self._db.get_connection() as conn:
                 cursor = await conn.execute(
                     """
-                    SELECT knowledge_id, distance
-                    FROM knowledge_embeddings
-                    WHERE embedding MATCH ?
+                    SELECT embeddings.knowledge_id,
+                           vec_distance_L2(embeddings.embedding, ?) AS distance
+                    FROM knowledge_embeddings AS embeddings
+                    JOIN knowledge ON knowledge.id = embeddings.knowledge_id
+                    WHERE knowledge.memory_type = 'general' AND knowledge.user_id IN ('', ?)
                     ORDER BY distance
                     LIMIT ?
                     """,
-                    (json.dumps(normalized_embedding), limit),
+                    (json.dumps(normalized_embedding), user_id, limit),
                 )
                 rows = await cursor.fetchall()
         except Exception:
@@ -153,7 +163,11 @@ class SemanticQueryMixin:
         results: list[dict[str, Any]] = []
         for knowledge_id, distance in rows:
             entry = await self._storage.knowledge.get(knowledge_id)
-            if entry is not None and belongs_to_user(entry, user_id):
+            if (
+                entry is not None
+                and belongs_to_user(entry, user_id)
+                and entry.get("memory_type") == "general"
+            ):
                 entry["_distance"] = distance
                 results.append(entry)
         return results

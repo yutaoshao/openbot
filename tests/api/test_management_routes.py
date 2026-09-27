@@ -27,6 +27,7 @@ class _FakeKnowledgeRepo:
         priority: str | None = None,
         limit: int = 50,
         offset: int = 0,
+        memory_type: str | None = None,
     ) -> list[dict[str, Any]]:
         values = list(self.items.values())
         if category:
@@ -35,7 +36,9 @@ class _FakeKnowledgeRepo:
             values = [item for item in values if item["priority"] == priority]
         return values[offset : offset + limit]
 
-    async def search(self, query: str, limit: int = 10) -> list[dict[str, Any]]:
+    async def search(
+        self, query: str, limit: int = 10, memory_type: str | None = None
+    ) -> list[dict[str, Any]]:
         return [item for item in self.items.values() if query in item["content"]][:limit]
 
     async def add(self, **kwargs: Any) -> None:

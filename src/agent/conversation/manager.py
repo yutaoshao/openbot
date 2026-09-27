@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import asyncio
 from typing import TYPE_CHECKING, Any
 
 from src.core.logging import get_logger
 from src.core.user_scope import SINGLE_USER_ID
+from src.memory.request_budget import request_limit
 
 from . import archive_helpers as archive
 from . import message_flow as flow
@@ -44,6 +46,10 @@ class ConversationManager:
         episodic_memory: EpisodicMemory,
         procedural_memory: ProceduralMemory,
         conversation_journal: ConversationJournal | None = None,
+        personal_profile: Any = None,
+        personal_history: Any = None,
+        personal_retrieval: Any = None,
+        followups: Any = None,
     ) -> None:
         self._storage = storage
         self._gateway = model_gateway
@@ -53,9 +59,32 @@ class ConversationManager:
         self._task_store = TaskStateStore()
         self._shared_timeline: SharedTimelineMemory | None = None
         self._journal = conversation_journal
+        self._personal_profile = personal_profile
+        self.followups = followups
+        from src.memory.personal_sync import PersonalMemorySync
+
+        self._personal_sync = (
+            PersonalMemorySync(
+                profile=personal_profile,
+                semantic=semantic_memory,
+                gateway=model_gateway,
+                progress=storage.personal_progress,
+            )
+            if personal_profile is not None
+            else None
+        )
+        self._personal_sync_lock = asyncio.Lock()
         self._last_memory_sync_count: dict[str, int] = {}
         self._last_archive_count: dict[str, int] = {}
-        self._prompt_builder = PromptBuilder(semantic_memory, episodic_memory, procedural_memory)
+        self._prompt_builder = PromptBuilder(
+            semantic_memory,
+            episodic_memory,
+            procedural_memory,
+            personal_profile=personal_profile,
+            personal_history=personal_history,
+            personal_retrieval=personal_retrieval,
+            followups=followups,
+        )
 
     async def get_or_create_conversation(
         self,
@@ -66,7 +95,15 @@ class ConversationManager:
     ) -> SharedTimelineMemory:
         await self._ensure_conversation_record(conversation_id, platform, user_id)
         if self._shared_timeline is None:
-            self._shared_timeline = SharedTimelineMemory(token_budget=token_budget)
+            trigger = getattr(self._gateway, "_agent_config", None)
+            compression_budget = (
+                int(trigger.input_token_budget * trigger.compression_trigger_ratio)
+                if trigger is not None
+                else token_budget
+            )
+            self._shared_timeline = SharedTimelineMemory(
+                token_budget=compression_budget, recent_budget=token_budget
+            )
         await self._shared_timeline.ensure_loaded(self._storage.messages)
         self._task_store.ensure(conversation_id)
         return self._shared_timeline
@@ -79,13 +116,19 @@ class ConversationManager:
         user_id: str,
         message_timestamp: datetime | None = None,
     ) -> list[dict[str, Any]]:
-        prompt = system_prompt
+        lookup = user_input
         protected_messages: list[dict[str, str]] = []
         history_messages: list[dict[str, Any]] = []
         if self._shared_timeline is not None:
-            prompt = await self._prompt_builder.enrich(system_prompt, user_input, user_id)
+            preceding = [
+                str(message.get("content", ""))
+                for message in self._shared_timeline.get_messages()
+                if message.get("role") == "user"
+            ]
+            lookup = " ".join([*preceding[-4:-1], user_input])
             protected_messages = self._task_store.get_protected_messages(conversation_id)
             history_messages = self._shared_timeline.get_messages()
+        prompt = await self._prompt_builder.enrich(system_prompt, lookup, user_id)
         return assemble_turn_messages(
             prompt, protected_messages, history_messages, user_input, message_timestamp
         )
@@ -155,12 +198,64 @@ class ConversationManager:
         )
 
     async def maybe_compress(self, conversation_id: str) -> None:
+        if self._personal_profile is not None:
+            if self._shared_timeline and self._shared_timeline.needs_compression():
+                await self._shared_timeline.compress(self._gateway)
+            return
         await maybe_compress_shared_timeline(
             self._shared_timeline,
             self._gateway,
             self._semantic,
             conversation_id=conversation_id,
         )
+
+    async def prepare_context_budget(
+        self,
+        conversation_id: str,
+        system_prompt: str,
+        user_input: str,
+        user_id: str,
+        *,
+        config: Any,
+        message_timestamp: datetime | None,
+    ) -> list[dict[str, Any]]:
+        messages = await self.build_messages(
+            conversation_id, system_prompt, user_input, user_id, message_timestamp
+        )
+        counter = getattr(self._gateway, "count_input", None)
+        if counter is None:
+            return messages
+        for _ in range(8):
+            measured = await counter(messages)
+            trigger = (
+                request_limit(
+                    config.input_token_budget, measured.model_window, measured.output_budget
+                )
+                * config.compression_trigger_ratio
+            )
+            if measured.tokens < trigger:
+                return messages
+            if self._shared_timeline is None:
+                break
+            before = self._shared_timeline.estimate_tokens()
+            if self._personal_profile is not None:
+                await self._shared_timeline.compress(self._gateway)
+            else:
+                await maybe_compress_shared_timeline(
+                    self._shared_timeline,
+                    self._gateway,
+                    self._semantic,
+                    conversation_id=conversation_id,
+                    force=True,
+                )
+            if self._shared_timeline.estimate_tokens() >= before:
+                break
+            messages = await self.build_messages(
+                conversation_id, system_prompt, user_input, user_id, message_timestamp
+            )
+        if (await counter(messages)).tokens >= trigger:
+            raise ValueError("Context cannot be compressed below the configured trigger")
+        return messages
 
     async def prune_idle_conversations(self, *, now: float | None = None) -> None:
         stale_ids = self._task_store.stale_conversations(
@@ -181,6 +276,9 @@ class ConversationManager:
             logger.debug("conversation.evicted_idle", conversation_id=conversation_id)
 
     async def sync_memory_after_turn(self, conversation_id: str) -> None:
+        if self._personal_profile is not None:
+            await self._sync_personal_memory(conversation_id)
+            return
         cursor = self._last_memory_sync_count.get(conversation_id, 0)
         self._last_memory_sync_count[conversation_id] = await sync_eligible_long_term_memory(
             storage=self._storage,
@@ -189,6 +287,24 @@ class ConversationManager:
             conversation_id=conversation_id,
             cursor=cursor,
         )
+
+    async def _sync_personal_memory(self, conversation_id: str) -> None:
+        from src.memory.turn_selection import select_memory_batch
+
+        async with self._personal_sync_lock:
+            cursor = await self._storage.personal_progress.get(conversation_id)
+            messages = await self._storage.messages.get_by_conversation(conversation_id)
+            selected = select_memory_batch(messages, cursor)
+            eligible = iter(selected.messages)
+            for user, assistant in zip(eligible, eligible, strict=True):
+                user_index = messages.index(user, cursor)
+                await self._personal_sync.sync_turn(
+                    user, assistant, adjacent=messages[max(0, user_index - 8) : user_index]
+                )
+                await self._storage.personal_progress.advance(
+                    conversation_id, messages.index(assistant, cursor) + 1
+                )
+            await self._storage.personal_progress.advance(conversation_id, selected.next_cursor)
 
     async def archive_idle_conversation(
         self,

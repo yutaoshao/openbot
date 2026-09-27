@@ -40,11 +40,52 @@ CREATE INDEX IF NOT EXISTS idx_messages_conversation_id
     ON messages(conversation_id);
 CREATE INDEX IF NOT EXISTS idx_messages_created_at
     ON messages(created_at);
+-- Durable cursor for completed-turn personal memory extraction.
+CREATE TABLE IF NOT EXISTS personal_memory_progress (
+    conversation_id TEXT PRIMARY KEY,
+    cursor INTEGER NOT NULL DEFAULT 0
+);
+-- Extraction outputs are saved before application so retries reuse the same claims.
+CREATE TABLE IF NOT EXISTS memory_stage_results (
+    source TEXT NOT NULL,
+    stage TEXT NOT NULL,
+    payload TEXT NOT NULL,
+    complete INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY(source, stage)
+);
+-- Rebuildable Markdown search projections, never a source of personal facts.
+CREATE TABLE IF NOT EXISTS personal_search_chunks (
+    id TEXT PRIMARY KEY,
+    path TEXT NOT NULL,
+    revision TEXT NOT NULL,
+    section TEXT NOT NULL,
+    content TEXT NOT NULL,
+    embedding_model TEXT NOT NULL,
+    embedding TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS memory_deliveries (
+    id TEXT PRIMARY KEY,
+    conversation_id TEXT NOT NULL,
+    content TEXT NOT NULL,
+    candidates TEXT NOT NULL,
+    delivered_at TEXT NOT NULL,
+    processed INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS memory_followups (
+    event_id TEXT NOT NULL,
+    field TEXT NOT NULL,
+    question TEXT NOT NULL,
+    asked_source TEXT NOT NULL,
+    asked_at TEXT NOT NULL,
+    answered_source TEXT,
+    PRIMARY KEY(event_id, field)
+);
 -- Knowledge
 CREATE TABLE IF NOT EXISTS knowledge (
     id TEXT PRIMARY KEY,
     user_id TEXT NOT NULL DEFAULT '{single_user_id}',
     source_conversation_id TEXT,
+    memory_type TEXT NOT NULL DEFAULT 'general',
     category TEXT NOT NULL,
     content TEXT NOT NULL,
     tags TEXT,

@@ -13,6 +13,7 @@ KNOWLEDGE_COLUMNS = [
     "id",
     "user_id",
     "source_conversation_id",
+    "memory_type",
     "category",
     "content",
     "tags",
@@ -43,21 +44,23 @@ class KnowledgeRepo:
         confidence: float | None = None,
         source_conversation_id: str | None = None,
         expires_at: str | None = None,
+        memory_type: str = "general",
     ) -> None:
         now = now_utc()
         async with self._db.get_connection() as conn:
             await conn.execute(
                 """
                 INSERT INTO knowledge
-                    (id, user_id, source_conversation_id, category, content, tags,
+                    (id, user_id, source_conversation_id, memory_type, category, content, tags,
                      priority, confidence, access_count,
                      created_at, updated_at, expires_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)
                 """,
                 (
                     id,
                     user_id,
                     source_conversation_id,
+                    memory_type,
                     category,
                     content,
                     json_dumps(tags),
@@ -90,6 +93,7 @@ class KnowledgeRepo:
             "confidence",
             "expires_at",
             "updated_at",
+            "memory_type",
         }
         to_set: dict[str, Any] = {}
         for key, value in fields.items():
@@ -111,9 +115,13 @@ class KnowledgeRepo:
         priority: str | None = None,
         limit: int = 50,
         offset: int = 0,
+        memory_type: str | None = None,
     ) -> list[dict[str, Any]]:
         clauses: list[str] = []
         params: list[Any] = []
+        if memory_type is not None:
+            clauses.append("memory_type = ?")
+            params.append(memory_type)
         if category is not None:
             clauses.append("category = ?")
             params.append(category)
@@ -141,10 +149,14 @@ class KnowledgeRepo:
         limit: int = 10,
         user_id: str | None = None,
         include_legacy: bool = False,
+        memory_type: str | None = None,
     ) -> list[dict[str, Any]]:
         pattern = f"%{query}%"
         clauses = ["(content LIKE ? OR tags LIKE ?)"]
         params: list[Any] = [pattern, pattern]
+        if memory_type is not None:
+            clauses.append("memory_type = ?")
+            params.append(memory_type)
         if user_id is not None:
             if include_legacy:
                 clauses.append("(user_id = ? OR user_id = '')")

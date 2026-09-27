@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from typing import Any
 
-from src.core.config import ModelConfig, ModelProviderConfig
+import pytest
+
+from src.core.config import AgentConfig, ModelConfig, ModelProviderConfig
 from src.infrastructure.model_gateway import (
     ModelGateway,
     ModelResponse,
@@ -10,6 +12,7 @@ from src.infrastructure.model_gateway import (
     ToolCall,
     Usage,
 )
+from src.memory.request_budget import InputCount
 
 
 class _FakeEventBus:
@@ -49,6 +52,17 @@ def _build_gateway(event_bus: _FakeEventBus) -> ModelGateway:
     gateway.event_bus = event_bus
     gateway._providers = {"primary": _FakeProvider()}
     return gateway
+
+
+async def test_unverified_provider_rejects_input_above_safe_limit(monkeypatch: Any) -> None:
+    gateway = _build_gateway(_FakeEventBus())
+    gateway._agent_config = AgentConfig()
+    monkeypatch.setattr(
+        "src.infrastructure.model_gateway.estimate_input_tokens",
+        lambda messages, tools: InputCount(tokens=125_000, exact=False),
+    )
+    with pytest.raises(ValueError, match="model context window not configured"):
+        await gateway.chat(messages=[{"role": "user", "content": "large request"}])
 
 
 async def test_chat_publishes_prompt_cache_metrics() -> None:
@@ -297,3 +311,49 @@ def _routing_config() -> ModelConfig:
         },
         max_retries=1,
     )
+
+
+@pytest.mark.parametrize("exact", [False, True])
+async def test_configured_window_allows_large_input_without_requiring_exact_count(
+    monkeypatch, exact
+):
+    gateway = _build_gateway(_FakeEventBus())
+    gateway._agent_config = AgentConfig()
+    gateway.config.primary.context_window = 272_000
+    gateway.config.primary.max_tokens = 16_384
+    if exact:
+
+        async def count(*args):
+            return 200_000
+
+        gateway._providers["primary"].count_input_tokens = count
+    monkeypatch.setattr(
+        "src.infrastructure.model_gateway.estimate_input_tokens",
+        lambda messages, tools: InputCount(tokens=200_000, exact=False),
+    )
+    counted = await gateway.count_input([{"role": "user", "content": "large"}])
+    assert counted.model_window == 272_000
+    assert counted.output_budget == 16_384
+    assert counted.exact is exact
+    assert (await gateway.chat(messages=[{"role": "user", "content": "large"}])).text == "ok"
+
+
+async def test_configured_window_still_enforces_input_and_output_limits(monkeypatch):
+    gateway = _build_gateway(_FakeEventBus())
+    gateway._agent_config = AgentConfig(input_token_budget=272_000)
+    gateway.config.primary.context_window = 272_000
+    gateway.config.primary.max_tokens = 16_384
+    monkeypatch.setattr(
+        "src.infrastructure.model_gateway.estimate_input_tokens",
+        lambda messages, tools: InputCount(tokens=252_000, exact=False),
+    )
+    with pytest.raises(ValueError, match="256096 > 255616"):
+        await gateway.chat(messages=[{"role": "user", "content": "too large"}])
+    monkeypatch.setattr(
+        "src.infrastructure.model_gateway.estimate_input_tokens",
+        lambda messages, tools: InputCount(tokens=240_000, exact=False),
+    )
+    with pytest.raises(ValueError, match="244096 > 240000"):
+        await gateway.chat(
+            messages=[{"role": "user", "content": "larger output"}], max_tokens=32_000
+        )

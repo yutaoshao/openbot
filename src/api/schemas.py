@@ -135,6 +135,7 @@ class KnowledgeItem(BaseModel):
 
     id: str
     source_conversation_id: str | None = None
+    memory_type: Literal["general", "personal_legacy", "legacy_unreviewed"] = "general"
     category: str
     content: str
     tags: list[str] | None = None

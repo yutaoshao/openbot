@@ -17,7 +17,8 @@ if TYPE_CHECKING:
     from src.core.config import ModelConfig
     from src.core.model_config import RouteTier
     from src.infrastructure.model_provider_selector import ProviderAttempt
-    from src.infrastructure.model_types import ModelProvider, ModelResponse, StreamChunk
+    from src.infrastructure.model_types import ModelProvider, ModelResponse, StreamChunk, Usage
+    from src.memory.request_budget import InputCount
 
 logger = get_logger(__name__)
 
@@ -29,6 +30,21 @@ class GatewayRequestContext:
     providers: dict[str, ModelProvider]
     record_completion: Callable[..., Awaitable[None]]
     handle_retry: Callable[..., Awaitable[None]]
+    check_budget: Callable[..., Awaitable[InputCount | None]]
+
+
+def _audited_completion(
+    record_completion: Callable[..., Awaitable[None]], input_count: InputCount | None
+) -> Callable[..., Awaitable[None]]:
+    async def record(
+        provider_attempt: ProviderAttempt, *, model: str, usage: Usage, latency_ms: int
+    ) -> None:
+        await record_completion(
+            provider_attempt, model=model, usage=usage, latency_ms=latency_ms,
+            input_count=input_count,
+        )
+
+    return record
 
 
 async def run_chat_request(
@@ -46,6 +62,7 @@ async def run_chat_request(
         route_reason=route_reason,
     ):
         provider = context.providers[provider_attempt.key]
+        input_count = await context.check_budget(provider_attempt, messages, tools, call_kwargs)
         for attempt in range(context.config.max_retries):
             try:
                 response = await provider.chat(messages, tools, **call_kwargs)
@@ -54,6 +71,7 @@ async def run_chat_request(
                     model=response.model,
                     usage=response.usage,
                     latency_ms=response.latency_ms,
+                    input_count=input_count,
                 )
                 return response
             except Exception as error:
@@ -79,6 +97,7 @@ async def run_model_round_request(
         route_reason=route_reason,
     ):
         provider = context.providers[provider_attempt.key]
+        input_count = await context.check_budget(provider_attempt, messages, tools, call_kwargs)
         for attempt in range(context.config.max_retries):
             try:
                 async for chunk in model_round_chunks_for_provider(
@@ -87,7 +106,9 @@ async def run_model_round_request(
                     messages=messages,
                     tools=tools,
                     call_kwargs=call_kwargs,
-                    record_completion=context.record_completion,
+                    record_completion=_audited_completion(
+                        context.record_completion, input_count
+                    ),
                 ):
                     yield chunk
                 return
@@ -122,6 +143,7 @@ async def run_stream_request(
         route_reason=route_reason,
     ):
         provider = context.providers[provider_attempt.key]
+        input_count = await context.check_budget(provider_attempt, messages, tools, call_kwargs)
         for attempt in range(context.config.max_retries):
             try:
                 async for chunk in streaming_chunks_for_provider(
@@ -130,7 +152,9 @@ async def run_stream_request(
                     messages=messages,
                     tools=tools,
                     call_kwargs=call_kwargs,
-                    record_completion=context.record_completion,
+                    record_completion=_audited_completion(
+                        context.record_completion, input_count
+                    ),
                 ):
                     yield chunk
                 return

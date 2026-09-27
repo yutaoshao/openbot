@@ -106,7 +106,10 @@ def _format_messages(messages: list[dict[str, Any]]) -> str:
     parts: list[str] = []
     for message in messages:
         role = message.get("role", "unknown")
-        content = render_llm_message(message).get("content", "")
+        content = (
+            render_llm_message(message).get("content", "")
+            if message.get("timestamp") else message.get("content", "")
+        )
         parts.append(f"[{role}] {content}")
     return "\n".join(parts)
 

@@ -19,6 +19,7 @@ class SharedTimelineMemory:
         self,
         *,
         token_budget: int,
+        recent_budget: int | None = None,
         include_platforms: tuple[str, ...] = tuple(CHAT_MEMORY_PLATFORMS),
     ) -> None:
         self._memory = WorkingMemory(
@@ -26,6 +27,7 @@ class SharedTimelineMemory:
             token_budget=token_budget,
         )
         self._include_platforms = tuple(include_platforms)
+        self._recent_budget = recent_budget or token_budget
         self._loaded = False
 
     async def ensure_loaded(self, messages: MessageRepo) -> None:
@@ -35,7 +37,7 @@ class SharedTimelineMemory:
             self._loaded = True
             return
         recent = await messages.get_recent_global(
-            self._memory._token_budget,  # noqa: SLF001
+            self._recent_budget,
             self._include_platforms,
             user_id=SINGLE_USER_ID,
         )

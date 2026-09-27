@@ -32,6 +32,7 @@ class OpenAIResponsesProvider:
 
         self.config = config
         self.model = config.model
+        self._token_count_supported = True
 
         import httpx
 
@@ -94,6 +95,29 @@ class OpenAIResponsesProvider:
         if tools:
             request_kwargs["tools"] = [_responses_function_tool(tool) for tool in tools]
         return request_kwargs
+
+    async def count_input_tokens(
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None,
+        kwargs: dict[str, Any],
+    ) -> int | None:
+        """Use provider counting when available; remember endpoints lacking it."""
+        if not self._token_count_supported:
+            return None
+        from openai import NotFoundError
+
+        try:
+            params = self._request_kwargs(messages, tools, kwargs)
+            params.pop("max_output_tokens", None)
+            result = await self.client.responses.input_tokens.count(
+                **params
+            )
+        except NotFoundError:
+            self._token_count_supported = False
+            logger.warning("model.input_token_count_unavailable", model=self.model)
+            return None
+        return int(result.input_tokens)
 
 
 def _response_from_openai(response: Any, *, model: str, latency_ms: int) -> ModelResponse:

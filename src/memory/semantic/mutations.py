@@ -136,8 +136,9 @@ class SemanticMutationMixin:
         embedding: list[float],
         user_id: str,
         source_conversation_id: str | None = None,
+        knowledge_id: str | None = None,
     ) -> dict:
-        knowledge_id = uuid.uuid4().hex
+        knowledge_id = knowledge_id or uuid.uuid4().hex
         expires_at = calculate_expires_at(priority)
 
         await self._storage.knowledge.add(
@@ -161,6 +162,7 @@ class SemanticMutationMixin:
             "priority": priority,
             "expires_at": expires_at,
             "source_conversation_id": source_conversation_id,
+            "memory_type": "general",
             "created": True,
         }
 

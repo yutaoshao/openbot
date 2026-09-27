@@ -22,7 +22,7 @@ if TYPE_CHECKING:
 
 logger = get_logger(__name__)
 
-SCHEMA_VERSION = 8
+SCHEMA_VERSION = 10
 
 
 class Database(DatabaseMigrationMixin):

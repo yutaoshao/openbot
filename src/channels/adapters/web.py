@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 from typing import TYPE_CHECKING, Any
 
+from src.channels.types import StreamingDelivery
 from src.core.logging import get_logger
 
 if TYPE_CHECKING:
@@ -37,11 +38,11 @@ class WebAdapter:
                 self._connections.pop(conversation_id, None)
         logger.info("web.adapter_disconnected", conversation_id=conversation_id)
 
-    async def send_message(self, chat_id: str, content: MessageContent) -> None:
+    async def send_message(self, chat_id: str, content: MessageContent) -> bool:
         websocket = await self._get(chat_id)
         if websocket is None:
             logger.warning("web.adapter_send_no_client", conversation_id=chat_id)
-            return
+            return False
         await websocket.send_json(
             {
                 "type": "message",
@@ -57,20 +58,23 @@ class WebAdapter:
                 ],
             }
         )
+        return True
 
     async def send_streaming(
         self,
         chat_id: str,
         stream: AsyncIterator[StreamChunk],
-    ) -> None:
+    ) -> StreamingDelivery:
         websocket = await self._get(chat_id)
         if websocket is None:
             logger.warning("web.adapter_stream_no_client", conversation_id=chat_id)
             # Drain stream to allow agent to complete
             async for _ in stream:
                 pass
-            return
+            return StreamingDelivery(False, "")
 
+        text = ""
+        delivered = False
         try:
             async for chunk in stream:
                 payload: dict[str, Any] = {
@@ -78,6 +82,7 @@ class WebAdapter:
                     "chunk_type": chunk.type,
                 }
                 if chunk.type == "text":
+                    text += chunk.text
                     payload["text"] = chunk.text
                 elif chunk.type == "tool_status":
                     payload["tool_name"] = chunk.tool_name
@@ -92,6 +97,8 @@ class WebAdapter:
                     )
                     payload["model"] = chunk.model
                 await websocket.send_json(payload)
+                if chunk.type == "done":
+                    delivered = True
         except Exception:
             logger.warning(
                 "web.adapter_stream_interrupted",
@@ -100,6 +107,7 @@ class WebAdapter:
             # Drain remaining stream so agent loop completes gracefully
             async for _ in stream:
                 pass
+        return StreamingDelivery(delivered and bool(text), text)
 
     async def _get(self, conversation_id: str) -> WebSocket | None:
         async with self._lock:

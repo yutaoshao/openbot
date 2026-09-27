@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Any
 from src.core.logging import get_logger
 from src.memory.history_references import history_file_references
 from src.memory.message_format import render_llm_message
+from src.memory.request_budget import estimate_input_tokens
 from src.memory.turn_selection import select_long_term_memory_prefix
 from src.memory.working_compaction import extract_memory_items, summarize_messages
 
@@ -102,17 +103,8 @@ class WorkingMemory:
         return result
 
     def estimate_tokens(self) -> int:
-        """Estimate total tokens across all segments (~4 chars/token)."""
-        total_chars = 0
-        for msg in self._pinned:
-            total_chars += len(msg.get("content", ""))
-        for content in self._protected.values():
-            total_chars += len(content)
-        if self._summary is not None:
-            total_chars += len(self._summary)
-        for msg in self._messages:
-            total_chars += len(str(render_llm_message(msg).get("content", "")))
-        return total_chars // CHARS_PER_TOKEN
+        """Conservative token count for working memory (including metadata)."""
+        return estimate_input_tokens(self.get_messages()).tokens
 
     def needs_compression(self) -> bool:
         """True if estimated tokens exceed the budget."""
@@ -172,6 +164,8 @@ class WorkingMemory:
             model_gateway=model_gateway,
             messages=older,
         )
+        if not summary:
+            raise ValueError("Working-memory compression returned an empty summary")
         new_summary = _summary_with_history_references(summary, older)
         if self._summary:
             new_summary = f"{self._summary}\n\n{new_summary}"

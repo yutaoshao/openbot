@@ -8,7 +8,9 @@ model:
     model: example-fast-model
     base_url: https://api.example.com/v1
     api_key_env: OPENBOT_MODEL_API_KEY
-    max_tokens: 4096
+    max_tokens: 16384
+    # Operator-confirmed total request window; local estimation is allowed.
+    context_window: 272000
     temperature: 0.7
     pricing_input: 0.0                 # per 1M tokens
     pricing_output: 0.0
@@ -24,7 +26,7 @@ model:
         model: gpt-5.5
         base_url: https://api.example.com/v1
         api_key_env: OPENAI_API_KEY
-        max_tokens: 4096
+        max_tokens: 16384
         reasoning_effort: medium
         verbosity: low
         connect_timeout: 30
@@ -34,7 +36,7 @@ model:
         model: gpt-5.5
         base_url: https://api.example.com/v1
         api_key_env: OPENAI_API_KEY
-        max_tokens: 4096
+        max_tokens: 16384
         reasoning_effort: xhigh
         verbosity: low
         connect_timeout: 30
@@ -84,7 +86,9 @@ agent:
   tool_timeout: 120
   max_task_cost: 0
   stuck_detection_threshold: 3
-  token_budget: 8000
+  input_token_budget: 255616
+  compression_trigger_ratio: 0.9
+  recent_token_budget: 128000
 
 embedding:
   enabled: false

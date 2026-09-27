@@ -26,10 +26,12 @@ extract persistent, actionable knowledge items.
 
 Rules:
 - Extract ONLY facts, concepts, procedures, or references worth remembering.
+- Personal details about the user, pets, health, relationships and preferences
+  belong to the personal dossier and MUST NOT be extracted here.
 - Skip greetings, filler, transient context, and small talk.
 - Each item must be self-contained and useful without the original conversation.
 - Assign a priority:
-  P0 = critical/permanent facts (identity, core preferences, key decisions)
+  P0 = critical/permanent general knowledge (never personal identity or preferences)
   P1 = useful information (technical details, project context, how-tos)
   P2 = minor details (casual mentions, low-impact notes)
 

@@ -60,6 +60,13 @@ class Agent:
         self._tool_hooks = ToolHookManager([ToolSearchActivationHook()])
         self._memory_finalize_tasks: dict[str, asyncio.Task[None]] = {}
 
+    async def confirm_delivery(self, conversation_id: str, content: str, delivery_id: str) -> None:
+        """Called only after the channel acknowledges the final reply's transport."""
+        if self.conversation_manager and self.conversation_manager.followups:
+            await self.conversation_manager.followups.confirm_delivery(
+                conversation_id, content, delivery_id
+            )
+
     async def run(
         self,
         input_text: str,

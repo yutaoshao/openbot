@@ -16,7 +16,7 @@ from typing import Literal
 
 import yaml
 from dotenv import load_dotenv
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from src.core.model_config import (
     ModelConfig,
@@ -190,7 +190,9 @@ class AgentConfig(BaseModel):
 
     max_iterations: int = 50
     system_prompt: str = ""
-    token_budget: int = 8000
+    input_token_budget: int = 255_616
+    compression_trigger_ratio: float = 0.9
+    recent_token_budget: int = 128_000
     # Max total seconds for a single agent run (0 = no limit)
     task_timeout: int = 0
     # Max seconds for a single tool call (0 = no limit)
@@ -199,6 +201,18 @@ class AgentConfig(BaseModel):
     max_task_cost: float = 0.0
     # Consecutive identical tool calls before declaring "stuck" (0 = disable)
     stuck_detection_threshold: int = 3
+
+    @model_validator(mode="after")
+    def validate_context_budget(self) -> AgentConfig:
+        if self.input_token_budget <= 0 or not 0 < self.compression_trigger_ratio < 1:
+            raise ValueError(
+                "input budget must be positive and trigger ratio must be between 0 and 1"
+            )
+        if not 0 < self.recent_token_budget < (
+            self.input_token_budget * self.compression_trigger_ratio
+        ):
+            raise ValueError("recent token budget must be below the compression trigger")
+        return self
 
 
 class EmbeddingConfig(BaseModel):

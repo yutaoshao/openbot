@@ -4,7 +4,9 @@ import asyncio
 from dataclasses import dataclass
 from types import SimpleNamespace
 
-from fastapi import Request
+import pytest
+from fastapi import Request, Response
+from fastapi.responses import JSONResponse
 from fastapi.testclient import TestClient
 
 from src.agent.coordination import UserExecutionCoordinator
@@ -112,6 +114,56 @@ def test_chat_returns_agent_output() -> None:
         "tokens_out": 5,
     }
     assert fake_agent.calls == [("hi", "conv-123", "web")]
+
+
+def test_chat_confirms_after_http_response_is_sent() -> None:
+    class DeliveryAgent(_FakeAgent):
+        def __init__(self) -> None:
+            super().__init__()
+            self.deliveries: list[tuple[str, str, str]] = []
+
+        async def confirm_delivery(
+            self, conversation_id: str, content: str, delivery_id: str
+        ) -> None:
+            self.deliveries.append((conversation_id, content, delivery_id))
+
+    agent = DeliveryAgent()
+    client = TestClient(create_api_app(agent=agent), client=("127.0.0.1", 50000))
+
+    response = client.post("/api/chat", json={"message": "hello", "conversation_id": "conv"})
+
+    assert response.status_code == 200
+    assert agent.deliveries and agent.deliveries[0][:2] == ("conv", "echo:hello")
+    assert agent.deliveries[0][2]
+
+
+async def test_chat_does_not_confirm_if_http_send_fails() -> None:
+    class DeliveryAgent(_FakeAgent):
+        def __init__(self) -> None:
+            super().__init__()
+            self.deliveries: list[tuple[str, str, str]] = []
+
+        async def confirm_delivery(self, cid: str, text: str, delivery_id: str) -> None:
+            self.deliveries.append((cid, text, delivery_id))
+
+    agent = DeliveryAgent()
+    app = create_api_app(agent=agent)
+    scope = {"type": "http", "method": "POST", "path": "/api/chat", "app": app}
+    result = await post_chat(
+        ChatRequest(message="hi", conversation_id="conv"), Request(scope), Response()
+    )
+    assert isinstance(result, JSONResponse)
+
+    async def receive() -> dict:
+        return {"type": "http.request", "body": b"", "more_body": False}
+
+    async def send(event: dict) -> None:
+        if event["type"] == "http.response.body":
+            raise ConnectionError("client disconnected")
+
+    with pytest.raises(ConnectionError, match="client disconnected"):
+        await result(scope, receive, send)
+    assert agent.deliveries == []
 
 
 async def test_chat_serializes_single_user_turns_across_conversations() -> None:

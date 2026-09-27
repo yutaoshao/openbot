@@ -5,7 +5,9 @@ from __future__ import annotations
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
-from ._base import CHARS_PER_TOKEN, json_dumps, now_utc, row_to_dict
+from src.memory.request_budget import estimate_input_tokens
+
+from ._base import json_dumps, now_utc, row_to_dict
 
 if TYPE_CHECKING:
     from src.infrastructure.database import Database
@@ -163,17 +165,15 @@ class MessageRepo:
 
     @staticmethod
     def _select_rows_within_budget(rows: list[Any], token_budget: int) -> list[dict[str, Any]]:
-        char_budget = token_budget * CHARS_PER_TOKEN
         selected: list[Any] = []
-        used = 0
-        content_idx = MESSAGE_COLUMNS.index("content")
+        used = 32
         for row in rows:
-            content = row[content_idx] or ""
-            content_chars = len(content)
-            if used + content_chars > char_budget:
+            item = row_to_dict(row, MESSAGE_COLUMNS, MESSAGE_JSON_FIELDS)
+            cost = estimate_input_tokens([item]).tokens - 32
+            if used + cost > token_budget:
                 break
             selected.append(row)
-            used += content_chars
+            used += cost
         selected.reverse()
         return [row_to_dict(row, MESSAGE_COLUMNS, MESSAGE_JSON_FIELDS) for row in selected]
 

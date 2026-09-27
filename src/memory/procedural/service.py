@@ -25,9 +25,12 @@ logger = get_logger(__name__)
 class ProceduralMemory:
     """Extracts, stores, and retrieves user preferences."""
 
-    def __init__(self, storage: Storage, model_gateway: ModelGateway) -> None:
+    def __init__(
+        self, storage: Storage, model_gateway: ModelGateway, *, profile: Any = None
+    ) -> None:
         self._storage = storage
         self._gateway = model_gateway
+        self._profile = profile
 
     async def observe(
         self,
@@ -45,8 +48,10 @@ class ProceduralMemory:
         try:
             response = await self._gateway.chat(prompt_messages)
         except Exception:
-            logger.error("procedural.observe_llm_failed", conversation_id=conversation_id)
-            return []
+            logger.error(
+                "procedural.observe_llm_failed", conversation_id=conversation_id, exc_info=True
+            )
+            raise
 
         raw_prefs = parse_preferences(response.text)
         if not raw_prefs:
@@ -108,7 +113,9 @@ class ProceduralMemory:
         prefs = await self._storage.preferences.get_all(user_id, include_legacy=include_legacy)
         return dedupe_preferences(prefs)
 
-    async def get_system_prompt_context(self, user_id: str) -> str:
+    async def get_system_prompt_context(self, user_id: str, *, query: str = "") -> str:
+        if self._profile is not None:
+            return self._profile.preference_context(query)
         prefs = await self.get_preferences(user_id)
         if not prefs:
             return ""

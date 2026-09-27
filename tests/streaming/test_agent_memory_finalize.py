@@ -92,6 +92,20 @@ class FakeConversationManager:
             {"role": "user", "content": user_input},
         ]
 
+    async def prepare_context_budget(
+        self,
+        conversation_id: str,
+        system_prompt: str,
+        user_input: str,
+        user_id: str,
+        *,
+        config: Any,
+        message_timestamp: datetime | None,
+    ) -> list[dict[str, str]]:
+        return await self.build_messages(
+            conversation_id, system_prompt, user_input, user_id, message_timestamp
+        )
+
     def get_task_state(self, conversation_id: str) -> TaskState | None:
         return self.task_state
 

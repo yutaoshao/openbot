@@ -28,6 +28,12 @@ from src.infrastructure.model_types import (
     ToolCall,
     Usage,
 )
+from src.memory.request_budget import (
+    ESTIMATED_REQUEST_OVERHEAD,
+    InputCount,
+    estimate_input_tokens,
+    request_limit,
+)
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -45,9 +51,10 @@ __all__ = ["ModelGateway", "ModelProvider", "ModelResponse", "StreamChunk", "Too
 class ModelGateway:
     """Unified gateway that routes requests, handles retries and fallback."""
 
-    def __init__(self, config: ModelConfig, event_bus: EventBus) -> None:
+    def __init__(self, config: ModelConfig, event_bus: EventBus, agent_config: Any = None) -> None:
         self.config = config
         self.event_bus = event_bus
+        self._agent_config = agent_config
         self._selector = ModelProviderSelector(config)
         self._router = ModelRouter(config.routing)
         self._providers = {
@@ -178,7 +185,78 @@ class ModelGateway:
             providers=self._providers,
             record_completion=self._record_completion,
             handle_retry=self._handle_retry,
+            check_budget=self._check_budget,
         )
+
+    async def count_input(
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None = None,
+        *,
+        route_tier: RouteTier | None = None,
+    ) -> InputCount:
+        attempt = self._provider_selector().attempts(route_tier=route_tier)[0]
+        provider = self._providers[attempt.key]
+        provider_config = self._provider_config(attempt.key)
+        window = provider_config.context_window if provider_config else None
+        output_budget = provider_config.max_tokens if provider_config else 0
+        counter = getattr(provider, "count_input_tokens", None)
+        if counter is not None:
+            count = await counter(messages, tools, {})
+            if count is not None:
+                return InputCount(
+                    tokens=count, exact=True, model_window=window, output_budget=output_budget
+                )
+        count = estimate_input_tokens(messages, tools)
+        return InputCount(
+            count.tokens + ESTIMATED_REQUEST_OVERHEAD,
+            exact=False,
+            model_window=window,
+            output_budget=output_budget,
+        )
+
+    async def _check_budget(
+        self,
+        provider_attempt: ProviderAttempt,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None,
+        call_kwargs: dict[str, Any],
+    ) -> InputCount | None:
+        config = getattr(self, "_agent_config", None)
+        if config is None:
+            return
+        provider = self._providers[provider_attempt.key]
+        provider_config = self._provider_config(provider_attempt.key)
+        if provider_config is None:
+            raise ValueError(f"Unknown model provider: {provider_attempt.key}")
+        counter = getattr(provider, "count_input_tokens", None)
+        count = await counter(messages, tools, call_kwargs) if counter is not None else None
+        measured = (
+            InputCount(count, exact=True)
+            if count is not None
+            else InputCount(
+                estimate_input_tokens(messages, tools).tokens + ESTIMATED_REQUEST_OVERHEAD,
+                exact=False,
+            )
+        )
+        limit = request_limit(
+            config.input_token_budget,
+            provider_config.context_window,
+            call_kwargs.get("max_tokens", provider_config.max_tokens),
+        )
+        logger.debug(
+            "model.input_budget", tokens=measured.tokens, exact=measured.exact, limit=limit
+        )
+        if measured.tokens > limit:
+            raise ValueError(
+                f"Model request input exceeds budget: {measured.tokens} > {limit} tokens"
+                + (
+                    " (model context window not configured)"
+                    if provider_config.context_window is None
+                    else ""
+                )
+            )
+        return measured
 
     async def _record_completion(
         self,
@@ -187,7 +265,23 @@ class ModelGateway:
         model: str,
         usage: Usage,
         latency_ms: int,
+        input_count: InputCount | None = None,
     ) -> None:
+        if input_count is not None:
+            logger.info(
+                "model.input_count_audit",
+                model=model,
+                estimated=input_count.tokens,
+                actual=usage.tokens_in,
+                exact=input_count.exact,
+            )
+            if usage.tokens_in > input_count.tokens:
+                logger.warning(
+                    "model.input_count_underestimated",
+                    model=model,
+                    estimated=input_count.tokens,
+                    actual=usage.tokens_in,
+                )
         await record_model_completion(
             event_bus=self.event_bus,
             provider_attempt=provider_attempt,
@@ -219,4 +313,3 @@ def _request_options(kwargs: dict[str, Any]) -> tuple[dict[str, Any], RouteTier 
     route_reason = call_kwargs.pop("route_reason", None)
     call_kwargs.pop("purpose", None)
     return call_kwargs, route_tier, route_reason
-

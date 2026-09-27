@@ -73,7 +73,23 @@ class MsgHub:
             return
 
         try:
-            await adapter.send_message(target_id, content)
+            delivery = await adapter.send_message(target_id, content)
+            # WebAdapter returns False when no socket is connected. Other adapters
+            # acknowledge success by returning without raising.
+            if delivery is False or not content.text:
+                return
             logger.info("msg_hub.message_sent", platform=platform, target_id=target_id)
         except Exception:
             logger.exception("msg_hub.send_failed", platform=platform, target_id=target_id)
+            return
+
+        confirm_delivery = data.get("confirm_delivery")
+        if confirm_delivery is not None:
+            try:
+                await confirm_delivery(
+                    target_id,
+                    content.text,
+                    delivery if isinstance(delivery, str) and delivery else data["delivery_id"],
+                )
+            except Exception:
+                logger.exception("msg_hub.delivery_confirmation_failed", platform=platform)

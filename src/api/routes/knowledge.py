@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import uuid
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 from fastapi import APIRouter, HTTPException, Query, Request
 
@@ -37,6 +37,7 @@ async def list_knowledge(
     priority: str | None = Query(default=None),
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
+    memory_type: Literal["general", "personal_legacy", "legacy_unreviewed"] = "general",
 ) -> list[KnowledgeItem]:
     storage = _get_storage(request)
     items = await storage.knowledge.list_all(
@@ -44,6 +45,7 @@ async def list_knowledge(
         priority=priority,
         limit=limit,
         offset=offset,
+        memory_type=memory_type,
     )
     return [KnowledgeItem(**item) for item in items]
 
@@ -55,7 +57,7 @@ async def search_knowledge(
     limit: int = Query(default=10, ge=1, le=100),
 ) -> list[KnowledgeItem]:
     storage = _get_storage(request)
-    items = await storage.knowledge.search(q, limit=limit)
+    items = await storage.knowledge.search(q, limit=limit, memory_type="general")
     return [KnowledgeItem(**item) for item in items]
 
 

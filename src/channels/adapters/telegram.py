@@ -14,7 +14,7 @@ from telegram.error import TelegramError
 from telegram.ext import ApplicationBuilder, ContextTypes, MessageHandler, filters
 
 from src.channels.markdown import md_to_telegram_html
-from src.channels.types import MessageContent, UnifiedMessage
+from src.channels.types import MessageContent, StreamingDelivery, UnifiedMessage
 from src.core.logging import get_logger
 
 if TYPE_CHECKING:
@@ -129,11 +129,12 @@ class TelegramAdapter:
     # Outgoing: non-streaming
     # ------------------------------------------------------------------
 
-    async def send_message(self, chat_id: str, content: MessageContent) -> None:
+    async def send_message(self, chat_id: str, content: MessageContent) -> str | None:
         """Send a message back to Telegram (non-streaming)."""
+        delivery_id = None
         if content.text:
             html = md_to_telegram_html(content.text, partial=False)
-            await self._send_final_message(chat_id, html, parse_mode="HTML")
+            delivery_id = await self._send_final_message(chat_id, html, parse_mode="HTML")
 
         for attachment in content.attachments:
             if attachment.type == "image" and isinstance(attachment.data, bytes):
@@ -147,6 +148,7 @@ class TelegramAdapter:
                     document=attachment.data,
                     filename=attachment.filename,
                 )
+        return delivery_id
 
     # ------------------------------------------------------------------
     # Outgoing: streaming via sendMessageDraft
@@ -156,7 +158,7 @@ class TelegramAdapter:
         self,
         chat_id: str,
         stream: AsyncIterator[StreamChunk],
-    ) -> None:
+    ) -> StreamingDelivery:
         """Consume a streaming response and deliver via sendMessageDraft.
 
         Flow: draft -> draft -> ... -> send_message (final).
@@ -201,11 +203,13 @@ class TelegramAdapter:
         # Send final formatted message
         if accumulated:
             final_html = md_to_telegram_html(accumulated, partial=False)
-            await self._send_final_message(
+            delivery_id = await self._send_final_message(
                 chat_id,
                 final_html,
                 parse_mode="HTML",
             )
+            return StreamingDelivery(True, accumulated, delivery_id)
+        return StreamingDelivery(False, "")
 
     # ------------------------------------------------------------------
     # Private helpers
@@ -240,13 +244,14 @@ class TelegramAdapter:
         chat_id: str,
         text: str,
         parse_mode: str | None = None,
-    ) -> None:
+    ) -> str:
         """Send the final message, splitting if it exceeds Telegram's limit."""
+        delivery_id = ""
         while text:
             chunk = text[:_TG_MAX_LEN]
             text = text[_TG_MAX_LEN:]
             try:
-                await self.app.bot.send_message(
+                sent = await self.app.bot.send_message(
                     chat_id=int(chat_id),
                     text=chunk,
                     parse_mode=parse_mode,
@@ -259,9 +264,12 @@ class TelegramAdapter:
                         chat_id=chat_id,
                         retrying_plain=True,
                     )
-                    await self.app.bot.send_message(
+                    sent = await self.app.bot.send_message(
                         chat_id=int(chat_id),
                         text=chunk,
                     )
                 else:
                     raise
+            if sent is not None:
+                delivery_id = str(sent.message_id)
+        return delivery_id

@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any
 from src.agent.turn_outcome import CompletedTurn, FailedTurn, TurnOutcome
 from src.core.logging import get_logger
 from src.infrastructure.model_gateway import StreamChunk
+from src.memory.request_budget import compact_request_history, request_limit
 
 from .file_write_verification import file_write_verification_failure
 from .loop_helpers import (
@@ -93,6 +94,7 @@ class TurnLoopExecution:
             self._context.request.input_text,
             task_state=task_state,
         )
+        await self._prepare_request_budget(tools)
         model_round: ModelRoundResult | None = None
         text_chunks: list[StreamChunk] = []
         async for event in model_round_events(
@@ -108,6 +110,33 @@ class TurnLoopExecution:
         assert model_round is not None
         self._record_model_round(model_round)
         return model_round, tuple(text_chunks)
+
+    async def _prepare_request_budget(self, tools: list[dict[str, Any]] | None) -> None:
+        agent = self._context.agent
+        counter = getattr(agent.model_gateway, "count_input", None)
+        budget = getattr(agent.config, "input_token_budget", None)
+        if counter is None or budget is None:
+            return
+        for _ in range(8):
+            result = await counter(
+                self._messages,
+                tools,
+                route_tier=getattr(self._context.route_decision, "tier", None),
+            )
+            trigger = (
+                request_limit(budget, result.model_window, result.output_budget)
+                * agent.config.compression_trigger_ratio
+            )
+            if result.tokens < trigger:
+                return
+            changed = await compact_request_history(
+                self._messages,
+                agent.model_gateway,
+                recent_budget=min(agent.config.recent_token_budget, int(trigger) - 1),
+            )
+            if not changed:
+                raise ValueError("Current request exceeds compression trigger without closed turns")
+        raise ValueError("Request history remains above the compression trigger")
 
     def _record_model_round(self, model_round: ModelRoundResult) -> None:
         self._final_model = model_round.model or self._final_model

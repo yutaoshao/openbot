@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from src.agent.agent import Agent
 from src.agent.conversation import ConversationManager
 from src.agent.conversation.journal import ConversationJournal
@@ -13,6 +15,10 @@ from src.infrastructure.event_bus import EventBus
 from src.infrastructure.model_gateway import ModelGateway
 from src.infrastructure.storage import Storage
 from src.memory.episodic import EpisodicMemory
+from src.memory.personal_followups import PersonalFollowups
+from src.memory.personal_history import PersonalHistory
+from src.memory.personal_profile import PersonalProfile
+from src.memory.personal_retrieval import PersonalRetrieval
 from src.memory.procedural import ProceduralMemory
 from src.memory.semantic import SemanticMemory
 from src.tools.registry import ToolRegistry
@@ -37,7 +43,7 @@ class Application:
         self._restart_requested = False
         self._restart_task: asyncio.Task[None] | None = None
         self.event_bus = EventBus()
-        self.model_gateway = ModelGateway(self.config.model, self.event_bus)
+        self.model_gateway = ModelGateway(self.config.model, self.event_bus, self.config.agent)
         self.database = Database(
             self.config.storage,
             embedding_dimensions=self.config.embedding.dimensions,
@@ -62,7 +68,22 @@ class Application:
             self.database,
             self.reranker_service,
         )
-        self.procedural_memory = ProceduralMemory(self.storage, self.model_gateway)
+        self.personal_profile = PersonalProfile()
+        self.procedural_memory = ProceduralMemory(
+            self.storage, self.model_gateway, profile=self.personal_profile
+        )
+        self.personal_history = PersonalHistory(db_path=Path(self.config.storage.db_path))
+        self.personal_retrieval = PersonalRetrieval(
+            self.personal_profile,
+            index=self.storage.personal_index,
+            embedding=self.embedding_service,
+            reranker=self.reranker_service,
+        )
+        self.personal_followups = PersonalFollowups(
+            profile=self.personal_profile,
+            repository=self.storage.followups,
+            gateway=self.model_gateway,
+        )
         self.conversation_manager = ConversationManager(
             self.storage,
             self.model_gateway,
@@ -70,6 +91,10 @@ class Application:
             self.episodic_memory,
             self.procedural_memory,
             conversation_journal=ConversationJournal(),
+            personal_profile=self.personal_profile,
+            personal_history=self.personal_history,
+            personal_retrieval=self.personal_retrieval,
+            followups=self.personal_followups,
         )
         self.agent = Agent(
             model_gateway=self.model_gateway,
