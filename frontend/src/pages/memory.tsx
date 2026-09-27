@@ -12,6 +12,8 @@ type Knowledge = {
   priority: string;
 };
 
+type ProfileDocument = { name: string; content: string; revision: string };
+
 export function MemoryPage(): JSX.Element {
   const { t, formatNumber } = useI18n();
   const qc = useQueryClient();
@@ -24,6 +26,29 @@ export function MemoryPage(): JSX.Element {
   const [editingId, setEditingId] = useState("");
   const [editingContent, setEditingContent] = useState("");
   const [editingPriority, setEditingPriority] = useState("P1");
+  const [selectedProfile, setSelectedProfile] = useState("");
+  const [profileContent, setProfileContent] = useState<string | null>(null);
+
+  const profileList = useQuery({
+    queryKey: ["personal-memory"],
+    queryFn: () => api.get<{ documents: string[] }>("/api/personal-memory"),
+  });
+  const profileDocument = useQuery({
+    queryKey: ["personal-memory", selectedProfile],
+    queryFn: () => api.get<ProfileDocument>(`/api/personal-memory/${selectedProfile.split("/").map(encodeURIComponent).join("/")}`),
+    enabled: Boolean(selectedProfile),
+  });
+  const saveProfile = useMutation({
+    mutationFn: () => api.put<ProfileDocument>(
+      `/api/personal-memory/${selectedProfile.split("/").map(encodeURIComponent).join("/")}`,
+      { content: profileContent, revision: profileDocument.data?.revision ?? "" },
+    ),
+    onSuccess: (updated) => {
+      qc.setQueryData(["personal-memory", selectedProfile], updated);
+      setProfileContent(null);
+      void qc.invalidateQueries({ queryKey: ["personal-memory"] });
+    },
+  });
 
   const list = useQuery({
     queryKey: ["knowledge", search, filterCategory, filterPriority],
@@ -90,6 +115,27 @@ export function MemoryPage(): JSX.Element {
             count: formatNumber(items.length),
           })}</p>
         </div>
+      </section>
+
+      <section className="surface-panel panel-stack">
+        <h2 className="surface-panel-title">{t("memory.personalProfiles")}</h2>
+        <p>{t("memory.personalProfilesHint")}</p>
+        <select className="select" aria-label={t("memory.personalProfiles")} value={selectedProfile}
+          onChange={(event) => { setSelectedProfile(event.target.value); setProfileContent(null); }}>
+          <option value="">{t("memory.selectProfile")}</option>
+          {(profileList.data?.documents ?? []).map((name) => <option key={name} value={name}>{name}</option>)}
+        </select>
+        {selectedProfile && profileDocument.data && (
+          <>
+            <p>{selectedProfile}</p>
+            <textarea className="textarea" rows={14} aria-label={t("memory.personalProfiles")}
+              value={profileContent ?? profileDocument.data.content}
+              onChange={(event) => setProfileContent(event.target.value)} />
+            <button className="btn" type="button" disabled={saveProfile.isPending}
+              onClick={() => saveProfile.mutate()}>{t("memory.save")}</button>
+            {saveProfile.isError && <p role="alert">{saveProfile.error.message}</p>}
+          </>
+        )}
       </section>
 
       <div className="split-layout">

@@ -18,6 +18,7 @@ from src.api.routes.identities import router as identities_router
 from src.api.routes.knowledge import router as knowledge_router
 from src.api.routes.logs import router as logs_router
 from src.api.routes.metrics import router as metrics_router
+from src.api.routes.personal_memory import router as personal_memory_router
 from src.api.routes.schedules import router as schedules_router
 from src.api.routes.settings import router as settings_router
 from src.api.routes.tools import router as tools_router
@@ -140,6 +141,7 @@ def _register_api_routes(app: FastAPI) -> None:
         conversations_router,
         identities_router,
         knowledge_router,
+        personal_memory_router,
         logs_router,
         tools_router,
         schedules_router,
