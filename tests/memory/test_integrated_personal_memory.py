@@ -129,6 +129,70 @@ async def test_paraphrase_retrieval_cache_rebuild_and_manual_edit_during_rerank(
     assert await storage.personal_index.all() == []
 
 
+async def test_reranked_dossier_can_displace_three_direct_matches(memory):
+    profile, storage, _ = memory
+    for name in ("甲", "乙", "丙"):
+        await profile.add_claim(dict(topic="关系", subject=name, kind="confirmed",
+                                     fact=f"事件：{name}提过赔付"),
+                                source=f"message:{name}", stated_at="2026-06-01")
+    await profile.add_claim(dict(topic="关系", subject="丁", kind="event",
+                                 fact="保险赔付到账了"),
+                            source="message:result", stated_at="2026-07-01")
+
+    class PrioritiseResult:
+        async def rerank_dicts(self, query, items, **kwargs):
+            return sorted(items, key=lambda item: "到账了" not in item["content"])
+
+    retrieval = PersonalRetrieval(profile, index=storage.personal_index,
+                                  embedding=MeaningEmbedding(), reranker=PrioritiseResult())
+    matches = await retrieval.recall("甲乙丙保险赔付后来怎样")
+    assert len(matches) == 3
+    assert any("到账了" in match.content for match in matches)
+
+
+async def test_backfilled_profile_embeddings_are_batched(memory):
+    profile, storage, _ = memory
+    path = profile.root / "项目" / "研究.md"
+    path.parent.mkdir(parents=True)
+    path.write_text("# 研究\n\n## 已确认事实\n" + "\n".join(
+        f"- 阶段{i}：已记录；来源：message:{i}" for i in range(35)
+    ))
+
+    class BoundedEmbedding(MeaningEmbedding):
+        async def embed_batch(self, texts):
+            assert len(texts) <= 32
+            return await super().embed_batch(texts)
+
+    embedding = BoundedEmbedding()
+    retrieval = PersonalRetrieval(profile, index=storage.personal_index, embedding=embedding)
+    chunks = await retrieval.rebuild()
+    assert len(chunks) == 35
+    assert embedding.batches == 2
+
+
+async def test_direct_dossier_reranks_using_relevant_old_record(memory):
+    profile, storage, _ = memory
+    path = profile.root / "项目" / "研究.md"
+    path.parent.mkdir(parents=True)
+    path.write_text("# 研究\n\n## 事件经过\n" + "\n".join(
+        [*(f"- 最近阶段{i}：整理资料；来源：message:{i}" for i in range(60)),
+         "- 保险赔付进度：尚未确定；来源：message:old"]
+    ))
+
+    class ObserveCandidates:
+        content = ""
+
+        async def rerank_dicts(self, query, items, **kwargs):
+            self.content = next(item["content"] for item in items if item["path"] == "项目/研究.md")
+            return items
+
+    reranker = ObserveCandidates()
+    retrieval = PersonalRetrieval(profile, index=storage.personal_index,
+                                  embedding=MeaningEmbedding(), reranker=reranker)
+    assert await retrieval.recall("研究的保险赔付进度")
+    assert "保险赔付进度：尚未确定" in reranker.content
+
+
 async def test_event_progression_reuses_id_and_does_not_turn_consultation_into_plan(memory):
     profile, _, _ = memory
     base = dict(topic="宠物", subject="猫咪", kind="event", event_name="第二针疫苗")
@@ -232,6 +296,89 @@ async def test_history_follows_event_sources_and_adjacent_outcome_across_dates(m
     assert "因为之前检查没问题" in content and "已经打完了" in content
     assert "助手原话（仅语境，不代表用户决定）" in content
     assert "message:event4" in content
+
+
+async def test_cross_date_short_outcome_is_found_beyond_neighbour_window(memory):
+    profile, storage, db = memory
+    await storage.conversations.create(id="later", platform="web", user_id="local-single-user")
+    from datetime import UTC, datetime, timedelta
+
+    begin = datetime(2026, 6, 1, tzinfo=UTC)
+    await storage.messages.add(id="plan", conversation_id="later", role="user",
+                               content="猫咪第二针准备周末去打", timestamp=begin)
+    for index in range(12):
+        await storage.messages.add(id=f"other{index}", conversation_id="later", role="user",
+                                   content=f"其它日常话题{index}",
+                                   timestamp=begin + timedelta(days=1, minutes=index))
+    await storage.messages.add(id="outcome", conversation_id="later", role="user",
+                               content="已经打完了，很顺利",
+                               timestamp=begin + timedelta(days=7))
+    history = PersonalHistory(profile.root / "missing", Path(db.db_path))
+    context = history.context("第二针后来怎么样了", profile_content=(
+        "- 猫咪第二针准备周末去打；事件名称：第二针疫苗；状态：planned；"
+        "事件ID：evt-second；来源：message:plan"))
+    assert "message:outcome" in context
+    assert "已经打完了" in context
+
+
+async def test_large_dossier_uses_relevant_sources_without_loading_every_old_turn(memory):
+    profile, storage, db = memory
+    from datetime import UTC, datetime, timedelta
+
+    begin = datetime(2026, 6, 1, tzinfo=UTC)
+    lines = []
+    for index in range(50):
+        chat = f"chat{index}"
+        await storage.conversations.create(id=chat, platform="web", user_id="local-single-user")
+        text = "猫咪的疫苗已经打完了" if index == 49 else f"第{index}次锻炼是跑步"
+        await storage.messages.add(id=f"source{index}", conversation_id=chat, role="user",
+                                   content=text, timestamp=begin + timedelta(minutes=index))
+        lines.append(f"- {text}；来源：message:source{index}")
+    history = PersonalHistory(profile.root / "missing", Path(db.db_path))
+    context = history.context("猫咪疫苗后来怎么样", profile_content="\n".join(lines))
+    assert "message:source49" in context
+    assert "message:source0" not in context
+
+
+async def test_history_budget_keeps_relevant_outcome_and_reports_other_sources(memory):
+    profile, storage, db = memory
+    from datetime import UTC, datetime, timedelta
+
+    begin = datetime(2026, 6, 1, tzinfo=UTC)
+    lines = []
+    for index in range(15):
+        chat = f"story{index}"
+        await storage.conversations.create(id=chat, platform="web", user_id="local-single-user")
+        content = ("已经打完第二针疫苗" if index == 14 else "猫咪第二针疫苗准备中")
+        content += "详细经历" * 700
+        await storage.messages.add(id=f"story{index}", conversation_id=chat, role="user",
+                                   content=content, timestamp=begin + timedelta(minutes=index))
+        lines.append(f"- {content[:16]}；事件ID：evt-vaccine；事件名称：第二针疫苗；"
+                     f"来源：message:story{index}")
+    history = PersonalHistory(profile.root / "missing", Path(db.db_path))
+    context = history.context("第二针疫苗已经打完了吗", profile_content="\n".join(lines))
+    assert "message:story14" in context
+    assert "未展开" in context
+    assert len(context) < 50_000
+
+
+async def test_cross_conversation_explicit_event_reference_finds_outcome(memory):
+    profile, storage, db = memory
+    from datetime import UTC, datetime, timedelta
+
+    begin = datetime(2026, 6, 1, tzinfo=UTC)
+    for name in ("plan-chat", "result-chat"):
+        await storage.conversations.create(id=name, platform="web", user_id="local-single-user")
+    await storage.messages.add(id="plan-cross", conversation_id="plan-chat", role="user",
+                               content="猫咪第二针准备周末去打", timestamp=begin)
+    await storage.messages.add(id="result-cross", conversation_id="result-chat", role="user",
+                               content="猫咪的第二针已经打完了，很顺利",
+                               timestamp=begin + timedelta(days=7))
+    history = PersonalHistory(profile.root / "missing", Path(db.db_path))
+    context = history.context("第二针后来怎么样", profile_content=(
+        "- 猫咪第二针准备周末去打；事件名称：第二针疫苗；状态：planned；"
+        "事件ID：evt-second；来源：message:plan-cross"))
+    assert "message:result-cross" in context
 
 
 async def test_followup_receipt_retries_and_suppresses_paraphrased_question_after_restart(memory):

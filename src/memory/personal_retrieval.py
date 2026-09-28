@@ -12,6 +12,7 @@ from src.core.logging import get_logger
 from src.memory.personal_profile import PersonalProfile, ProfileMatch, _terms
 
 logger = get_logger(__name__)
+_EMBEDDING_BATCH_SIZE = 32
 
 
 class PersonalRetrieval:
@@ -57,11 +58,12 @@ class PersonalRetrieval:
                         )
                     )
             missing = [item for item in chunks if not item["embedding"]]
-            if missing:
-                vectors = await self.embedding.embed_batch([item["content"] for item in missing])
-                if len(vectors) != len(missing):
+            for offset in range(0, len(missing), _EMBEDDING_BATCH_SIZE):
+                batch = missing[offset:offset + _EMBEDDING_BATCH_SIZE]
+                vectors = await self.embedding.embed_batch([item["content"] for item in batch])
+                if len(vectors) != len(batch):
                     raise ValueError("Profile embedding batch size does not match the input")
-                for item, vector in zip(missing, vectors, strict=True):
+                for item, vector in zip(batch, vectors, strict=True):
                     item["embedding"] = vector
             if chunks != list(cached.values()):
                 await self.index.replace(chunks)
@@ -83,21 +85,35 @@ class PersonalRetrieval:
         for ranking, values in ((lexical, keyword_scores), (semantic, vector_scores)):
             for rank, index in enumerate([i for i in ranking if values[i] > 0][:20]):
                 scores[index] = scores.get(index, 0) + 1 / (60 + rank + 1)
-        candidates = [
-            {**chunks[i], "score": score}
-            for i, score in sorted(scores.items(), key=lambda pair: -pair[1])
-        ]
+        direct = self.profile.matches(query, limit=max(limit, 12))
+        by_path: dict[str, dict] = {}
+        direct_paths = {match.path.relative_to(self.profile.root).as_posix() for match in direct}
+        for match in direct:
+            path = match.path.relative_to(self.profile.root).as_posix()
+            by_path[path] = dict(
+                path=path, content=match.content,
+                revision=hashlib.sha256(match.content.encode()).hexdigest(),
+                score=float(match.score),
+            )
+        for index, score in sorted(scores.items(), key=lambda pair: -pair[1]):
+            item = chunks[index]
+            path = item["path"]
+            if path not in by_path:
+                by_path[path] = {**item, "score": score, "_chunk_score": score}
+            elif path in direct_paths and score > by_path[path].get("_chunk_score", 0):
+                by_path[path]["content"] = item["content"]
+                by_path[path]["_chunk_score"] = score
+            elif path not in direct_paths:
+                by_path[path]["score"] = max(by_path[path]["score"], score)
+        candidates = sorted(by_path.values(), key=lambda item: -item["score"])[:20]
         if self.reranker and candidates:
             candidates = await self.reranker.rerank_dicts(
                 query, candidates, content_key="content", top_n=min(12, len(candidates))
             )
-        direct = self.profile.matches(query, limit=limit)
-        result = list(direct)
+        result: list[ProfileMatch] = []
         for item in candidates:
             if len(result) >= limit:
                 break
-            if any(match.path == self.profile.root / item["path"] for match in result):
-                continue
             try:
                 content, revision = self.profile.read_document(item["path"])
             except FileNotFoundError:
@@ -118,6 +134,8 @@ class PersonalRetrieval:
         logger.info(
             "personal_profile.lookup",
             query=query,
+            candidates=[{"path": item["path"], "revision": item["revision"]}
+                        for item in candidates],
             sources=[
                 {"path": item.source, "revision": hashlib.sha256(item.content.encode()).hexdigest()}
                 for item in result

@@ -29,6 +29,30 @@ class DatabaseMigrationMixin:
             await self._ensure_column(
                 "knowledge", "memory_type", "TEXT NOT NULL DEFAULT 'legacy_unreviewed'"
             )
+        if current_version < 11:
+            await self._ensure_working_summary()
+
+    async def _ensure_working_summary(self) -> None:
+        await self.connection.execute("""
+            CREATE TABLE IF NOT EXISTS working_memory_summaries (
+                timeline TEXT PRIMARY KEY, boundary_id TEXT NOT NULL,
+                content TEXT NOT NULL, version INTEGER NOT NULL, updated_at TEXT NOT NULL
+            )
+        """)
+        await self.connection.execute("""
+            CREATE TABLE IF NOT EXISTS personal_backfill_turns (
+                message_id TEXT PRIMARY KEY, source TEXT NOT NULL,
+                statement_at TEXT NOT NULL, source_aliases TEXT NOT NULL,
+                status TEXT NOT NULL CHECK(status IN
+                    ('staged', 'extracted', 'none', 'uncertain', 'failed')),
+                claims TEXT NOT NULL, error TEXT NOT NULL DEFAULT '', updated_at TEXT NOT NULL
+            )
+        """)
+        await self.connection.execute("""
+            CREATE TABLE IF NOT EXISTS personal_backfill_documents (
+                path TEXT PRIMARY KEY, revision TEXT NOT NULL
+            )
+        """)
 
     async def _migrate_to_v5(self) -> None:
         await self._ensure_column(
@@ -137,6 +161,7 @@ class DatabaseMigrationMixin:
 
     async def _ensure_current_schema(self) -> None:
         await self._ensure_message_timestamp()
+        await self._ensure_working_summary()
         await self.connection.commit()
 
     async def _migrate_to_v7(self) -> None:

@@ -47,6 +47,44 @@ async def test_profile_correction_preserves_source_and_manual_edit_wins(tmp_path
     assert "2026-03-30" in (tmp_path / "INDEX.md").read_text()
 
 
+async def test_correction_uses_stable_key_across_wording(tmp_path: Path) -> None:
+    profile = PersonalProfile(tmp_path)
+    old = {"topic": "个人", "subject": "交流偏好", "kind": "confirmed",
+           "fact": "回复偏好：不要使用 emoji", "preference_key": "emoji", "scope": "通用"}
+    assert await profile.add_claim(old, source="message:old", stated_at="2026-06-01")
+    new = {**old, "fact": "表情使用：现在可以使用 emoji", "correction": True}
+    assert await profile.add_claim(new, source="message:new", stated_at="2026-07-01")
+    document = (tmp_path / "个人" / "交流偏好.md").read_text()
+    current = document.split("## 已确认事实", 1)[1].split("## 历史修订", 1)[0]
+    assert "表情使用：现在可以使用 emoji" in current
+    assert "回复偏好：不要使用 emoji" not in current
+    assert "回复偏好：不要使用 emoji" in document.split("## 历史修订", 1)[1]
+    assert "回复偏好：不要使用 emoji" not in profile.preference_context("打招呼")
+
+
+async def test_aliases_from_later_sourced_claim_are_visible(tmp_path: Path) -> None:
+    profile = PersonalProfile(tmp_path)
+    base = {"topic": "宠物", "subject": "小橘", "kind": "confirmed", "fact": "物种：猫"}
+    await profile.add_claim(base, source="message:old", stated_at="2026-06-01")
+    await profile.add_claim({**base, "fact": "性别：公", "aliases": ["阿橘"]},
+                            source="message:new", stated_at="2026-07-01")
+    assert "阿橘" in (tmp_path / "INDEX.md").read_text()
+    assert "物种：猫" in profile.context("阿橘是什么")
+
+
+async def test_age_annotation_ignores_superseded_birth_date(tmp_path: Path) -> None:
+    profile = PersonalProfile(tmp_path)
+    await profile.add_claim({"topic": "宠物", "subject": "小白", "kind": "confirmed",
+                             "fact": "出生日期：2024-01-02"},
+                            source="message:old", stated_at="2026-05-01")
+    await profile.add_claim({"topic": "宠物", "subject": "小白", "kind": "confirmed",
+                             "fact": "出生日期：未知", "correction": True},
+                            source="message:new", stated_at="2026-06-01")
+    context = profile.context("小白多大了")
+    assert "出生日期：未知" in context and "## 历史修订" in context
+    assert "按 " not in context
+
+
 async def test_history_uses_both_sources_and_stays_with_entity(tmp_path: Path) -> None:
     root = tmp_path / "conversations"
     day = root / "2026" / "09" / "17.jsonl"
@@ -110,17 +148,31 @@ async def test_new_measurement_reuses_pet_dossier_even_if_extractor_changes_topi
 ) -> None:
     profile = PersonalProfile(tmp_path)
     await profile.add_claim(
-        {"topic": "宠物", "subject": "嘻嘻", "kind": "confirmed",
-         "fact": "出生日期：2026-03-28"},
-        source="message:birth", stated_at="2026-05-29",
+        {"topic": "宠物", "subject": "测试猫", "kind": "confirmed",
+         "fact": "出生日期：2025-02-01"},
+        source="message:birth", stated_at="2025-03-01",
     )
     await profile.add_claim(
-        {"topic": "体重", "subject": "嘻嘻", "kind": "confirmed",
-         "fact": "体重：2026 年 9 月 17 日为 2.9kg"},
-        source="message:weighing", stated_at="2026-09-27",
+        {"topic": "体重", "subject": "测试猫", "kind": "confirmed",
+         "fact": "体重：2025 年 6 月 3 日为 3.7kg"},
+        source="message:weighing", stated_at="2025-06-04",
     )
-    assert profile.documents() == ["宠物/嘻嘻.md"]
-    assert "## 事件经过\n- 体重：" in (tmp_path / "宠物" / "嘻嘻.md").read_text()
+    await profile.add_claim(
+        {"topic": "宠物", "subject": "测试猫", "kind": "confirmed",
+         "fact": "当天这只猫的体重两斤"},
+        source="message:earlier", stated_at="2025-03-01",
+    )
+    await profile.add_claim(
+        {"topic": "宠物", "subject": "测试猫", "kind": "confirmed",
+         "fact": "截至2025年6月3日，小猫体重约3.7千克"},
+        source="message:kilogram", stated_at="2025-06-05",
+    )
+    assert profile.documents() == ["宠物/测试猫.md"]
+    document = (tmp_path / "宠物" / "测试猫.md").read_text()
+    measurements = document.split("## 事件经过", 1)[1]
+    assert "- 当天这只猫的体重两斤" in measurements
+    assert "- 体重：" in measurements
+    assert "小猫体重约3.7千克" in measurements
 
 
 async def test_same_name_across_topics_requires_a_clear_subject(tmp_path: Path) -> None:

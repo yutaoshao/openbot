@@ -53,6 +53,27 @@ CREATE TABLE IF NOT EXISTS memory_stage_results (
     complete INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY(source, stage)
 );
+CREATE TABLE IF NOT EXISTS working_memory_summaries (
+    timeline TEXT PRIMARY KEY,
+    boundary_id TEXT NOT NULL,
+    content TEXT NOT NULL,
+    version INTEGER NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS personal_backfill_turns (
+    message_id TEXT PRIMARY KEY,
+    source TEXT NOT NULL,
+    statement_at TEXT NOT NULL,
+    source_aliases TEXT NOT NULL,
+    status TEXT NOT NULL CHECK(status IN ('staged', 'extracted', 'none', 'uncertain', 'failed')),
+    claims TEXT NOT NULL,
+    error TEXT NOT NULL DEFAULT '',
+    updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS personal_backfill_documents (
+    path TEXT PRIMARY KEY,
+    revision TEXT NOT NULL
+);
 -- Rebuildable Markdown search projections, never a source of personal facts.
 CREATE TABLE IF NOT EXISTS personal_search_chunks (
     id TEXT PRIMARY KEY,
