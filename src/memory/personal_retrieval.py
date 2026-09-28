@@ -37,26 +37,7 @@ class PersonalRetrieval:
         async with self._lock:
             cached = {item["id"]: item for item in await self.index.all()}
             model = self._embedding_model()
-            chunks = []
-            for path in self.profile.documents():
-                content, revision = self.profile.read_document(path)
-                for section, text in paragraphs(content):
-                    chunk_id = hashlib.sha256(f"{path}\n{section}\n{text}".encode()).hexdigest()
-                    item = cached.get(chunk_id, {})
-                    vector = (
-                        item.get("embedding", []) if item.get("embedding_model") == model else []
-                    )
-                    chunks.append(
-                        dict(
-                            id=chunk_id,
-                            path=path,
-                            revision=revision,
-                            section=section,
-                            content=text,
-                            embedding_model=model,
-                            embedding=vector,
-                        )
-                    )
+            chunks = await asyncio.to_thread(self._document_chunks, cached, model)
             missing = [item for item in chunks if not item["embedding"]]
             for offset in range(0, len(missing), _EMBEDDING_BATCH_SIZE):
                 batch = missing[offset : offset + _EMBEDDING_BATCH_SIZE]
@@ -74,6 +55,27 @@ class PersonalRetrieval:
             )
             return chunks
 
+    def _document_chunks(self, cached: dict[str, dict], model: str) -> list[dict]:
+        chunks = []
+        for path in self.profile.documents():
+            content, revision = self.profile.read_document(path)
+            for section, text in paragraphs(content):
+                chunk_id = hashlib.sha256(f"{path}\n{section}\n{text}".encode()).hexdigest()
+                item = cached.get(chunk_id, {})
+                vector = item.get("embedding", []) if item.get("embedding_model") == model else []
+                chunks.append(
+                    dict(
+                        id=chunk_id,
+                        path=path,
+                        revision=revision,
+                        section=section,
+                        content=text,
+                        embedding_model=model,
+                        embedding=vector,
+                    )
+                )
+        return chunks
+
     async def recall(self, query: str, *, limit: int = 3) -> list[ProfileMatch]:
         chunks = await self.rebuild()
         query_vector = await self.embedding.embed(query)
@@ -85,7 +87,7 @@ class PersonalRetrieval:
         for ranking, values in ((lexical, keyword_scores), (semantic, vector_scores)):
             for rank, index in enumerate([i for i in ranking if values[i] > 0][:20]):
                 scores[index] = scores.get(index, 0) + 1 / (60 + rank + 1)
-        direct = self.profile.matches(query, limit=max(limit, 12))
+        direct = await asyncio.to_thread(self.profile.matches, query, limit=max(limit, 12))
         by_path: dict[str, dict] = {}
         direct_paths = {match.path.relative_to(self.profile.root).as_posix() for match in direct}
         for match in direct:
@@ -116,7 +118,9 @@ class PersonalRetrieval:
             if len(result) >= limit:
                 break
             try:
-                content, revision = self.profile.read_document(item["path"])
+                content, revision = await asyncio.to_thread(
+                    self.profile.read_document, item["path"]
+                )
             except FileNotFoundError:
                 logger.info("personal_index.stale_hit", path=item["path"], reason="deleted")
                 continue

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from src.agent.state.task_contract import ACTION_FILE_WRITE
+from src.agent.state.task_contract import ACTION_FILE_WRITE, TaskContract
 from src.agent.verification.stop import ledger_from_tool_calls
 from src.agent.verification.stop_messages import missing_requirement_message
 from src.core.logging import get_logger
@@ -13,11 +13,13 @@ from src.tools.file_mutation_receipt import FILE_MUTATION_ACTIONS
 if TYPE_CHECKING:
     from pathlib import Path
 
+    from src.tools.effects import ToolEffect
+
 logger = get_logger(__name__)
 
 
 def file_write_verification_failure(
-    contract: Any,
+    contract: TaskContract,
     tool_calls: list[dict[str, Any]],
     *,
     project_root: Path | None = None,
@@ -41,7 +43,7 @@ def file_write_verification_failure(
     return missing_requirement_message(requirement, {}, ledger.events)
 
 
-def _observed_write_targets(events: tuple[Any, ...]) -> tuple[str, ...]:
+def _observed_write_targets(events: tuple[ToolEffect, ...]) -> tuple[str, ...]:
     targets: list[str] = []
     for event in events:
         if event.action not in FILE_MUTATION_ACTIONS:

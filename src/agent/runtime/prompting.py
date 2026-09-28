@@ -11,7 +11,10 @@ from src.core.user_scope import SINGLE_USER_ID
 from src.memory.message_format import render_llm_message
 
 if TYPE_CHECKING:
+    from src.agent.agent import Agent
     from src.agent.runtime.turn_request import TurnRequest
+    from src.agent.state import TaskState
+    from src.tools.registry import ToolRegistry
 
 DEFAULT_SYSTEM_PROMPT = """You are OpenBot, a helpful personal AI assistant.
 
@@ -36,10 +39,10 @@ _CONTEXT_METADATA_GUIDANCE = (
 
 
 def build_system_prompt(
-    agent: Any,
+    agent: Agent,
     *,
     input_text: str = "",
-    task_state: Any = None,
+    task_state: TaskState | None = None,
 ) -> str:
     """Build the dynamic system prompt for the current turn."""
     template = agent.config.system_prompt or DEFAULT_SYSTEM_PROMPT
@@ -59,7 +62,7 @@ def build_system_prompt(
 
 
 async def prepare_agent_turn(
-    agent: Any,
+    agent: Agent,
     request: TurnRequest,
 ) -> list[dict[str, Any]]:
     """Build model messages for the current turn."""
@@ -69,7 +72,7 @@ async def prepare_agent_turn(
 
 
 async def _conversation_turn_messages(
-    agent: Any,
+    agent: Agent,
     request: TurnRequest,
 ) -> list[dict[str, Any]]:
     resolved_user_id = request.user_id or SINGLE_USER_ID
@@ -101,7 +104,7 @@ async def _conversation_turn_messages(
 
 
 async def _standalone_turn_messages(
-    agent: Any,
+    agent: Agent,
     request: TurnRequest,
 ) -> list[dict[str, Any]]:
     if agent.conversation_manager:
@@ -128,31 +131,31 @@ async def _standalone_turn_messages(
 
 
 def resolve_tools(
-    agent: Any,
+    registry: ToolRegistry | None,
     input_text: str,
     *,
-    task_state: Any = None,
+    task_state: TaskState | None = None,
 ) -> list[dict[str, Any]] | None:
     """Resolve core and activated deferred tools for the current turn."""
-    if not agent.tool_registry:
+    if registry is None:
         return None
-    active_names = agent.tool_registry.get_default_active_names()
-    active_names.update(agent.tool_registry.match_deferred(input_text))
+    active_names = registry.get_default_active_names()
+    active_names.update(registry.match_deferred(input_text))
     if task_state is not None:
         active_names.update(task_state.activated_tools)
-    return agent.tool_registry.get_schemas(active_names=active_names)
+    return registry.get_schemas(active_names=active_names)
 
 
 def resolve_route_tool_names(
-    agent: Any,
+    registry: ToolRegistry | None,
     input_text: str,
     *,
-    task_state: Any = None,
+    task_state: TaskState | None = None,
 ) -> tuple[str, ...]:
     """Return tools that indicate user-requested extra capability."""
-    if not agent.tool_registry:
+    if registry is None:
         return ()
-    names = set(agent.tool_registry.match_deferred(input_text))
+    names = set(registry.match_deferred(input_text))
     if task_state is not None:
         names.update(task_state.activated_tools)
     return tuple(sorted(names))

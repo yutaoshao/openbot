@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import uuid
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from src.channels.types import MessageContent, StreamingAdapter
 from src.core.logging import get_logger
@@ -11,13 +11,13 @@ from src.core.trace import trace_scope
 
 logger = get_logger(__name__)
 
+if TYPE_CHECKING:
+    from src.channels.types import UnifiedMessage
 
-def _delivery_confirmation(app: Any) -> Any:
-    """Old agent doubles need no delivery hook; production agents provide it."""
-    return getattr(app.agent, "confirm_delivery", None)
+    from .container import Application
 
 
-async def on_message_receive(app: Any, data: dict[str, Any]) -> None:
+async def on_message_receive(app: Application, data: dict[str, Any]) -> None:
     """Handle incoming platform messages."""
     message = data["message"]
     input_text = message.content.text
@@ -76,7 +76,9 @@ async def on_message_receive(app: Any, data: dict[str, Any]) -> None:
             )
 
 
-async def handle_streaming(app: Any, message: Any, adapter: StreamingAdapter) -> None:
+async def handle_streaming(
+    app: Application, message: UnifiedMessage, adapter: StreamingAdapter
+) -> None:
     """Streaming path: Agent.run_stream() -> adapter.send_streaming()."""
     import time
 
@@ -91,9 +93,8 @@ async def handle_streaming(app: Any, message: Any, adapter: StreamingAdapter) ->
         platform_user_id=message.sender_id,
     )
     delivery = await adapter.send_streaming(message.conversation_id, stream)
-    confirm = _delivery_confirmation(app)
-    if delivery.delivered and delivery.text and confirm is not None:
-        await confirm(
+    if delivery.delivered and delivery.text:
+        await app.agent.confirm_delivery(
             message.conversation_id,
             delivery.text,
             delivery.delivery_id or uuid.uuid4().hex,
@@ -115,7 +116,7 @@ async def handle_streaming(app: Any, message: Any, adapter: StreamingAdapter) ->
     )
 
 
-async def handle_non_streaming(app: Any, message: Any) -> None:
+async def handle_non_streaming(app: Application, message: UnifiedMessage) -> None:
     """Non-streaming path: Agent.run() -> event bus -> MsgHub."""
     result = await app.agent.run(
         input_text=message.content.text,
@@ -136,7 +137,7 @@ async def handle_non_streaming(app: Any, message: Any) -> None:
             "tokens_in": result.tokens_in,
             "tokens_out": result.tokens_out,
             "delivery_id": uuid.uuid4().hex,
-            "confirm_delivery": _delivery_confirmation(app),
+            "confirm_delivery": app.agent.confirm_delivery,
         },
     )
     logger.info(

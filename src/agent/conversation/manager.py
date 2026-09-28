@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 from typing import TYPE_CHECKING, Any
 
 from src.core.logging import get_logger
@@ -12,7 +11,7 @@ from src.memory.request_budget import estimate_input_tokens, request_limit
 from . import archive_helpers as archive
 from . import message_flow as flow
 from .compression import maybe_compress_shared_timeline
-from .memory_sync import sync_eligible_long_term_memory
+from .online_memory import OnlineMemorySync
 from .prompt_builder import PromptBuilder
 from .shared_timeline import SharedTimelineMemory
 from .task_state_store import TaskStateStore
@@ -61,20 +60,9 @@ class ConversationManager:
         self._journal = conversation_journal
         self._personal_profile = personal_profile
         self.followups = followups
-        from src.memory.personal_sync import PersonalMemorySync
-
-        self._personal_sync = (
-            PersonalMemorySync(
-                profile=personal_profile,
-                semantic=semantic_memory,
-                gateway=model_gateway,
-                progress=storage.personal_progress,
-            )
-            if personal_profile is not None
-            else None
+        self._online_memory = OnlineMemorySync(
+            storage, model_gateway, semantic_memory, procedural_memory, personal_profile
         )
-        self._personal_sync_lock = asyncio.Lock()
-        self._last_memory_sync_count: dict[str, int] = {}
         self._last_archive_count: dict[str, int] = {}
         self._prompt_builder = PromptBuilder(
             semantic_memory,
@@ -289,35 +277,7 @@ class ConversationManager:
             logger.debug("conversation.evicted_idle", conversation_id=conversation_id)
 
     async def sync_memory_after_turn(self, conversation_id: str) -> None:
-        if self._personal_profile is not None:
-            await self._sync_personal_memory(conversation_id)
-            return
-        cursor = self._last_memory_sync_count.get(conversation_id, 0)
-        self._last_memory_sync_count[conversation_id] = await sync_eligible_long_term_memory(
-            storage=self._storage,
-            semantic_memory=self._semantic,
-            procedural_memory=self._procedural,
-            conversation_id=conversation_id,
-            cursor=cursor,
-        )
-
-    async def _sync_personal_memory(self, conversation_id: str) -> None:
-        from src.memory.turn_selection import select_memory_batch
-
-        async with self._personal_sync_lock:
-            cursor = await self._storage.personal_progress.get(conversation_id)
-            messages = await self._storage.messages.get_by_conversation(conversation_id)
-            selected = select_memory_batch(messages, cursor)
-            eligible = iter(selected.messages)
-            for user, assistant in zip(eligible, eligible, strict=True):
-                user_index = messages.index(user, cursor)
-                await self._personal_sync.sync_turn(
-                    user, assistant, adjacent=messages[max(0, user_index - 8) : user_index]
-                )
-                await self._storage.personal_progress.advance(
-                    conversation_id, messages.index(assistant, cursor) + 1
-                )
-            await self._storage.personal_progress.advance(conversation_id, selected.next_cursor)
+        await self._online_memory.sync(conversation_id)
 
     async def archive_idle_conversation(
         self,

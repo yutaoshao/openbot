@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import json
 import re
-import sqlite3
+import threading
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
 
 from src.core.logging import get_logger
+from src.infrastructure.storage.history_sources import HistorySources
 from src.memory.personal_events import metadata
 from src.memory.personal_retrieval import bm25
 from src.memory.request_budget import estimate_input_tokens
@@ -36,60 +37,45 @@ class PersonalHistory:
     ) -> None:
         self.root = root
         self.db_path = db_path
+        self._sources = HistorySources(root, db_path)
+        self._lock = threading.RLock()
         self._signature: tuple = ()
         self._records: dict[str, HistoryHit] = {}
         self._aliases: dict[str, str] = {}
 
     def _refresh(self) -> None:
-        files = sorted(self.root.glob("*/*/*.jsonl"))
-        watched = [*files, self.db_path, self.db_path.with_name(self.db_path.name + "-wal")]
-        signature = tuple(
-            (str(path), path.stat().st_mtime_ns, path.stat().st_size)
-            for path in watched
-            if path.is_file()
-        )
+        signature, files = self._sources.signature()
         if signature == self._signature:
             return
         records: dict[str, HistoryHit] = {}
         aliases: dict[str, str] = {}
-        for path in files:
-            for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
-                try:
-                    item = json.loads(line)
-                except json.JSONDecodeError:
-                    logger.warning("personal_history.invalid_json", path=str(path), line=number)
-                    continue
-                source = f"{path}:{number}"
-                hit = self._hit(source, item)
-                message_id = item.get("stored_message_id")
-                if hit is None or (message_id and f"message:{message_id}" in aliases):
-                    continue
-                records[source] = hit
-                if message_id:
-                    aliases[f"message:{message_id}"] = source
-        if self.db_path.is_file():
-            self._read_database(records, aliases)
+        for source, item in self._sources.archived(files):
+            hit = self._hit(source, item)
+            message_id = item.get("stored_message_id")
+            if hit is None or (message_id and f"message:{message_id}" in aliases):
+                continue
+            records[source] = hit
+            if message_id:
+                aliases[f"message:{message_id}"] = source
+        self._read_database(records, aliases)
         self._records, self._aliases, self._signature = records, aliases, signature
 
     def _read_database(self, records: dict[str, HistoryHit], aliases: dict[str, str]) -> None:
-        with sqlite3.connect(f"file:{self.db_path.resolve()}?mode=ro", uri=True) as conn:
-            conn.row_factory = sqlite3.Row
-            for row in conn.execute("SELECT * FROM messages ORDER BY timestamp, id"):
-                item = dict(row)
-                source = f"message:{item['id']}"
-                if source in aliases:
-                    key = aliases[source]
-                    if self._hit(source, item) is None:
-                        records.pop(key, None)
-                        aliases.pop(source, None)
-                        continue
-                    records[key] = replace(
-                        records[key], conversation_id=item.get("conversation_id", "")
-                    )
+        for item in self._sources.messages():
+            source = f"message:{item['id']}"
+            if source in aliases:
+                key = aliases[source]
+                if self._hit(source, item) is None:
+                    records.pop(key, None)
+                    aliases.pop(source, None)
                     continue
-                hit = self._hit(source, item)
-                if hit:
-                    records[source] = hit
+                records[key] = replace(
+                    records[key], conversation_id=item.get("conversation_id", "")
+                )
+                continue
+            hit = self._hit(source, item)
+            if hit:
+                records[source] = hit
 
     @staticmethod
     def _hit(source: str, item: dict) -> HistoryHit | None:
@@ -110,6 +96,10 @@ class PersonalHistory:
         )
 
     def search(self, query: str, *, limit: int = 5) -> list[HistoryHit]:
+        with self._lock:
+            return self._search(query, limit=limit)
+
+    def _search(self, query: str, *, limit: int) -> list[HistoryHit]:
         self._refresh()
         users = [record for record in self._records.values() if record.role == "user"]
         scores = bm25(query, [item.text for item in users])
@@ -122,6 +112,14 @@ class PersonalHistory:
 
     def context(
         self, query: str, *, profile_content: str = "", conversation_ids: list[str] | None = None
+    ) -> str:
+        with self._lock:
+            return self._context(
+                query, profile_content=profile_content, conversation_ids=conversation_ids
+            )
+
+    def _context(
+        self, query: str, *, profile_content: str, conversation_ids: list[str] | None
     ) -> str:
         hits = self.search(query, limit=8)
         selected = {hit.source for hit in hits}

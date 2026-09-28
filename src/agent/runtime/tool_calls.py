@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from src.core.logging import get_logger
 from src.infrastructure.model_gateway import StreamChunk
@@ -13,6 +13,12 @@ from .tool_executor import execute_tool_call, summarize_tool_result
 from .tool_output_store import offload_tool_output_if_needed
 
 logger = get_logger(__name__)
+
+if TYPE_CHECKING:
+    from src.agent.agent import Agent
+    from src.agent.state import TaskState
+    from src.infrastructure.model_types import ToolCall
+    from src.tools.registry import ToolResult
 
 
 @dataclass(frozen=True)
@@ -23,12 +29,12 @@ class ToolExecutionBatch:
 
 
 async def execute_tool_calls_for_round(
-    agent: Any,
+    agent: Agent,
     *,
-    collected_tool_calls: list[Any],
+    collected_tool_calls: list[ToolCall],
     conversation_id: str,
     platform: str,
-    task_state: Any,
+    task_state: TaskState | None,
     task_start: float,
     task_timeout: int,
     iterations: int,
@@ -54,12 +60,12 @@ async def execute_tool_calls_for_round(
 
 
 async def _execute_tool_call(
-    agent: Any,
+    agent: Agent,
     *,
-    tool_call: Any,
+    tool_call: ToolCall,
     conversation_id: str,
     platform: str,
-    task_state: Any,
+    task_state: TaskState | None,
     task_start: float,
     task_timeout: int,
     iterations: int,
@@ -94,15 +100,17 @@ async def _execute_tool_call(
 
 
 async def _run_tool_call(
-    agent: Any,
-    tool_call: Any,
+    agent: Agent,
+    tool_call: ToolCall,
     conversation_id: str,
     platform: str,
-    task_state: Any,
+    task_state: TaskState | None,
     timeout_override: float | None,
-) -> Any:
+) -> ToolResult:
     tool_result = await execute_tool_call(
-        agent,
+        agent.tool_registry,
+        agent.config,
+        agent.tool_hooks,
         tool_call.name,
         tool_call.arguments,
         conversation_id=conversation_id,
@@ -117,7 +125,9 @@ async def _run_tool_call(
     )
 
 
-def _execution_record(tool_call: Any, tool_result: Any, tool_latency: int) -> dict[str, Any]:
+def _execution_record(
+    tool_call: ToolCall, tool_result: ToolResult, tool_latency: int
+) -> dict[str, Any]:
     return {
         "name": tool_call.name,
         "arguments": tool_call.arguments,
@@ -130,7 +140,7 @@ def _execution_record(tool_call: Any, tool_result: Any, tool_latency: int) -> di
 
 
 async def _publish_tool_event(
-    agent: Any,
+    agent: Agent,
     conversation_id: str,
     tool_name: str,
     is_error: bool,
@@ -147,7 +157,7 @@ async def _publish_tool_event(
     )
 
 
-def _log_tool_call(tool_name: str, tool_result: Any, tool_latency: int) -> None:
+def _log_tool_call(tool_name: str, tool_result: ToolResult, tool_latency: int) -> None:
     logger.info(
         "tool_called",
         surface="operational",
@@ -159,7 +169,7 @@ def _log_tool_call(tool_name: str, tool_result: Any, tool_latency: int) -> None:
     )
 
 
-def _effect_log_records(tool_result: Any) -> list[dict[str, Any]]:
+def _effect_log_records(tool_result: ToolResult) -> list[dict[str, Any]]:
     records: list[dict[str, Any]] = []
     for effect in tool_result.effects:
         record = {
@@ -182,11 +192,11 @@ def _timeout_override(task_timeout: int, task_start: float) -> float | None:
 
 
 def _record_tool_context(
-    agent: Any,
+    agent: Agent,
     *,
     conversation_id: str,
-    tool_call: Any,
-    tool_result: Any,
+    tool_call: ToolCall,
+    tool_result: ToolResult,
 ) -> None:
     activated_tools = _activated_tools(tool_result)
     if not agent.conversation_manager:
@@ -207,7 +217,7 @@ def _record_tool_context(
         )
 
 
-def _activated_tools(tool_result: Any) -> list[str] | None:
+def _activated_tools(tool_result: ToolResult) -> list[str] | None:
     activated = tool_result.metadata.get("activated_tools") or []
     if isinstance(activated, list):
         return [str(item) for item in activated]
@@ -218,7 +228,7 @@ def _activated_tools(tool_result: Any) -> list[str] | None:
     return None
 
 
-def _loaded_skill_name(tool_result: Any) -> str:
+def _loaded_skill_name(tool_result: ToolResult) -> str:
     skill_name = tool_result.metadata.get("skill_name")
     if isinstance(skill_name, str):
         return skill_name

@@ -10,8 +10,12 @@ if TYPE_CHECKING:
     from collections.abc import Callable
     from pathlib import Path
 
+    from src.agent.agent import Agent
+    from src.agent.state.task_contract import TaskContract
     from src.agent.turn_outcome import TurnOutcome
+    from src.core.trace import TraceContext
     from src.infrastructure.model_gateway import StreamChunk
+    from src.infrastructure.model_routing import RouteDecision
 
     from .turn_request import TurnRequest
 
@@ -20,12 +24,12 @@ if TYPE_CHECKING:
 class TurnLoopContext:
     """Immutable dependencies and prepared input for one loop."""
 
-    agent: Any
+    agent: Agent
     request: TurnRequest
-    trace_context: Any
+    trace_context: TraceContext
     messages: tuple[dict[str, Any], ...]
-    route_decision: Any
-    contract: Any
+    route_decision: RouteDecision | None
+    contract: TaskContract
     project_root: Path | None
     clock: Callable[[], float] = time.monotonic
 
@@ -35,7 +39,7 @@ class TurnLoopSnapshot:
     """Immutable execution facts captured when the loop stops."""
 
     request: TurnRequest
-    contract: Any
+    contract: TaskContract
     project_root: Path | None
     iterations: int
     tokens_in: int

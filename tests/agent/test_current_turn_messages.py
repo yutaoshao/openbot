@@ -211,6 +211,6 @@ async def test_scheduler_runtime_sends_current_prompt_after_chat_history() -> No
     assert "最近在解释 grep_tool" in rendered
     assert messages[-1]["role"] == "user"
     assert "写每日研究日报" in str(messages[-1]["content"])
-    background_task = agent._memory_finalize_tasks.get("schedule_sched-1")
+    background_task = agent.post_turn_memory.task_for("schedule_sched-1")
     if background_task is not None:
         await asyncio.wait_for(background_task, timeout=0.5)

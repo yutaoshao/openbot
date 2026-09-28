@@ -6,7 +6,9 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from src.infrastructure.model_gateway import Usage
+    from src.infrastructure.model_gateway import ModelGateway, Usage
+    from src.infrastructure.model_routing import RouteDecision
+    from src.infrastructure.model_types import ToolCall
 
 
 @dataclass(frozen=True)
@@ -15,25 +17,25 @@ class ModelRoundResult:
 
     accumulated_text: str
     reasoning_content: str
-    collected_tool_calls: list[Any]
+    collected_tool_calls: list[ToolCall]
     usage: Usage | None
     model: str
 
 
 async def model_round_events(
-    agent: Any,
+    gateway: ModelGateway,
     messages: list[dict[str, Any]],
     tools: list[dict[str, Any]] | None,
-    route_decision: Any = None,
+    route_decision: RouteDecision | None = None,
 ):
     """Yield visible text chunks, then a final ``ModelRoundResult`` event."""
     accumulated_text = ""
     reasoning_content = ""
-    collected_tool_calls: list[Any] = []
+    collected_tool_calls: list[ToolCall] = []
     iter_usage: Usage | None = None
     final_model = ""
 
-    async for chunk in agent.model_gateway.model_round_chunks(
+    async for chunk in gateway.model_round_chunks(
         messages=messages,
         tools=tools,
         **_route_kwargs(route_decision),
@@ -59,7 +61,7 @@ async def model_round_events(
     )
 
 
-def _route_kwargs(route_decision: Any) -> dict[str, str]:
+def _route_kwargs(route_decision: RouteDecision | None) -> dict[str, str]:
     if route_decision is None:
         return {}
     return {

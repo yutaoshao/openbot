@@ -86,11 +86,11 @@ class TurnLoopExecution:
             max_iterations=self._context.agent.max_iterations,
         )
         task_state = current_task_state(
-            self._context.agent,
+            self._context.agent.conversation_manager,
             self._context.request.conversation_id,
         )
         tools = resolve_tools(
-            self._context.agent,
+            self._context.agent.tool_registry,
             self._context.request.input_text,
             task_state=task_state,
         )
@@ -98,7 +98,7 @@ class TurnLoopExecution:
         model_round: ModelRoundResult | None = None
         text_chunks: list[StreamChunk] = []
         async for event in model_round_events(
-            self._context.agent,
+            self._context.agent.model_gateway,
             self._messages,
             tools,
             route_decision=self._context.route_decision,
@@ -195,7 +195,7 @@ class TurnLoopExecution:
         model_round: ModelRoundResult,
     ) -> AsyncIterator[StreamChunk | ToolExecutionBatch]:
         task_state = current_task_state(
-            self._context.agent,
+            self._context.agent.conversation_manager,
             self._context.request.conversation_id,
         )
         async for event in execute_tool_calls_for_round(
@@ -229,7 +229,7 @@ class TurnLoopExecution:
 
     def _timeout_completion(self) -> LoopCompletion | None:
         elapsed = self._context.clock() - self._task_start
-        message = timeout_text(self._context.agent, elapsed, self._iterations)
+        message = timeout_text(self._context.agent.config, elapsed, self._iterations)
         if not message:
             return None
         return self._completion(
@@ -238,7 +238,7 @@ class TurnLoopExecution:
 
     def _cost_completion(self) -> LoopCompletion | None:
         message = cost_limit_text(
-            self._context.agent,
+            self._context.agent.config,
             self._usage.cost_usd,
             self._iterations,
         )

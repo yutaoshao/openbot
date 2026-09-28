@@ -4,12 +4,15 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from src.core.logging import get_logger
 from src.infrastructure.model_gateway import StreamChunk, Usage
 
 logger = get_logger(__name__)
+
+if TYPE_CHECKING:
+    from src.core.config import AgentConfig
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -32,8 +35,8 @@ def reply_chunks(
     return [StreamChunk(type="text", text=final_text)]
 
 
-def timeout_text(agent: Any, elapsed: float, iterations: int) -> str:
-    task_timeout = agent.config.task_timeout
+def timeout_text(config: AgentConfig, elapsed: float, iterations: int) -> str:
+    task_timeout = config.task_timeout
     if task_timeout <= 0:
         return ""
     if elapsed < task_timeout:
@@ -61,8 +64,8 @@ def accumulate_usage(
     )
 
 
-def cost_limit_text(agent: Any, total_cost_usd: float, iterations: int) -> str:
-    max_task_cost = agent.config.max_task_cost
+def cost_limit_text(config: AgentConfig, total_cost_usd: float, iterations: int) -> str:
+    max_task_cost = config.max_task_cost
     if max_task_cost <= 0 or total_cost_usd < max_task_cost:
         return ""
     logger.warning(
