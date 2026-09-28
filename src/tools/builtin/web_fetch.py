@@ -6,9 +6,15 @@ from typing import Any
 
 import httpx
 import trafilatura
+from pydantic import Field
 
+from src.tools.builtin.validation import StrictToolInput, schema_for, validate_args
 from src.tools.effects import EFFECT_NONE, STATUS_COMPLETED, STATUS_ERROR, tool_effect
 from src.tools.registry import ToolResult
+
+
+class WebFetchInput(StrictToolInput):
+    url: str = Field(description="The URL to fetch")
 
 
 class WebFetchTool:
@@ -30,26 +36,19 @@ class WebFetchTool:
 
     @property
     def parameters(self) -> dict[str, Any]:
-        return {
-            "type": "object",
-            "properties": {
-                "url": {
-                    "type": "string",
-                    "description": "The URL to fetch",
-                },
-            },
-            "required": ["url"],
-        }
+        return schema_for(WebFetchInput)
 
     @property
     def category(self) -> str:
         return "information"
 
     async def execute(self, args: dict[str, Any]) -> ToolResult:
-        url = args.get("url", "")
-
-        if not url:
+        if args.get("url", "") == "":
             return _result("URL is required", True, "", STATUS_ERROR, EFFECT_NONE)
+        data, error = validate_args(WebFetchInput, args, tool_name=self.name)
+        if error:
+            return error
+        url = data.url
 
         try:
             async with httpx.AsyncClient(timeout=30, follow_redirects=True) as client:

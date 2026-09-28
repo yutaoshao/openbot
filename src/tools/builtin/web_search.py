@@ -6,9 +6,18 @@ import os
 from typing import Any
 
 import httpx
+from pydantic import Field
 
+from src.tools.builtin.validation import StrictToolInput, schema_for, validate_args
 from src.tools.effects import EFFECT_NONE, STATUS_COMPLETED, STATUS_ERROR, tool_effect
 from src.tools.registry import ToolResult
+
+
+class WebSearchInput(StrictToolInput):
+    query: str = Field(description="The search query")
+    max_results: int = Field(
+        default=5, description="Maximum number of results to return (default: 5)"
+    )
 
 
 class WebSearchTool:
@@ -31,29 +40,17 @@ class WebSearchTool:
 
     @property
     def parameters(self) -> dict[str, Any]:
-        return {
-            "type": "object",
-            "properties": {
-                "query": {
-                    "type": "string",
-                    "description": "The search query",
-                },
-                "max_results": {
-                    "type": "integer",
-                    "description": "Maximum number of results to return (default: 5)",
-                    "default": 5,
-                },
-            },
-            "required": ["query"],
-        }
+        return schema_for(WebSearchInput)
 
     @property
     def category(self) -> str:
         return "information"
 
     async def execute(self, args: dict[str, Any]) -> ToolResult:
-        query = args.get("query", "")
-        max_results = args.get("max_results", 5)
+        data, error = validate_args(WebSearchInput, args, tool_name=self.name)
+        if error:
+            return error
+        query, max_results = data.query, data.max_results
 
         api_key = os.environ.get("TAVILY_API_KEY", "")
         if not api_key:
