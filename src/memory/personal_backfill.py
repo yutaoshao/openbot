@@ -2,20 +2,19 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 import re
-import sqlite3
 from collections import Counter
 from dataclasses import dataclass, replace
-from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
+from src.infrastructure.storage.personal_backfill_repo import PersonalBackfillRepo
 from src.memory.personal_events import event_identity, events_from_document, metadata, sections
 from src.memory.personal_history import PersonalHistory
 from src.memory.structured_json import parse_json_array_response
 
 if TYPE_CHECKING:
+    import sqlite3
     from pathlib import Path
 
     from src.memory.personal_profile import PersonalProfile
@@ -58,15 +57,7 @@ class HistoricalTurn:
 def inventory(db_path: Path, archive_root: Path) -> tuple[list[HistoricalTurn], dict]:
     history = PersonalHistory(archive_root, db_path)
     history._refresh()
-    with sqlite3.connect(f"file:{db_path.resolve()}?mode=ro", uri=True) as conn:
-        conn.row_factory = sqlite3.Row
-        messages = [
-            dict(row)
-            for row in conn.execute(
-                "SELECT id, conversation_id, role, content, timestamp FROM messages "
-                "ORDER BY timestamp, created_at, id"
-            )
-        ]
+    messages = PersonalBackfillRepo.source_messages(db_path)
     duplicates: list[str] = []
     seen: set[tuple[str, str, str, str]] = set()
     aliases = history._aliases
@@ -140,14 +131,6 @@ def inventory(db_path: Path, archive_root: Path) -> tuple[list[HistoricalTurn], 
         "linked_archive_messages": len(aliases),
         "unlinked_archive_users": missing,
         "unique_evidence_users": len(all_users),
-    }
-
-
-def _rows(conn: sqlite3.Connection) -> dict[str, dict]:
-    conn.row_factory = sqlite3.Row
-    return {
-        row["message_id"]: dict(row)
-        for row in conn.execute("SELECT * FROM personal_backfill_turns")
     }
 
 
@@ -311,7 +294,8 @@ async def stage_history(
     batch_size: int = 8,
     limit: int | None = None,
 ) -> dict:
-    known_rows = _rows(conn)
+    repo = PersonalBackfillRepo(conn)
+    known_rows = repo.turns()
     pending = [
         turn
         for turn in turns
@@ -323,7 +307,7 @@ async def stage_history(
         batch = pending[start : start + batch_size]
         await _stage_batch(conn, batch, profile, gateway, known_rows)
         print(f"Historical extraction: {start + len(batch)}/{len(pending)}", flush=True)
-    return Counter(row["status"] for row in _rows(conn).values())
+    return Counter(row["status"] for row in repo.turns().values())
 
 
 async def _stage_batch(
@@ -333,6 +317,7 @@ async def _stage_batch(
     gateway: Any,
     known_rows: dict[str, dict],
 ) -> None:
+    repo = PersonalBackfillRepo(conn)
     payload = {
         "turns": [
             {
@@ -363,14 +348,14 @@ async def _stage_batch(
             await _stage_batch(conn, batch[middle:], profile, gateway, known_rows)
             return
         for turn in batch:
-            _write_row(conn, turn, "failed", [], str(exc))
-        conn.commit()
+            _write_row(repo, turn, "failed", [], str(exc))
+        repo.commit()
         print(f"Historical extraction failed for {batch[0].source}: {exc}", flush=True)
         return
     except Exception as exc:
         for turn in batch:
-            _write_row(conn, turn, "failed", [], str(exc))
-        conn.commit()
+            _write_row(repo, turn, "failed", [], str(exc))
+        repo.commit()
         print(f"Historical extraction request failed: {exc}", flush=True)
         return
     for turn in batch:
@@ -379,16 +364,11 @@ async def _stage_batch(
             for claim in claims:
                 _canonical_subject(claim, profile)
                 _restrict_followup(claim, turn)
-                document = profile._claim_path(claim["topic"], claim["subject"])
-                name = document.relative_to(profile.root).as_posix()
+                name = profile.claim_document_name(claim["topic"], claim["subject"])
                 claim["_document"] = name
-                claim["_revision"] = (
-                    profile.read_document(name)[1]
-                    if document.exists()
-                    else hashlib.sha256(b"").hexdigest()
-                )
+                claim["_revision"] = profile.document_snapshot(name)[1]
         except ValueError as exc:
-            _write_row(conn, turn, "uncertain", claims, str(exc))
+            _write_row(repo, turn, "uncertain", claims, str(exc))
             known_rows[turn.message_id] = {
                 "status": "uncertain",
                 "source": turn.source,
@@ -396,36 +376,30 @@ async def _stage_batch(
             }
             continue
         status = "staged" if claims else "none"
-        _write_row(conn, turn, status, claims)
+        _write_row(repo, turn, status, claims)
         known_rows[turn.message_id] = {
             "status": status,
             "source": turn.source,
             "claims": json.dumps(claims, ensure_ascii=False),
         }
-    conn.commit()
+    repo.commit()
 
 
 def _write_row(
-    conn: sqlite3.Connection, turn: HistoricalTurn, status: str, claims: list[dict], error: str = ""
+    repo: PersonalBackfillRepo,
+    turn: HistoricalTurn,
+    status: str,
+    claims: list[dict],
+    error: str = "",
 ) -> None:
-    conn.execute(
-        """
-        INSERT INTO personal_backfill_turns
-            (message_id, source, statement_at, source_aliases, status, claims, error, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT(message_id) DO UPDATE SET status=excluded.status,
-            claims=excluded.claims, error=excluded.error, updated_at=excluded.updated_at
-    """,
-        (
-            turn.message_id,
-            turn.source,
-            turn.timestamp,
-            json.dumps(turn.aliases, ensure_ascii=False),
-            status,
-            json.dumps(claims, ensure_ascii=False),
-            error,
-            datetime.now(UTC).isoformat(),
-        ),
+    repo.save_turn(
+        message_id=turn.message_id,
+        source=turn.source,
+        timestamp=turn.timestamp,
+        aliases=turn.aliases,
+        status=status,
+        claims=claims,
+        error=error,
     )
 
 
@@ -456,8 +430,9 @@ def _resolve_event_reference(profile: PersonalProfile, claim: dict, name: str) -
 async def apply_history(
     conn: sqlite3.Connection, turns: list[HistoricalTurn], profile: PersonalProfile
 ) -> dict:
-    rows = _rows(conn)
-    written_revisions = dict(conn.execute("SELECT path, revision FROM personal_backfill_documents"))
+    repo = PersonalBackfillRepo(conn)
+    rows = repo.turns()
+    written_revisions = repo.document_revisions()
     for turn in turns:
         row = rows.get(turn.message_id)
         if not row or row["status"] != "staged":
@@ -467,26 +442,14 @@ async def apply_history(
             for claim in claims:
                 _canonical_subject(claim, profile)
                 _restrict_followup(claim, turn)
-                name = (
-                    claim.get("_document")
-                    or profile._claim_path(claim["topic"], claim["subject"])
-                    .relative_to(profile.root)
-                    .as_posix()
+                name = claim.get("_document") or profile.claim_document_name(
+                    claim["topic"], claim["subject"]
                 )
-                resolved = (
-                    profile._claim_path(claim["topic"], claim["subject"])
-                    .relative_to(profile.root)
-                    .as_posix()
-                )
+                resolved = profile.claim_document_name(claim["topic"], claim["subject"])
                 if name != resolved:
                     raise ValueError(f"Dossier selection changed since historical review: {name}")
                 _resolve_event_reference(profile, claim, name)
-                document = profile._document_path(name)
-                content, actual = (
-                    profile.read_document(name)
-                    if document.exists()
-                    else ("", hashlib.sha256(b"").hexdigest())
-                )
+                content, actual = profile.document_snapshot(name)
                 if "_revision" not in claim:
                     raise ValueError(f"Historical claim has no reviewed dossier revision: {name}")
                 expected = written_revisions.get(name, claim["_revision"])
@@ -501,31 +464,24 @@ async def apply_history(
                 claim["_revision"] = actual
                 await profile.add_claim(claim, source=turn.source, stated_at=turn.timestamp)
                 revision = profile.read_document(name)[1]
-                conn.execute(
-                    """
-                    INSERT INTO personal_backfill_documents (path, revision) VALUES (?, ?)
-                    ON CONFLICT(path) DO UPDATE SET revision=excluded.revision
-                """,
-                    (name, revision),
-                )
-                conn.commit()
+                repo.save_document_revision(name, revision)
                 written_revisions[name] = revision
         except Exception as exc:
-            _write_row(conn, turn, "failed", claims, str(exc))
-            conn.commit()
+            _write_row(repo, turn, "failed", claims, str(exc))
+            repo.commit()
             continue
         _write_row(
-            conn,
+            repo,
             turn,
             "uncertain" if all(claim["kind"] == "uncertain" for claim in claims) else "extracted",
             claims,
         )
-        conn.commit()
-    return Counter(row["status"] for row in _rows(conn).values())
+        repo.commit()
+    return Counter(row["status"] for row in repo.turns().values())
 
 
 def review_report(conn: sqlite3.Connection, turns: list[HistoricalTurn], path: Path) -> None:
-    rows = _rows(conn)
+    rows = PersonalBackfillRepo(conn).turns()
     uncertain_path = path.with_name("completeness-uncertain.jsonl")
     failed_path = path.with_name("completeness-failures.jsonl")
     with (

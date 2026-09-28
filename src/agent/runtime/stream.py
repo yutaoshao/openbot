@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from src.agent.state.task_contract_planner import (
     plan_scheduled_task_contract,
@@ -27,6 +27,9 @@ from .turn_loop_types import LoopCompletion, TurnLoopContext, TurnLoopSnapshot
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
+    from src.agent.agent import Agent
+    from src.core.trace import TraceContext
+
     from .turn_request import TurnRequest
 
 build_system_prompt = prompting.build_system_prompt
@@ -35,9 +38,9 @@ resolve_tools = prompting.resolve_tools
 
 
 async def run_stream_inner(
-    agent: Any,
+    agent: Agent,
     request: TurnRequest,
-    trace_context: Any,
+    trace_context: TraceContext,
 ) -> AsyncIterator[StreamChunk]:
     """Prepare, execute, verify, persist, and stream one turn."""
     execution = await _prepare_turn_loop(agent, request, trace_context)
@@ -71,13 +74,15 @@ async def run_stream_inner(
 
 
 async def _prepare_turn_loop(
-    agent: Any,
+    agent: Agent,
     request: TurnRequest,
-    trace_context: Any,
+    trace_context: TraceContext,
 ) -> TurnLoopExecution:
     messages = await prepare_agent_turn(agent, request)
-    task_state = current_task_state(agent, request.conversation_id)
-    route_decision = choose_route(agent, request.input_text, task_state)
+    task_state = current_task_state(agent.conversation_manager, request.conversation_id)
+    route_decision = choose_route(
+        agent.model_gateway, agent.tool_registry, request.input_text, task_state
+    )
     await agent.event_bus.publish(
         "agent.think.start",
         {
@@ -108,7 +113,7 @@ async def _prepare_turn_loop(
 
 
 async def _verified_stop_outcome(
-    agent: Any,
+    agent: Agent,
     completion: LoopCompletion,
 ) -> TurnOutcome:
     snapshot = completion.snapshot

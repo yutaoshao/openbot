@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from typing import TYPE_CHECKING
 
 from src.core.logging import get_logger
@@ -50,10 +51,13 @@ class PromptBuilder:
     async def _memory_sections(self, user_input: str, user_id: str) -> list[str]:
         if self._profile is not None:
             matches = await self._retrieval.recall(user_input) if self._retrieval else None
-            profile_context = self._profile.context(user_input, matches=matches)
+            profile_context = await asyncio.to_thread(
+                self._profile.context, user_input, matches=matches
+            )
             past = await self._episodic.recall(user_input, user_id, limit=2)
             history_context = (
-                self._history.context(
+                await asyncio.to_thread(
+                    self._history.context,
                     user_input,
                     profile_content=profile_context,
                     conversation_ids=[item["id"] for item in past if item.get("id")],

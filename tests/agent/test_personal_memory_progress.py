@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from typing import TYPE_CHECKING
@@ -85,5 +86,47 @@ async def test_cursor_survives_failure_and_restart(tmp_path: Path) -> None:
         assert restarted.sources == ["message:m2"]
         assert await storage.personal_progress.get("chat") == 4
         assert semantic.sources == ["message:m0", "message:m2"]
+    finally:
+        await db.close()
+
+
+async def test_cancelled_online_extraction_keeps_turn_pending(tmp_path: Path) -> None:
+    db = Database(StorageConfig(db_path=str(tmp_path / "memory.db")))
+    await db.initialize()
+    try:
+        storage = Storage(db)
+        await storage.conversations.create(id="chat", platform="web", user_id="local-single-user")
+        for index, role in enumerate(("user", "assistant")):
+            await storage.messages.add(
+                id=f"m{index}",
+                conversation_id="chat",
+                role=role,
+                content="message",
+                timestamp=datetime(2026, 9, 27, tzinfo=UTC) + timedelta(seconds=index),
+            )
+
+        entered = asyncio.Event()
+
+        class SuspendedProfile(_Profile):
+            async def extract(
+                self, gateway, user_text: str, *, stated_at: str, context_messages=None
+            ):
+                entered.set()
+                await asyncio.Event().wait()
+
+        manager = ConversationManager(
+            storage,
+            SimpleNamespace(),
+            _Semantic(),
+            SimpleNamespace(),
+            SimpleNamespace(),
+            personal_profile=SuspendedProfile(),
+        )
+        sync = asyncio.create_task(manager.sync_memory_after_turn("chat"))
+        await asyncio.wait_for(entered.wait(), timeout=0.5)
+        sync.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await sync
+        assert await storage.personal_progress.get("chat") == 0
     finally:
         await db.close()

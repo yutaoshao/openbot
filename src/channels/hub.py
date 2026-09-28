@@ -32,6 +32,11 @@ class MsgHub:
         self._adapters[platform] = adapter
         logger.info("msg_hub.adapter_registered", platform=platform)
 
+    def unregister_adapter(self, platform: str, adapter: Any) -> None:
+        """Remove a failed adapter only if it is still the registered instance."""
+        if self._adapters.get(platform) is adapter:
+            self._adapters.pop(platform)
+
     def get_adapter(self, platform: str) -> Any | None:
         """Get a registered adapter by core name."""
         return self._adapters.get(platform)

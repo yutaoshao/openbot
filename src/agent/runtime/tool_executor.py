@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from src.core.logging import get_logger
 from src.tools.effects import EFFECT_NONE, STATUS_ERROR, STATUS_TIMEOUT, tool_effect
@@ -11,6 +11,12 @@ from src.tools.registry import ToolResult
 from src.tools.runtime import ToolExecutionContext, tool_execution_context
 
 logger = get_logger(__name__)
+
+if TYPE_CHECKING:
+    from src.agent.state import TaskState
+    from src.core.config import AgentConfig
+    from src.tools.hooks import ToolHookManager
+    from src.tools.registry import ToolRegistry
 
 
 def summarize_tool_result(content: str) -> str:
@@ -20,24 +26,26 @@ def summarize_tool_result(content: str) -> str:
 
 
 async def execute_tool_call(
-    agent: Any,
+    registry: ToolRegistry | None,
+    config: AgentConfig,
+    hooks: ToolHookManager,
     name: str,
     arguments: dict[str, Any],
     *,
     conversation_id: str,
     platform: str,
-    task_state: Any = None,
+    task_state: TaskState | None = None,
     timeout_override: float | None = None,
-):
+) -> ToolResult:
     """Execute a single tool call by name."""
-    if not agent.tool_registry:
+    if registry is None:
         return ToolResult(content="No tools available", is_error=True)
 
-    tool = agent.tool_registry.get(name)
+    tool = registry.get(name)
     if not tool:
         return ToolResult(content=f"Unknown tool: {name}", is_error=True)
 
-    configured_timeout = agent.config.tool_timeout if agent.config.tool_timeout > 0 else None
+    configured_timeout = config.tool_timeout if config.tool_timeout > 0 else None
     timeout_candidates = [
         timeout
         for timeout in (configured_timeout, timeout_override)
@@ -46,7 +54,7 @@ async def execute_tool_call(
     effective_timeout = min(timeout_candidates) if timeout_candidates else None
 
     try:
-        pre_result = await agent._tool_hooks.before_execute(name, arguments, task_state)  # noqa: SLF001
+        pre_result = await hooks.before_execute(name, arguments, task_state)
         effective_arguments = dict(pre_result.override_args or arguments)
         tool_result = await _run_tool(
             tool,
@@ -55,7 +63,7 @@ async def execute_tool_call(
             conversation_id,
             platform,
         )
-        post_result = await agent._tool_hooks.after_execute(  # noqa: SLF001
+        post_result = await hooks.after_execute(
             name,
             effective_arguments,
             tool_result,

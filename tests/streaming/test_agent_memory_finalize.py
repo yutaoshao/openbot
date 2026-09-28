@@ -167,7 +167,8 @@ async def test_run_returns_before_background_memory_finalize_completes() -> None
     assert conversation_manager.compress_calls == []
     assert conversation_manager.sync_calls == []
 
-    background_task = agent._memory_finalize_tasks["conv-1"]
+    background_task = agent.post_turn_memory.task_for("conv-1")
+    assert background_task is not None
     conversation_manager.release_background.set()
     await asyncio.wait_for(background_task, timeout=0.5)
 
@@ -196,7 +197,8 @@ async def test_run_passes_explicit_message_timestamp_to_conversation_manager() -
     assert result.content == "Hello streaming"
     assert conversation_manager.user_timestamps == [timestamp]
 
-    background_task = agent._memory_finalize_tasks["conv-1"]
+    background_task = agent.post_turn_memory.task_for("conv-1")
+    assert background_task is not None
     conversation_manager.release_background.set()
     await asyncio.wait_for(background_task, timeout=0.5)
 
@@ -232,7 +234,8 @@ async def test_background_memory_sync_uses_child_trace_context() -> None:
         result = await agent.run("hello world", conversation_id="conv-1", platform="wechat")
 
     assert result.content == "Hello streaming"
-    background_task = agent._memory_finalize_tasks["conv-1"]
+    background_task = agent.post_turn_memory.task_for("conv-1")
+    assert background_task is not None
     conversation_manager.release_background.set()
     await asyncio.wait_for(background_task, timeout=0.5)
 
@@ -258,7 +261,7 @@ async def test_failed_turn_is_persisted_without_background_memory_sync() -> None
     assert [failure.reason for failure in conversation_manager.failed_turns] == [
         "stop_verification"
     ]
-    assert "conv-failed" not in agent._memory_finalize_tasks
+    assert agent.post_turn_memory.task_for("conv-failed") is None
     assert conversation_manager.compress_calls == []
     assert conversation_manager.sync_calls == []
 
@@ -284,7 +287,7 @@ async def test_failed_turn_is_persisted_before_final_text_is_consumed() -> None:
     ]
 
     await stream.aclose()
-    assert "conv-cancelled" not in agent._memory_finalize_tasks
+    assert agent.post_turn_memory.task_for("conv-cancelled") is None
 
 
 async def test_vague_post_tool_reply_becomes_typed_failed_outcome() -> None:

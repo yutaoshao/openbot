@@ -81,6 +81,15 @@ class PersonalProfile:
         content = path.read_text(encoding="utf-8")
         return content, hashlib.sha256(content.encode()).hexdigest()
 
+    def claim_document_name(self, topic: str, subject: str) -> str:
+        """Resolve the authoritative dossier for a claim using normal write rules."""
+        return self._claim_path(topic, subject).relative_to(self.root).as_posix()
+
+    def document_snapshot(self, name: str) -> tuple[str, str]:
+        """Read a validated dossier or its initial empty revision."""
+        path = self._document_path(name)
+        return self.read_document(name) if path.is_file() else ("", hashlib.sha256(b"").hexdigest())
+
     async def edit_document(self, name: str, content: str, revision: str) -> str:
         path = self._document_path(name)
         async with self._lock:

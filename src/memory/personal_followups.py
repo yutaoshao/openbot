@@ -24,7 +24,7 @@ class PersonalFollowups:
         asked = await self.repository.asked()
         candidates = [
             self._candidate(event)
-            for event in self.profile.events()
+            for event in await asyncio.to_thread(self.profile.events)
             if event.can_follow_up and (event.id, event.field) not in asked
         ]
         if not candidates:
@@ -61,7 +61,7 @@ class PersonalFollowups:
         if not await self._process_deliveries():
             return _NO_FOLLOWUP + "交付记录尚待核实，避免重复询问。"
         asked = await self.repository.asked()
-        events = self.profile.events()
+        events = await asyncio.to_thread(self.profile.events)
         for event in events:
             if event.status in {"done", "cancelled"}:
                 await self.repository.resolve(event.id, event.source)

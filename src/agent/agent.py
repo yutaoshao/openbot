@@ -2,19 +2,18 @@
 
 from __future__ import annotations
 
-import asyncio
 import time
 from contextlib import nullcontext
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
-from src.agent.runtime import TurnRequest, execute_tool_call, run_stream_inner
+from src.agent.conversation.post_turn import PostTurnMemory
+from src.agent.runtime import TurnRequest, run_stream_inner
 from src.core.trace import TraceContext, current_trace
 from src.tools.hooks import ToolHookManager, ToolSearchActivationHook
 
 if TYPE_CHECKING:
-    import asyncio
     from collections.abc import AsyncIterator
 
     from src.agent.conversation import ConversationManager
@@ -49,6 +48,7 @@ class Agent:
         tool_registry: ToolRegistry | None = None,
         conversation_manager: ConversationManager | None = None,
         skill_registry: SkillRegistry | None = None,
+        post_turn_memory: PostTurnMemory | None = None,
     ) -> None:
         self.model_gateway = model_gateway
         self.event_bus = event_bus
@@ -57,8 +57,8 @@ class Agent:
         self.tool_registry = tool_registry
         self.conversation_manager = conversation_manager
         self.skill_registry = skill_registry
-        self._tool_hooks = ToolHookManager([ToolSearchActivationHook()])
-        self._memory_finalize_tasks: dict[str, asyncio.Task[None]] = {}
+        self.tool_hooks = ToolHookManager([ToolSearchActivationHook()])
+        self.post_turn_memory = post_turn_memory or PostTurnMemory(conversation_manager)
 
     async def confirm_delivery(self, conversation_id: str, content: str, delivery_id: str) -> None:
         """Called only after the channel acknowledges the final reply's transport."""
@@ -155,27 +155,6 @@ class Agent:
                     yield chunk
             finally:
                 ctx.iteration = previous_iteration
-
-    async def _execute_tool(
-        self,
-        name: str,
-        arguments: dict[str, Any],
-        *,
-        conversation_id: str,
-        platform: str,
-        task_state: Any = None,
-        timeout_override: float | None = None,
-    ):
-        """Compatibility wrapper for tests and legacy call sites."""
-        return await execute_tool_call(
-            self,
-            name,
-            arguments,
-            conversation_id=conversation_id,
-            platform=platform,
-            task_state=task_state,
-            timeout_override=timeout_override,
-        )
 
 
 def _resolve_message_timestamp(message_timestamp: datetime | None) -> datetime:
