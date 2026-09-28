@@ -10,7 +10,7 @@ if TYPE_CHECKING:
     from collections.abc import Mapping
 
 _TIMESTAMPED_ROLES = {"user", "assistant"}
-_INTERNAL_MESSAGE_FIELDS = {"metadata", "timestamp"}
+_INTERNAL_MESSAGE_FIELDS = {"id", "metadata", "timestamp"}
 _INTERNAL_TIMESTAMP_PREFIX = re.compile(r"^(?:\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}\]\s*)+")
 
 

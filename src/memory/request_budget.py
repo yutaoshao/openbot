@@ -50,23 +50,14 @@ async def compact_request_history(
     recent_budget: int,
 ) -> bool:
     """Summarize closed turns while keeping the current tool chain intact."""
+    from src.memory.turn_selection import recent_turn_cut
     from src.memory.working_compaction import summarize_messages
 
-    last_user = max(
-        (index for index, message in enumerate(messages) if message.get("role") == "user"),
-        default=-1,
-    )
-    prior_users = [index for index in range(last_user) if messages[index].get("role") == "user"]
-    if not prior_users:
+    first_user = next((i for i, message in enumerate(messages)
+                       if message.get("role") == "user"), -1)
+    cut = recent_turn_cut(messages, recent_budget)
+    if first_user < 0 or not cut:
         return False
-    first_user = prior_users[0]
-    cut = last_user
-    for index in reversed(prior_users):
-        if estimate_input_tokens(messages[index:]).tokens > recent_budget:
-            break
-        cut = index
-    if cut == first_user:
-        cut = prior_users[1] if len(prior_users) > 1 else last_user
     older = messages[first_user:cut]
     if not older:
         return False

@@ -15,16 +15,13 @@ from src.core.logging import get_logger
 from src.memory.history_references import history_file_references
 from src.memory.message_format import render_llm_message
 from src.memory.request_budget import estimate_input_tokens
-from src.memory.turn_selection import select_long_term_memory_prefix
+from src.memory.turn_selection import recent_turn_cut, select_long_term_memory_prefix
 from src.memory.working_compaction import extract_memory_items, summarize_messages
 
 if TYPE_CHECKING:
     from src.infrastructure.model_gateway import ModelGateway
 
 logger = get_logger(__name__)
-
-CHARS_PER_TOKEN = 4
-
 
 class WorkingMemory:
     """Manages the message context window for a single conversation."""
@@ -33,9 +30,11 @@ class WorkingMemory:
         self,
         conversation_id: str,
         token_budget: int = 8000,
+        recent_budget: int | None = None,
     ) -> None:
         self._conversation_id = conversation_id
         self._token_budget = token_budget
+        self._recent_budget = recent_budget if recent_budget is not None else token_budget
         self._messages: list[dict[str, Any]] = []  # role/content dicts
         self._pinned: list[dict[str, Any]] = []  # never compressed
         self._protected: OrderedDict[str, str] = OrderedDict()
@@ -49,7 +48,7 @@ class WorkingMemory:
             "working_memory.add",
             conversation_id=self._conversation_id,
             role=message.get("role"),
-            tokens_est=self.estimate_tokens(),
+            message_count=len(self._messages),
         )
 
     def pin(self, message: dict[str, Any]) -> None:
@@ -113,8 +112,8 @@ class WorkingMemory:
     def _compression_segments(
         self,
     ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]] | None:
-        midpoint = len(self._messages) // 2
-        memory_prefix = select_long_term_memory_prefix(self._messages, midpoint)
+        cut = recent_turn_cut(self._messages, self._recent_budget)
+        memory_prefix = select_long_term_memory_prefix(self._messages, cut)
         if memory_prefix.next_cursor == 0:
             logger.info(
                 "working_memory.compress.skip",
@@ -127,12 +126,10 @@ class WorkingMemory:
             self._messages[memory_prefix.next_cursor :],
         )
 
-    async def compress(self, model_gateway: ModelGateway) -> str:
+    async def compress(self, model_gateway: ModelGateway, *, persist: Any = None) -> str:
         """Compress older messages via LLM summarisation.
 
-        Splits ``_messages`` in half, sends the older half to the LLM for
-        summarisation, then replaces those messages with the resulting
-        summary.  Returns the summary text.
+        Keeps recent complete turns within the configured token target.
         """
         if len(self._messages) < 2:
             logger.info(
@@ -147,7 +144,6 @@ class WorkingMemory:
             return self._summary or ""
         older, recent = segments
         if not older:
-            self._messages = recent
             logger.info(
                 "working_memory.compress.skip_summary",
                 conversation_id=self._conversation_id,
@@ -169,6 +165,9 @@ class WorkingMemory:
         new_summary = _summary_with_history_references(summary, older)
         if self._summary:
             new_summary = f"{self._summary}\n\n{new_summary}"
+        boundary = self._messages[len(self._messages) - len(recent) - 1]
+        if persist is not None:
+            await persist(new_summary, boundary)
         self._summary = new_summary
         self._messages = recent
         logger.info(
@@ -192,8 +191,9 @@ class WorkingMemory:
         if len(self._messages) < 2:
             return []
 
-        midpoint = len(self._messages) // 2
-        memory_prefix = select_long_term_memory_prefix(self._messages, midpoint)
+        memory_prefix = select_long_term_memory_prefix(
+            self._messages, recent_turn_cut(self._messages, self._recent_budget)
+        )
         older = list(memory_prefix.messages)
         if not older:
             return []

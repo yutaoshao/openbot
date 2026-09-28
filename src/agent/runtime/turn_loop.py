@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Any
 from src.agent.turn_outcome import CompletedTurn, FailedTurn, TurnOutcome
 from src.core.logging import get_logger
 from src.infrastructure.model_gateway import StreamChunk
-from src.memory.request_budget import compact_request_history, request_limit
+from src.memory.request_budget import compact_request_history, estimate_input_tokens, request_limit
 
 from .file_write_verification import file_write_verification_failure
 from .loop_helpers import (
@@ -135,8 +135,19 @@ class TurnLoopExecution:
                 recent_budget=min(agent.config.recent_token_budget, int(trigger) - 1),
             )
             if not changed:
-                raise ValueError("Current request exceeds compression trigger without closed turns")
-        raise ValueError("Request history remains above the compression trigger")
+                system_messages = [m for m in self._messages if m.get("role") == "system"]
+                raise ValueError(
+                    "Current request exceeds trigger without compressible closed turns: "
+                    f"input={result.tokens}, trigger={int(trigger)}, "
+                    f"window={result.model_window}, output_reserved={result.output_budget}, "
+                    f"system_estimate={estimate_input_tokens(system_messages).tokens}, "
+                    f"tools_estimate={estimate_input_tokens([], tools).tokens}"
+                )
+        raise ValueError(
+            f"Request history remains above compression trigger: input={result.tokens}, "
+            f"trigger={int(trigger)}, window={result.model_window}, "
+            f"output_reserved={result.output_budget}"
+        )
 
     def _record_model_round(self, model_round: ModelRoundResult) -> None:
         self._final_model = model_round.model or self._final_model

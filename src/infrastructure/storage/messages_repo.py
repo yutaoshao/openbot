@@ -137,6 +137,70 @@ class MessageRepo:
             rows = await cursor.fetchall()
         return self._select_rows_within_budget(rows, token_budget)
 
+    async def get_working_summary(self) -> dict[str, Any] | None:
+        async with self._db.get_connection() as conn:
+            row = await (await conn.execute(
+                "SELECT boundary_id, content, version FROM working_memory_summaries "
+                "WHERE timeline = 'shared'"
+            )).fetchone()
+        return dict(row) if row else None
+
+    async def save_working_summary(self, boundary_id: str, content: str) -> None:
+        async with self._db.get_connection() as conn:
+            if not await (await conn.execute(
+                "SELECT id FROM messages WHERE id = ?", (boundary_id,)
+            )).fetchone():
+                raise ValueError(f"Compressed source missing from database: {boundary_id}")
+            await conn.execute("""
+                INSERT INTO working_memory_summaries
+                    (timeline, boundary_id, content, version, updated_at)
+                VALUES ('shared', ?, ?, 1, ?)
+                ON CONFLICT(timeline) DO UPDATE SET
+                    boundary_id=excluded.boundary_id,
+                    content=excluded.content,
+                    version=working_memory_summaries.version + 1,
+                    updated_at=excluded.updated_at
+            """, (boundary_id, content, now_utc()))
+            await conn.commit()
+
+    async def get_global_after(
+        self, boundary_id: str, include_platforms: tuple[str, ...], *, user_id: str
+    ) -> list[dict[str, Any]]:
+        async with self._db.get_connection() as conn:
+            boundary = await (await conn.execute(
+                "SELECT timestamp, created_at FROM messages WHERE id = ?", (boundary_id,)
+            )).fetchone()
+            if not boundary:
+                raise ValueError(f"Compressed source missing from database: {boundary_id}")
+            if not include_platforms:
+                return []
+            placeholders = ", ".join("?" for _ in include_platforms)
+            rows = await (await conn.execute(f"""
+                SELECT m.{", m.".join(MESSAGE_COLUMNS)} FROM messages m
+                JOIN conversations c ON c.id = m.conversation_id
+                WHERE c.platform IN ({placeholders}) AND c.user_id = ? AND
+                  (m.timestamp > ? OR (m.timestamp = ? AND m.created_at > ?) OR
+                   (m.timestamp = ? AND m.created_at = ? AND m.id > ?))
+                ORDER BY m.timestamp, m.created_at, m.id
+            """, (*include_platforms, user_id, boundary[0], boundary[0], boundary[1],
+                  boundary[0], boundary[1], boundary_id))).fetchall()
+        return [row_to_dict(row, MESSAGE_COLUMNS, MESSAGE_JSON_FIELDS) for row in rows]
+
+    async def get_global_history(
+        self, include_platforms: tuple[str, ...], *, user_id: str
+    ) -> list[dict[str, Any]]:
+        if not include_platforms:
+            return []
+        placeholders = ", ".join("?" for _ in include_platforms)
+        async with self._db.get_connection() as conn:
+            rows = await (await conn.execute(f"""
+                SELECT m.{", m.".join(MESSAGE_COLUMNS)} FROM messages m
+                JOIN conversations c ON c.id = m.conversation_id
+                WHERE c.platform IN ({placeholders}) AND c.user_id = ?
+                ORDER BY m.timestamp, m.created_at, m.id
+            """, (*include_platforms, user_id))).fetchall()
+        return [row_to_dict(row, MESSAGE_COLUMNS, MESSAGE_JSON_FIELDS) for row in rows]
+
     async def count_by_conversation(self, conversation_id: str) -> int:
         async with self._db.get_connection() as conn:
             cursor = await conn.execute(
@@ -165,17 +229,29 @@ class MessageRepo:
 
     @staticmethod
     def _select_rows_within_budget(rows: list[Any], token_budget: int) -> list[dict[str, Any]]:
-        selected: list[Any] = []
+        chronological = [row_to_dict(row, MESSAGE_COLUMNS, MESSAGE_JSON_FIELDS)
+                         for row in reversed(rows)]
+        pairs: list[list[int]] = []
+        pending: dict[str, int] = {}
+        for index, item in enumerate(chronological):
+            conversation_id = item["conversation_id"]
+            if item["role"] == "user":
+                if conversation_id in pending:
+                    pairs.append([pending[conversation_id]])
+                pending[conversation_id] = index
+            elif item["role"] == "assistant" and conversation_id in pending:
+                pairs.append([pending.pop(conversation_id), index])
+        pairs.extend([index] for index in pending.values())
+        pairs.sort(key=lambda group: max(group))
+        selected: set[int] = set()
         used = 32
-        for row in rows:
-            item = row_to_dict(row, MESSAGE_COLUMNS, MESSAGE_JSON_FIELDS)
-            cost = estimate_input_tokens([item]).tokens - 32
-            if used + cost > token_budget:
+        for group in reversed(pairs):
+            cost = estimate_input_tokens([chronological[index] for index in group]).tokens - 32
+            if selected and used + cost > token_budget:
                 break
-            selected.append(row)
+            selected.update(group)
             used += cost
-        selected.reverse()
-        return [row_to_dict(row, MESSAGE_COLUMNS, MESSAGE_JSON_FIELDS) for row in selected]
+        return [item for index, item in enumerate(chronological) if index in selected]
 
 
 def _timestamp_text(value: datetime | str) -> str:

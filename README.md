@@ -77,6 +77,8 @@ reranker, then reads the current Markdown revision. Relevant unresolved plans
 may receive a natural follow-up after checking subsequent history. A question
 is marked asked only after successful transport; ordinary advice requests do
 not become tasks, and unanswered follow-ups are not repeated.
+When related original history is lengthy, the answer context notes that more
+source messages remain searchable rather than treating them as absent.
 
 After a database upgrade, old knowledge is explicitly unreviewed and excluded
 from general recall until classified. These resumable commands preserve its
@@ -91,12 +93,25 @@ Reports and backups remain local. Old generated preferences require original
 user evidence before migration into dossiers. Index rebuilding never overwrites
 Markdown from an older database copy.
 
+To process existing chats, back up `data/openbot.db` and `data/personal_memory/`,
+then run `uv run python -m scripts.backfill_personal_memory inventory`, followed by
+`stage`. Review the local candidate and source report at
+`data/personal_memory/_migration/completeness-review.jsonl` before running `apply`.
+Ambiguous subjects appear separately in `completeness-uncertain.jsonl` and are not merged.
+Run `uv run python -m src.memory.maintenance rebuild` afterward. Failed stages
+can be retried; progress is independent of new conversation processing.
+Local name mappings for people and projects can be edited in
+`data/personal_memory/_migration/subject_aliases.json`; this private file is
+excluded from Git.
+
 The example sets `model.primary.context_window` to **272,000 total tokens**
 and reserves **16,384** for output via `max_tokens`. The default
 `agent.input_token_budget` is **255,616**; compression begins at 90% of the
 effective input limit (about 230,054), retaining a 128,000-token recent transcript
 target. System prompts, dossiers, tool definitions, and results count toward input.
 Configure fallback and enabled routing providers separately.
+The first load of a long chat history saves summaries in segments; restarts
+resume at the saved boundary with complete recent turns.
 
 A configured `context_window` is the operator-confirmed service window or a
 smaller local total budget. Exact counting is preferred when available. If the

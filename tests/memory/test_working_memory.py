@@ -70,7 +70,7 @@ async def test_working_memory_compress_appends_history_file_references(
     assert "完整历史见 data/conversations/2026/05/01.jsonl" in summary
 
 
-async def test_working_memory_compress_discards_failed_turn_without_summary() -> None:
+async def test_working_memory_does_not_discard_failed_turn_without_summary() -> None:
     gateway = FakeModelGateway([])
     wm = WorkingMemory(conversation_id="conv-failed", token_budget=1)
     failure_metadata = FailedTurn("failed", reason="stop_verification").message_metadata()
@@ -85,13 +85,13 @@ async def test_working_memory_compress_discards_failed_turn_without_summary() ->
 
     assert summary == ""
     assert gateway.calls == []
-    assert [message["role"] for message in assembled] == ["user", "assistant"]
-    assert all("failed" not in str(message["content"]) for message in assembled)
+    assert [message["role"] for message in assembled] == ["user", "assistant", "user", "assistant"]
+    assert "failed request" in assembled[0]["content"]
 
 
-async def test_working_memory_compress_keeps_pair_crossing_midpoint_together() -> None:
+async def test_working_memory_compress_keeps_token_bounded_complete_turns() -> None:
     gateway = FakeModelGateway(["summary: first pair"])
-    wm = WorkingMemory(conversation_id="conv-boundary", token_budget=1)
+    wm = WorkingMemory(conversation_id="conv-boundary", token_budget=1, recent_budget=170)
     messages = [
         _message("user", "first user", TS1),
         _message("assistant", "first assistant", TS1),

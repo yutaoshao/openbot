@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Any
 
 from src.core.logging import get_logger
 from src.core.user_scope import SINGLE_USER_ID
-from src.memory.request_budget import request_limit
+from src.memory.request_budget import estimate_input_tokens, request_limit
 
 from . import archive_helpers as archive
 from . import message_flow as flow
@@ -102,9 +102,11 @@ class ConversationManager:
                 else token_budget
             )
             self._shared_timeline = SharedTimelineMemory(
-                token_budget=compression_budget, recent_budget=token_budget
+                token_budget=compression_budget,
+                recent_budget=(trigger.recent_token_budget if trigger is not None
+                               else token_budget),
             )
-        await self._shared_timeline.ensure_loaded(self._storage.messages)
+        await self._shared_timeline.ensure_loaded(self._storage.messages, self._gateway)
         self._task_store.ensure(conversation_id)
         return self._shared_timeline
 
@@ -253,8 +255,18 @@ class ConversationManager:
             messages = await self.build_messages(
                 conversation_id, system_prompt, user_input, user_id, message_timestamp
             )
-        if (await counter(messages)).tokens >= trigger:
-            raise ValueError("Context cannot be compressed below the configured trigger")
+        final_count = await counter(messages)
+        if final_count.tokens >= trigger:
+            history_tokens = self._shared_timeline.estimate_tokens() if self._shared_timeline else 0
+            system_tokens = estimate_input_tokens(
+                [item for item in messages if item.get("role") == "system"]
+            ).tokens
+            raise ValueError(
+                f"Context cannot be compressed: input={final_count.tokens}, "
+                f"trigger={int(trigger)}, window={final_count.model_window}, "
+                f"output_reserved={final_count.output_budget}, system_estimate={system_tokens}, "
+                f"history_estimate={history_tokens}"
+            )
         return messages
 
     async def prune_idle_conversations(self, *, now: float | None = None) -> None:

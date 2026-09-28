@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from src.memory.request_budget import estimate_input_tokens
+
 TURN_FAILURE_METADATA_KEY = "turn_failure"
 TURN_FAILURE_REASON_KEY = "reason"
 
@@ -80,6 +82,19 @@ def select_long_term_memory_prefix(
             selected_messages.extend((user_message, assistant_message))
         cursor += 2
     return MemoryBatch(messages=tuple(selected_messages), next_cursor=cursor)
+
+
+def recent_turn_cut(messages: list[dict[str, Any]], recent_budget: int) -> int:
+    """Keep the largest token-bounded suffix starting at a complete user turn."""
+    users = [i for i, message in enumerate(messages) if message.get("role") == "user"]
+    if len(users) < 2:
+        return 0
+    cut = users[-1]
+    for index in reversed(users[:-1]):
+        if estimate_input_tokens(messages[index:]).tokens > recent_budget:
+            break
+        cut = index
+    return cut if cut > users[0] else users[1]
 
 
 def _is_failed_assistant(message: dict[str, Any]) -> bool:

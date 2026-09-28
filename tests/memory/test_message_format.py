@@ -11,6 +11,7 @@ def test_render_assistant_message_does_not_duplicate_internal_timestamp(
 ) -> None:
     monkeypatch.setattr(message_format, "_local_timezone", lambda: UTC)
     message = {
+        "id": "730a451119a343d0b7844ce7aec3bcae",
         "role": "assistant",
         "content": "[2026-05-11 11:50] 抱歉，你说过了。",
         "timestamp": datetime(2026, 5, 11, 11, 50, tzinfo=UTC),
@@ -19,6 +20,7 @@ def test_render_assistant_message_does_not_duplicate_internal_timestamp(
     rendered = render_llm_message(message)
 
     assert rendered["content"] == "[2026-05-11 11:50] 抱歉，你说过了。"
+    assert "id" not in rendered
 
 
 def test_render_assistant_message_collapses_repeated_internal_timestamps(
