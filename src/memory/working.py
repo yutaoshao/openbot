@@ -23,6 +23,7 @@ if TYPE_CHECKING:
 
 logger = get_logger(__name__)
 
+
 class WorkingMemory:
     """Manages the message context window for a single conversation."""
 

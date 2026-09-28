@@ -60,10 +60,13 @@ def inventory(db_path: Path, archive_root: Path) -> tuple[list[HistoricalTurn], 
     history._refresh()
     with sqlite3.connect(f"file:{db_path.resolve()}?mode=ro", uri=True) as conn:
         conn.row_factory = sqlite3.Row
-        messages = [dict(row) for row in conn.execute(
-            "SELECT id, conversation_id, role, content, timestamp FROM messages "
-            "ORDER BY timestamp, created_at, id"
-        )]
+        messages = [
+            dict(row)
+            for row in conn.execute(
+                "SELECT id, conversation_id, role, content, timestamp FROM messages "
+                "ORDER BY timestamp, created_at, id"
+            )
+        ]
     duplicates: list[str] = []
     seen: set[tuple[str, str, str, str]] = set()
     aliases = history._aliases
@@ -72,8 +75,12 @@ def inventory(db_path: Path, archive_root: Path) -> tuple[list[HistoricalTurn], 
     pending: dict[str, int] = {}
     mismatched_sources: list[str] = []
     for message in messages:
-        fingerprint = (message["conversation_id"], message["role"],
-                       message["timestamp"], message["content"])
+        fingerprint = (
+            message["conversation_id"],
+            message["role"],
+            message["timestamp"],
+            message["content"],
+        )
         if fingerprint in seen:
             duplicates.append(message["id"])
             continue
@@ -85,11 +92,17 @@ def inventory(db_path: Path, archive_root: Path) -> tuple[list[HistoricalTurn], 
             if reference != source and history._records[reference].text != message["content"]:
                 mismatched_sources.append(reference)
                 reference = source
-            turns.append(HistoricalTurn(
-                message["id"], message["conversation_id"], reference,
-                tuple(dict.fromkeys((source, reference))), message["timestamp"],
-                message["content"], tuple(group[-4:]),
-            ))
+            turns.append(
+                HistoricalTurn(
+                    message["id"],
+                    message["conversation_id"],
+                    reference,
+                    tuple(dict.fromkeys((source, reference))),
+                    message["timestamp"],
+                    message["content"],
+                    tuple(group[-4:]),
+                )
+            )
             pending[message["conversation_id"]] = len(turns) - 1
         elif message["role"] == "assistant" and message["conversation_id"] in pending:
             index = pending.pop(message["conversation_id"])
@@ -108,27 +121,34 @@ def inventory(db_path: Path, archive_root: Path) -> tuple[list[HistoricalTurn], 
                     archive_rows += 1
                 except json.JSONDecodeError:
                     damaged.append(f"{path}:{number}")
-    missing = [hit.source for hit in archive_users if not hit.conversation_id
-               and hit.source not in {turn.source for turn in turns}]
+    missing = [
+        hit.source
+        for hit in archive_users
+        if not hit.conversation_id and hit.source not in {turn.source for turn in turns}
+    ]
     return turns, {
-        "database_user_messages": len(turns), "archived_user_messages": len(archive_users),
+        "database_user_messages": len(turns),
+        "archived_user_messages": len(archive_users),
         "closed_database_turns": sum(turn.closed for turn in turns),
         "user_messages_without_database_reply": [turn.source for turn in turns if not turn.closed],
         "database_only_user_messages": len(all_users) - len(archive_users),
         "duplicate_database_message_ids": duplicates,
         "archive_content_mismatches": mismatched_sources,
-        "archive_files": len(archive_files), "archive_rows": archive_rows,
+        "archive_files": len(archive_files),
+        "archive_rows": archive_rows,
         "damaged_archive_lines": damaged,
-        "linked_archive_messages": len(aliases), "unlinked_archive_users": missing,
+        "linked_archive_messages": len(aliases),
+        "unlinked_archive_users": missing,
         "unique_evidence_users": len(all_users),
     }
 
 
 def _rows(conn: sqlite3.Connection) -> dict[str, dict]:
     conn.row_factory = sqlite3.Row
-    return {row["message_id"]: dict(row) for row in conn.execute(
-        "SELECT * FROM personal_backfill_turns"
-    )}
+    return {
+        row["message_id"]: dict(row)
+        for row in conn.execute("SELECT * FROM personal_backfill_turns")
+    }
 
 
 def _known(profile: PersonalProfile, drafts: dict[str, dict], batch: list[HistoricalTurn]) -> dict:
@@ -136,13 +156,27 @@ def _known(profile: PersonalProfile, drafts: dict[str, dict], batch: list[Histor
     events: list[dict] = []
     for path in profile.documents():
         content, _ = profile.read_document(path)
-        facts.extend({"path": path, "fact": line[2:].split("；", 1)[0],
-                      "key": metadata(line, "偏好键") or metadata(line, "事实键"),
-                      "source": metadata(line, "来源")}
-                     for heading, line in sections(content) if heading == "已确认事实")
-        events.extend({"id": event.id, "name": event.name, "subject": event.subject,
-                       "path": path, "status": event.status, "records": event.records[-2:]}
-                      for event in events_from_document(path, content))
+        facts.extend(
+            {
+                "path": path,
+                "fact": line[2:].split("；", 1)[0],
+                "key": metadata(line, "偏好键") or metadata(line, "事实键"),
+                "source": metadata(line, "来源"),
+            }
+            for heading, line in sections(content)
+            if heading == "已确认事实"
+        )
+        events.extend(
+            {
+                "id": event.id,
+                "name": event.name,
+                "subject": event.subject,
+                "path": path,
+                "status": event.status,
+                "records": event.records[-2:],
+            }
+            for event in events_from_document(path, content)
+        )
     profile_fact_count = len(facts)
     batch_text = "\n".join(turn.user for turn in batch)
     recent_drafts = list(drafts.values())[-80:]
@@ -151,28 +185,39 @@ def _known(profile: PersonalProfile, drafts: dict[str, dict], batch: list[Histor
             continue
         for claim in json.loads(row["claims"]):
             if claim.get("kind") == "confirmed":
-                facts.append({"path": claim.get("_document", ""),
-                              "fact": claim["fact"],
-                              "key": claim.get("preference_key") or claim.get("fact_key", ""),
-                              "source": row.get("source", "")})
+                facts.append(
+                    {
+                        "path": claim.get("_document", ""),
+                        "fact": claim["fact"],
+                        "key": claim.get("preference_key") or claim.get("fact_key", ""),
+                        "source": row.get("source", ""),
+                    }
+                )
             if claim.get("kind") != "event" or not claim.get("event_name"):
                 continue
             path = claim.get("_document") or f"{claim['topic']}/{claim['subject']}.md"
             event_id = claim.get("event_id") or event_identity(path, claim["event_name"])
             if event_id not in {event["id"] for event in events}:
-                events.append({"id": event_id, "name": claim["event_name"],
-                               "subject": claim["subject"], "path": path,
-                               "status": claim.get("status", "unknown"),
-                               "records": [claim["fact"]]})
-    selected_events = [event for event in events if event["name"] in batch_text
-                       or event["subject"] in batch_text]
-    selected_events.extend(event for event in events[-35:]
-                           if event not in selected_events)
-    return {"known_facts": [*facts[:profile_fact_count],
-                            *facts[profile_fact_count:][-80:]],
-            "known_events": selected_events,
-            "subjects": profile.documents(),
-            "canonical_self": _aliases(profile).get("self_subject", "")}
+                events.append(
+                    {
+                        "id": event_id,
+                        "name": claim["event_name"],
+                        "subject": claim["subject"],
+                        "path": path,
+                        "status": claim.get("status", "unknown"),
+                        "records": [claim["fact"]],
+                    }
+                )
+    selected_events = [
+        event for event in events if event["name"] in batch_text or event["subject"] in batch_text
+    ]
+    selected_events.extend(event for event in events[-35:] if event not in selected_events)
+    return {
+        "known_facts": [*facts[:profile_fact_count], *facts[profile_fact_count:][-80:]],
+        "known_events": selected_events,
+        "subjects": profile.documents(),
+        "canonical_self": _aliases(profile).get("self_subject", ""),
+    }
 
 
 def _aliases(profile: PersonalProfile) -> dict:
@@ -194,9 +239,7 @@ def _canonical_subject(claim: dict, profile: PersonalProfile) -> None:
             marker in claim["subject"] for marker in rule["subject_contains"]
         ):
             continue
-        if rule.get("contains") and not any(
-            marker in claim["fact"] for marker in rule["contains"]
-        ):
+        if rule.get("contains") and not any(marker in claim["fact"] for marker in rule["contains"]):
             continue
         claim["topic"] = rule["target_topic"]
         claim["subject"] = rule["target_subject"]
@@ -207,8 +250,9 @@ def _restrict_followup(claim: dict, turn: HistoricalTurn) -> None:
     """Only explicit plans and ongoing experiences can create follow-up candidates."""
     evidence = str(claim.get("evidence", ""))
     subject = str(claim.get("subject", ""))
-    actor = "|".join(re.escape(value) for value in
-                     ("我们", "我", "她", "他", "它", subject) if value)
+    actor = "|".join(
+        re.escape(value) for value in ("我们", "我", "她", "他", "它", subject) if value
+    )
     personal_action = re.search(
         rf"(?:{actor}).{{0,16}}(?:计划|打算|准备|决定|正在|还在|开始|想|需要|"
         r"要(?:去|做|开始|接着|带|把|办|看|买|写|学))",
@@ -218,15 +262,20 @@ def _restrict_followup(claim: dict, turn: HistoricalTurn) -> None:
         r"(?:明天|接下来|下周|这周|等有时间).{0,12}(?:开始|执行|去|做|再来|看)", evidence
     )
     hypothetical = re.search(r"(?:如果|假如).{0,16}(?:想|要|计划)", evidence)
-    if (claim.get("kind") != "event" or claim.get("status") not in {"planned", "ongoing"}
-            or turn.user.lstrip().startswith("#")
-            or not (personal_action or dated_action) or (hypothetical and not dated_action)):
+    if (
+        claim.get("kind") != "event"
+        or claim.get("status") not in {"planned", "ongoing"}
+        or turn.user.lstrip().startswith("#")
+        or not (personal_action or dated_action)
+        or (hypothetical and not dated_action)
+    ):
         claim.pop("followup_field", None)
         claim.pop("followup_question", None)
 
 
-def _validate_batch(response: str, turns: list[HistoricalTurn],
-                    known_event_ids: set[str]) -> dict[str, list[dict]]:
+def _validate_batch(
+    response: str, turns: list[HistoricalTurn], known_event_ids: set[str]
+) -> dict[str, list[dict]]:
     parsed = parse_json_array_response(response)
     expected = {turn.message_id: turn for turn in turns}
     if not parsed.ok or len(parsed.items) != len(turns):
@@ -237,8 +286,9 @@ def _validate_batch(response: str, turns: list[HistoricalTurn],
         if key not in expected or key in output or not isinstance(item.get("claims"), list):
             raise ValueError("Historical extraction has duplicate/unknown ID or invalid claims")
         for claim in item["claims"]:
-            if not isinstance(claim, dict) or not all(claim.get(field) for field in
-                 ("topic", "subject", "kind", "fact", "evidence")):
+            if not isinstance(claim, dict) or not all(
+                claim.get(field) for field in ("topic", "subject", "kind", "fact", "evidence")
+            ):
                 raise ValueError(f"Historical extraction has an invalid claim: {key}")
             if claim["kind"] not in {"confirmed", "event", "inference", "uncertain"}:
                 raise ValueError(f"Historical extraction has an invalid kind: {key}")
@@ -253,35 +303,56 @@ def _validate_batch(response: str, turns: list[HistoricalTurn],
 
 
 async def stage_history(
-    conn: sqlite3.Connection, turns: list[HistoricalTurn], profile: PersonalProfile,
-    gateway: Any, *, batch_size: int = 8, limit: int | None = None,
+    conn: sqlite3.Connection,
+    turns: list[HistoricalTurn],
+    profile: PersonalProfile,
+    gateway: Any,
+    *,
+    batch_size: int = 8,
+    limit: int | None = None,
 ) -> dict:
     known_rows = _rows(conn)
-    pending = [turn for turn in turns if turn.message_id not in known_rows
-               or known_rows[turn.message_id]["status"] == "failed"]
+    pending = [
+        turn
+        for turn in turns
+        if turn.message_id not in known_rows or known_rows[turn.message_id]["status"] == "failed"
+    ]
     if limit is not None:
         pending = pending[:limit]
     for start in range(0, len(pending), batch_size):
-        batch = pending[start:start + batch_size]
+        batch = pending[start : start + batch_size]
         await _stage_batch(conn, batch, profile, gateway, known_rows)
         print(f"Historical extraction: {start + len(batch)}/{len(pending)}", flush=True)
     return Counter(row["status"] for row in _rows(conn).values())
 
 
-async def _stage_batch(conn: sqlite3.Connection, batch: list[HistoricalTurn],
-                       profile: PersonalProfile, gateway: Any,
-                       known_rows: dict[str, dict]) -> None:
+async def _stage_batch(
+    conn: sqlite3.Connection,
+    batch: list[HistoricalTurn],
+    profile: PersonalProfile,
+    gateway: Any,
+    known_rows: dict[str, dict],
+) -> None:
     payload = {
-        "turns": [{"message_id": turn.message_id, "source": turn.source,
-                   "timestamp": turn.timestamp, "user": turn.user,
-                   "adjacent": turn.adjacent} for turn in batch],
+        "turns": [
+            {
+                "message_id": turn.message_id,
+                "source": turn.source,
+                "timestamp": turn.timestamp,
+                "user": turn.user,
+                "adjacent": turn.adjacent,
+            }
+            for turn in batch
+        ],
         **_known(profile, known_rows, batch),
     }
     try:
-        response = await gateway.chat([
-            {"role": "system", "content": _PROMPT},
-            {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
-        ])
+        response = await gateway.chat(
+            [
+                {"role": "system", "content": _PROMPT},
+                {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
+            ]
+        )
         results = _validate_batch(
             response.text, batch, {item["id"] for item in payload["known_events"]}
         )
@@ -311,32 +382,51 @@ async def _stage_batch(conn: sqlite3.Connection, batch: list[HistoricalTurn],
                 document = profile._claim_path(claim["topic"], claim["subject"])
                 name = document.relative_to(profile.root).as_posix()
                 claim["_document"] = name
-                claim["_revision"] = (profile.read_document(name)[1] if document.exists()
-                                      else hashlib.sha256(b"").hexdigest())
+                claim["_revision"] = (
+                    profile.read_document(name)[1]
+                    if document.exists()
+                    else hashlib.sha256(b"").hexdigest()
+                )
         except ValueError as exc:
             _write_row(conn, turn, "uncertain", claims, str(exc))
-            known_rows[turn.message_id] = {"status": "uncertain", "source": turn.source,
-                                           "claims": json.dumps(claims, ensure_ascii=False)}
+            known_rows[turn.message_id] = {
+                "status": "uncertain",
+                "source": turn.source,
+                "claims": json.dumps(claims, ensure_ascii=False),
+            }
             continue
         status = "staged" if claims else "none"
         _write_row(conn, turn, status, claims)
-        known_rows[turn.message_id] = {"status": status,
-                                       "source": turn.source,
-                                       "claims": json.dumps(claims, ensure_ascii=False)}
+        known_rows[turn.message_id] = {
+            "status": status,
+            "source": turn.source,
+            "claims": json.dumps(claims, ensure_ascii=False),
+        }
     conn.commit()
 
 
-def _write_row(conn: sqlite3.Connection, turn: HistoricalTurn, status: str,
-               claims: list[dict], error: str = "") -> None:
-    conn.execute("""
+def _write_row(
+    conn: sqlite3.Connection, turn: HistoricalTurn, status: str, claims: list[dict], error: str = ""
+) -> None:
+    conn.execute(
+        """
         INSERT INTO personal_backfill_turns
             (message_id, source, statement_at, source_aliases, status, claims, error, updated_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(message_id) DO UPDATE SET status=excluded.status,
             claims=excluded.claims, error=excluded.error, updated_at=excluded.updated_at
-    """, (turn.message_id, turn.source, turn.timestamp,
-          json.dumps(turn.aliases, ensure_ascii=False), status,
-          json.dumps(claims, ensure_ascii=False), error, datetime.now(UTC).isoformat()))
+    """,
+        (
+            turn.message_id,
+            turn.source,
+            turn.timestamp,
+            json.dumps(turn.aliases, ensure_ascii=False),
+            status,
+            json.dumps(claims, ensure_ascii=False),
+            error,
+            datetime.now(UTC).isoformat(),
+        ),
+    )
 
 
 def _resolve_event_reference(profile: PersonalProfile, claim: dict, name: str) -> None:
@@ -349,8 +439,9 @@ def _resolve_event_reference(profile: PersonalProfile, claim: dict, name: str) -
     if original and original.path == name:
         claim["event_name"] = original.name
         return
-    matching = [event for event in events
-                if event.path == name and event.name == claim.get("event_name")]
+    matching = [
+        event for event in events if event.path == name and event.name == claim.get("event_name")
+    ]
     if len(matching) > 1 or (original and original.subject == claim.get("subject")):
         raise ValueError(f"Historical event reference is ambiguous: {name}")
     if len(matching) == 1:
@@ -362,12 +453,11 @@ def _resolve_event_reference(profile: PersonalProfile, claim: dict, name: str) -
     claim["_event_reconciliation"] = f"{old_id} -> {claim['event_id']}"
 
 
-async def apply_history(conn: sqlite3.Connection, turns: list[HistoricalTurn],
-                        profile: PersonalProfile) -> dict:
+async def apply_history(
+    conn: sqlite3.Connection, turns: list[HistoricalTurn], profile: PersonalProfile
+) -> dict:
     rows = _rows(conn)
-    written_revisions = dict(conn.execute(
-        "SELECT path, revision FROM personal_backfill_documents"
-    ))
+    written_revisions = dict(conn.execute("SELECT path, revision FROM personal_backfill_documents"))
     for turn in turns:
         row = rows.get(turn.message_id)
         if not row or row["status"] != "staged":
@@ -377,25 +467,32 @@ async def apply_history(conn: sqlite3.Connection, turns: list[HistoricalTurn],
             for claim in claims:
                 _canonical_subject(claim, profile)
                 _restrict_followup(claim, turn)
-                name = claim.get("_document") or profile._claim_path(
-                    claim["topic"], claim["subject"]
-                ).relative_to(profile.root).as_posix()
-                resolved = profile._claim_path(
-                    claim["topic"], claim["subject"]
-                ).relative_to(profile.root).as_posix()
+                name = (
+                    claim.get("_document")
+                    or profile._claim_path(claim["topic"], claim["subject"])
+                    .relative_to(profile.root)
+                    .as_posix()
+                )
+                resolved = (
+                    profile._claim_path(claim["topic"], claim["subject"])
+                    .relative_to(profile.root)
+                    .as_posix()
+                )
                 if name != resolved:
                     raise ValueError(f"Dossier selection changed since historical review: {name}")
                 _resolve_event_reference(profile, claim, name)
                 document = profile._document_path(name)
-                content, actual = (profile.read_document(name) if document.exists()
-                                   else ("", hashlib.sha256(b"").hexdigest()))
+                content, actual = (
+                    profile.read_document(name)
+                    if document.exists()
+                    else ("", hashlib.sha256(b"").hexdigest())
+                )
                 if "_revision" not in claim:
                     raise ValueError(f"Historical claim has no reviewed dossier revision: {name}")
                 expected = written_revisions.get(name, claim["_revision"])
                 if expected != actual:
                     already_applied = any(
-                        line.startswith(f"- {claim['fact']}；")
-                        and f"；来源：{turn.source}" in line
+                        line.startswith(f"- {claim['fact']}；") and f"；来源：{turn.source}" in line
                         for line in content.splitlines()
                     )
                     if not already_applied:
@@ -404,18 +501,25 @@ async def apply_history(conn: sqlite3.Connection, turns: list[HistoricalTurn],
                 claim["_revision"] = actual
                 await profile.add_claim(claim, source=turn.source, stated_at=turn.timestamp)
                 revision = profile.read_document(name)[1]
-                conn.execute("""
+                conn.execute(
+                    """
                     INSERT INTO personal_backfill_documents (path, revision) VALUES (?, ?)
                     ON CONFLICT(path) DO UPDATE SET revision=excluded.revision
-                """, (name, revision))
+                """,
+                    (name, revision),
+                )
                 conn.commit()
                 written_revisions[name] = revision
         except Exception as exc:
             _write_row(conn, turn, "failed", claims, str(exc))
             conn.commit()
             continue
-        _write_row(conn, turn, "uncertain" if all(
-            claim["kind"] == "uncertain" for claim in claims) else "extracted", claims)
+        _write_row(
+            conn,
+            turn,
+            "uncertain" if all(claim["kind"] == "uncertain" for claim in claims) else "extracted",
+            claims,
+        )
         conn.commit()
     return Counter(row["status"] for row in _rows(conn).values())
 
@@ -424,14 +528,19 @@ def review_report(conn: sqlite3.Connection, turns: list[HistoricalTurn], path: P
     rows = _rows(conn)
     uncertain_path = path.with_name("completeness-uncertain.jsonl")
     failed_path = path.with_name("completeness-failures.jsonl")
-    with (path.open("w", encoding="utf-8") as output,
-          uncertain_path.open("w", encoding="utf-8") as uncertain,
-          failed_path.open("w", encoding="utf-8") as failures):
+    with (
+        path.open("w", encoding="utf-8") as output,
+        uncertain_path.open("w", encoding="utf-8") as uncertain,
+        failed_path.open("w", encoding="utf-8") as failures,
+    ):
         for turn in turns:
             row = rows.get(turn.message_id)
             item = {
-                "source": turn.source, "aliases": turn.aliases, "stated_at": turn.timestamp,
-                "user": turn.user, "closed": turn.closed,
+                "source": turn.source,
+                "aliases": turn.aliases,
+                "stated_at": turn.timestamp,
+                "user": turn.user,
+                "closed": turn.closed,
                 "status": row["status"] if row else "unprocessed",
                 "claims": json.loads(row["claims"]) if row else [],
                 "error": row["error"] if row else "",

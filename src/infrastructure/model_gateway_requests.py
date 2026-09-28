@@ -40,7 +40,10 @@ def _audited_completion(
         provider_attempt: ProviderAttempt, *, model: str, usage: Usage, latency_ms: int
     ) -> None:
         await record_completion(
-            provider_attempt, model=model, usage=usage, latency_ms=latency_ms,
+            provider_attempt,
+            model=model,
+            usage=usage,
+            latency_ms=latency_ms,
             input_count=input_count,
         )
 
@@ -106,9 +109,7 @@ async def run_model_round_request(
                     messages=messages,
                     tools=tools,
                     call_kwargs=call_kwargs,
-                    record_completion=_audited_completion(
-                        context.record_completion, input_count
-                    ),
+                    record_completion=_audited_completion(context.record_completion, input_count),
                 ):
                     yield chunk
                 return
@@ -152,9 +153,7 @@ async def run_stream_request(
                     messages=messages,
                     tools=tools,
                     call_kwargs=call_kwargs,
-                    record_completion=_audited_completion(
-                        context.record_completion, input_count
-                    ),
+                    record_completion=_audited_completion(context.record_completion, input_count),
                 ):
                     yield chunk
                 return

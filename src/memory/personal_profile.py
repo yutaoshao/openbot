@@ -138,10 +138,12 @@ class PersonalProfile:
             return ""
         items = ["个人档案（Markdown 原文是权威来源；推测不得表述成已确认事实）："]
         for match in matches:
-            confirmed = (match.content.split("## 已确认事实", 1)[1].split("\n## ", 1)[0]
-                         if "## 已确认事实" in match.content else "")
-            birth = re.search(r"^- 出生日期：(\d{4}-\d{2}-\d{2})", confirmed,
-                              re.MULTILINE)
+            confirmed = (
+                match.content.split("## 已确认事实", 1)[1].split("\n## ", 1)[0]
+                if "## 已确认事实" in match.content
+                else ""
+            )
+            birth = re.search(r"^- 出生日期：(\d{4}-\d{2}-\d{2})", confirmed, re.MULTILINE)
             age = ""
             if birth:
                 try:
@@ -187,9 +189,14 @@ class PersonalProfile:
             for event in events_from_document(name, content)
         ]
         known_facts = [
-            {"path": name, "fact": line[2:].split("；", 1)[0],
-             "key": metadata(line, "偏好键") or metadata(line, "事实键")
-             or line[2:].split("：", 1)[0], "source": metadata(line, "来源")}
+            {
+                "path": name,
+                "fact": line[2:].split("；", 1)[0],
+                "key": metadata(line, "偏好键")
+                or metadata(line, "事实键")
+                or line[2:].split("：", 1)[0],
+                "source": metadata(line, "来源"),
+            }
             for name, (content, _) in snapshots.items()
             for heading, line in sections(content)
             if heading == "已确认事实"
@@ -297,8 +304,13 @@ class PersonalProfile:
             merged = list(dict.fromkeys([*present, *(alias for alias in additions if alias)]))
             if merged != present:
                 if re.search(r"^别名：", content, re.MULTILINE):
-                    content = re.sub(r"^别名：.*$", "别名：" + "、".join(merged), content,
-                                     count=1, flags=re.MULTILINE)
+                    content = re.sub(
+                        r"^别名：.*$",
+                        "别名：" + "、".join(merged),
+                        content,
+                        count=1,
+                        flags=re.MULTILINE,
+                    )
                 else:
                     heading, separator, remainder = content.partition("\n")
                     content = heading + "\n别名：" + "、".join(merged) + separator + remainder

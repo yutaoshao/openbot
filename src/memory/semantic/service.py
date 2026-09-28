@@ -54,8 +54,12 @@ class SemanticMemory(SemanticMutationMixin, SemanticQueryMixin):
         return await self._call_extraction_llm(messages)
 
     async def store_extracted_knowledge(
-        self, raw_items: list[dict], conversation_id: str, user_id: str,
-        *, source: str | None = None,
+        self,
+        raw_items: list[dict],
+        conversation_id: str,
+        user_id: str,
+        *,
+        source: str | None = None,
     ) -> list[dict]:
         if not raw_items:
             return []
@@ -75,15 +79,17 @@ class SemanticMemory(SemanticMutationMixin, SemanticQueryMixin):
                 priority = "P1"
 
             embedding = await self._embedding.embed(content)
-            knowledge_id = (hashlib.sha256(f"{source}\n{content}".encode()).hexdigest()
-                            if source else None)
+            knowledge_id = (
+                hashlib.sha256(f"{source}\n{content}".encode()).hexdigest() if source else None
+            )
             existing = await self._storage.knowledge.get(knowledge_id) if knowledge_id else None
             if existing:
                 await self._update_embedding(knowledge_id, embedding)
                 results.append(existing)
                 continue
-            duplicate = (await self._find_duplicate(embedding, content, user_id)
-                         if source is None else None)
+            duplicate = (
+                await self._find_duplicate(embedding, content, user_id) if source is None else None
+            )
             if duplicate is not None:
                 merged = await self._merge_knowledge(duplicate, content, tags, priority)
                 results.append(merged)

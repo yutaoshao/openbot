@@ -105,9 +105,7 @@ async def test_chat_sends_responses_reasoning_request_and_maps_output() -> None:
 
 
 async def test_chat_rejects_invalid_tool_arguments() -> None:
-    provider = _make_provider(
-        SimpleNamespace(output=[_function_call("{not-json")], usage=None)
-    )
+    provider = _make_provider(SimpleNamespace(output=[_function_call("{not-json")], usage=None))
 
     with pytest.raises(ValueError, match="Invalid JSON arguments for tool 'read_file'"):
         await provider.chat(messages=[])

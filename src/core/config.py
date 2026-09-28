@@ -208,8 +208,10 @@ class AgentConfig(BaseModel):
             raise ValueError(
                 "input budget must be positive and trigger ratio must be between 0 and 1"
             )
-        if not 0 < self.recent_token_budget < (
-            self.input_token_budget * self.compression_trigger_ratio
+        if (
+            not 0
+            < self.recent_token_budget
+            < (self.input_token_budget * self.compression_trigger_ratio)
         ):
             raise ValueError("recent token budget must be below the compression trigger")
         return self

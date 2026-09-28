@@ -89,9 +89,7 @@ class DeepResearchTool:
                     "saturated": report.saturated,
                     "latency_ms": report.latency_ms,
                 },
-                effects=(
-                    _effect(topic, STATUS_COMPLETED, "research_completed"),
-                ),
+                effects=(_effect(topic, STATUS_COMPLETED, "research_completed"),),
             )
 
         except Exception as e:

@@ -42,8 +42,7 @@ def test_task_contract_treats_schedule_question_as_consultation() -> None:
 
 def test_stop_verifier_allows_consultation_after_schedule_read() -> None:
     contract = build_task_contract(
-        "data/diaries 想改成年月目录，需要改哪些地方？"
-        "是不是要把定时任务也改一下？"
+        "data/diaries 想改成年月目录，需要改哪些地方？是不是要把定时任务也改一下？"
     )
 
     decision = verify_stop(

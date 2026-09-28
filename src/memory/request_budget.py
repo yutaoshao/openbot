@@ -53,8 +53,9 @@ async def compact_request_history(
     from src.memory.turn_selection import recent_turn_cut
     from src.memory.working_compaction import summarize_messages
 
-    first_user = next((i for i, message in enumerate(messages)
-                       if message.get("role") == "user"), -1)
+    first_user = next(
+        (i for i, message in enumerate(messages) if message.get("role") == "user"), -1
+    )
     cut = recent_turn_cut(messages, recent_budget)
     if first_user < 0 or not cut:
         return False

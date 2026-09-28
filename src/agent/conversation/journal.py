@@ -59,11 +59,7 @@ class ConversationJournal:
 def _payload(entry: ConversationJournalEntry, local_ts: datetime) -> dict[str, Any]:
     payload = asdict(entry)
     payload["ts"] = local_ts.isoformat()
-    return {
-        key: _jsonable(value)
-        for key, value in payload.items()
-        if value not in ("", None, [])
-    }
+    return {key: _jsonable(value) for key, value in payload.items() if value not in ("", None, [])}
 
 
 def _jsonable(value: Any) -> Any:

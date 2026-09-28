@@ -41,20 +41,24 @@ class SharedTimelineMemory:
             self._loaded = True
             return
         self._repository = messages
-        summary = (await messages.get_working_summary()
-                   if hasattr(messages, "get_working_summary") else None)
+        summary = (
+            await messages.get_working_summary()
+            if hasattr(messages, "get_working_summary")
+            else None
+        )
         if summary:
             recent = await messages.get_global_after(
                 summary["boundary_id"], self._include_platforms, user_id=SINGLE_USER_ID
             )
             self._memory._summary = summary["content"]
         else:
-            recent = (await messages.get_global_history(
-                self._include_platforms, user_id=SINGLE_USER_ID
-            ) if model_gateway is not None and hasattr(messages, "get_global_history")
+            recent = (
+                await messages.get_global_history(self._include_platforms, user_id=SINGLE_USER_ID)
+                if model_gateway is not None and hasattr(messages, "get_global_history")
                 else await messages.get_recent_global(
                     self._recent_budget, self._include_platforms, user_id=SINGLE_USER_ID
-                ))
+                )
+            )
         for index, item in enumerate(recent, 1):
             timeline_message = {
                 "role": item["role"],
@@ -66,8 +70,7 @@ class SharedTimelineMemory:
             if item.get("metadata") is not None:
                 timeline_message["metadata"] = item["metadata"]
             self._memory.add(timeline_message)
-            if (model_gateway is not None and index % 32 == 0
-                    and self._memory.needs_compression()):
+            if model_gateway is not None and index % 32 == 0 and self._memory.needs_compression():
                 await self.compress(model_gateway)
         if model_gateway is not None and self.estimate_tokens() > self._recent_budget:
             await self.compress(model_gateway)

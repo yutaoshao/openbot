@@ -147,13 +147,20 @@ class PersonalHistory:
         expanded = self._neighbours(selected)
         if not expanded:
             return ""
-        prioritized = list(dict.fromkeys([
-            *(hit.source for hit in hits),
-            *(self._aliases.get(reference, reference) for reference in references),
-            *(hit.source for hit in sorted(expanded, key=_time, reverse=True)
-              if hit.source in selected),
-            *(hit.source for hit in expanded),
-        ]))
+        prioritized = list(
+            dict.fromkeys(
+                [
+                    *(hit.source for hit in hits),
+                    *(self._aliases.get(reference, reference) for reference in references),
+                    *(
+                        hit.source
+                        for hit in sorted(expanded, key=_time, reverse=True)
+                        if hit.source in selected
+                    ),
+                    *(hit.source for hit in expanded),
+                ]
+            )
+        )
         by_source = {hit.source: hit for hit in expanded}
         chosen: list[HistoryHit] = []
         used = 0
@@ -168,12 +175,20 @@ class PersonalHistory:
             used += cost
         chosen.sort(key=lambda hit: (_time(hit), hit.source))
         omitted = len(expanded) - len(chosen)
-        logger.info("personal_history.lookup", sources=[hit.source for hit in chosen],
-                    candidates=len(expanded), omitted=omitted, tokens_est=used)
+        logger.info(
+            "personal_history.lookup",
+            sources=[hit.source for hit in chosen],
+            candidates=len(expanded),
+            omitted=omitted,
+            tokens_est=used,
+        )
         if omitted:
             logger.info("personal_history.additional_sources_available", count=omitted)
-        note = (f"另有 {omitted} 条相关或相邻历史未展开；仍可检索，不能据此断定没有后续。\n"
-                if omitted else "")
+        note = (
+            f"另有 {omitted} 条相关或相邻历史未展开；仍可检索，不能据此断定没有后续。\n"
+            if omitted
+            else ""
+        )
         return note + "\n".join(
             f"- {'用户原话' if hit.role == 'user' else '助手原话（仅语境，不代表用户决定）'}"
             f"（{hit.timestamp}；来源：{hit.source}）：{hit.text}"
@@ -190,21 +205,32 @@ class PersonalHistory:
         ranked = sorted(
             enumerate(lines),
             key=lambda pair: (
-                any(self._aliases.get(reference, reference) in already_selected
-                    for reference in re.findall(r"来源：([^；\n）]+)", pair[1])),
+                any(
+                    self._aliases.get(reference, reference) in already_selected
+                    for reference in re.findall(r"来源：([^；\n）]+)", pair[1])
+                ),
                 scores[pair[0]],
             ),
             reverse=True,
         )
-        relevant = [line for index, line in ranked if scores[index] > 0 or any(
-            self._aliases.get(reference, reference) in already_selected
-            for reference in re.findall(r"来源：([^；\n）]+)", line)
-        )][:12]
+        relevant = [
+            line
+            for index, line in ranked
+            if scores[index] > 0
+            or any(
+                self._aliases.get(reference, reference) in already_selected
+                for reference in re.findall(r"来源：([^；\n）]+)", line)
+            )
+        ][:12]
         event_ids = {metadata(line, "事件ID") for line in relevant if metadata(line, "事件ID")}
-        return "\n".join(dict.fromkeys([
-            *relevant,
-            *(line for line in lines if metadata(line, "事件ID") in event_ids),
-        ]))
+        return "\n".join(
+            dict.fromkeys(
+                [
+                    *relevant,
+                    *(line for line in lines if metadata(line, "事件ID") in event_ids),
+                ]
+            )
+        )
 
     def _include_later_event_records(self, profile_content: str, selected: set[str]) -> None:
         names = set(re.findall(r"事件名称：([^；\n]+)", profile_content))
@@ -218,8 +244,9 @@ class PersonalHistory:
             if event_id:
                 event_lines.setdefault(event_id, []).append(line)
         for lines in event_lines.values():
-            sources = [self._aliases.get(metadata(line, "来源"), metadata(line, "来源"))
-                       for line in lines]
+            sources = [
+                self._aliases.get(metadata(line, "来源"), metadata(line, "来源")) for line in lines
+            ]
             originals = [self._records[source] for source in sources if source in self._records]
             if not originals:
                 continue
@@ -228,27 +255,38 @@ class PersonalHistory:
                 continue
             # Short follow-ups may omit the name entirely ("已经打完了"). Include
             # candidates as evidence, never promote them to confirmed outcomes.
-            verbs = {verb for verb in ("打", "接种", "寄", "预约", "面试", "入职",
-                                       "复诊", "搬")
-                     if verb in latest.text or any(verb in line for line in lines)}
+            verbs = {
+                verb
+                for verb in ("打", "接种", "寄", "预约", "面试", "入职", "复诊", "搬")
+                if verb in latest.text or any(verb in line for line in lines)
+            }
             if not verbs:
                 continue
             names = {metadata(line, "事件名称") for line in lines}
-            later = [hit for hit in self._records.values() if hit.role == "user"
-                     and _time(hit) > _time(latest)
-                     and any(verb in hit.text for verb in verbs)
-                     and re.search(r"已经|做完|打完|完成|结束|取消|改期|没去|终于|后来", hit.text)
-                     and (hit.conversation_id == latest.conversation_id
-                          or any(name and (name in hit.text
-                                  or (len(name) >= 3 and name[:2] in hit.text))
-                                 for name in names))]
+            later = [
+                hit
+                for hit in self._records.values()
+                if hit.role == "user"
+                and _time(hit) > _time(latest)
+                and any(verb in hit.text for verb in verbs)
+                and re.search(r"已经|做完|打完|完成|结束|取消|改期|没去|终于|后来", hit.text)
+                and (
+                    hit.conversation_id == latest.conversation_id
+                    or any(
+                        name and (name in hit.text or (len(name) >= 3 and name[:2] in hit.text))
+                        for name in names
+                    )
+                )
+            ]
             ordered = sorted(later, key=_time)
             possible = [*ordered[:2], *ordered[-2:]]
             selected.update(hit.source for hit in possible)
             if possible:
-                logger.info("personal_history.possible_outcome",
-                            event_name=metadata(lines[0], "事件名称"),
-                            sources=[hit.source for hit in possible])
+                logger.info(
+                    "personal_history.possible_outcome",
+                    event_name=metadata(lines[0], "事件名称"),
+                    sources=[hit.source for hit in possible],
+                )
 
     def _neighbours(self, selected: set[str]) -> list[HistoryHit]:
         grouped: dict[str, list[HistoryHit]] = {}

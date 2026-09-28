@@ -103,8 +103,9 @@ class ConversationManager:
             )
             self._shared_timeline = SharedTimelineMemory(
                 token_budget=compression_budget,
-                recent_budget=(trigger.recent_token_budget if trigger is not None
-                               else token_budget),
+                recent_budget=(
+                    trigger.recent_token_budget if trigger is not None else token_budget
+                ),
             )
         await self._shared_timeline.ensure_loaded(self._storage.messages, self._gateway)
         self._task_store.ensure(conversation_id)

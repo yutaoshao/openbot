@@ -50,8 +50,12 @@ async def store_user_message(
     await _append_to_shared_timeline(
         context,
         conversation_id=conversation_id,
-        message={"id": storage_message_id, "role": "user",
-                 "content": content, "timestamp": timestamp},
+        message={
+            "id": storage_message_id,
+            "role": "user",
+            "content": content,
+            "timestamp": timestamp,
+        },
     )
     await context.storage.messages.add(
         id=storage_message_id,
@@ -141,8 +145,10 @@ async def _store_assistant_message(
     await _append_to_shared_timeline(
         context,
         conversation_id=conversation_id,
-        message={"id": storage_message_id,
-                 **_assistant_timeline_message(content, timestamp, metadata)},
+        message={
+            "id": storage_message_id,
+            **_assistant_timeline_message(content, timestamp, metadata),
+        },
     )
     await context.storage.messages.add(
         id=storage_message_id,

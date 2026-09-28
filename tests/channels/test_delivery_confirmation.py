@@ -72,8 +72,10 @@ async def test_hub_confirmation_requires_adapter_delivery() -> None:
     assert confirmed == [("conv", "answer", "outbound-1")]
 
     socket.fail_on = "message"
+
     async def fail_send(event: dict) -> None:
         raise ConnectionError("socket disconnected")
+
     socket.send_json = fail_send  # type: ignore[method-assign]
     await hub.event_bus.publish("agent.response", payload)
     assert len(confirmed) == 1

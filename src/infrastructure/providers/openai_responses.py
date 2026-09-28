@@ -110,9 +110,7 @@ class OpenAIResponsesProvider:
         try:
             params = self._request_kwargs(messages, tools, kwargs)
             params.pop("max_output_tokens", None)
-            result = await self.client.responses.input_tokens.count(
-                **params
-            )
+            result = await self.client.responses.input_tokens.count(**params)
         except NotFoundError:
             self._token_count_supported = False
             logger.warning("model.input_token_count_unavailable", model=self.model)

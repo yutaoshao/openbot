@@ -36,20 +36,31 @@ async def main() -> None:
             profile = PersonalProfile()
             if args.phase == "stage":
                 result = await stage_history(
-                    conn, turns, profile, ModelGateway(config.model, EventBus(), config.agent),
-                    batch_size=args.batch_size, limit=args.limit,
+                    conn,
+                    turns,
+                    profile,
+                    ModelGateway(config.model, EventBus(), config.agent),
+                    batch_size=args.batch_size,
+                    limit=args.limit,
                 )
             else:
                 result = await apply_history(conn, turns, profile)
             report = Path("data/personal_memory/_migration/completeness-review.jsonl")
             review_report(conn, turns, report)
-            print(json.dumps({
-                "coverage": coverage, "status": result,
-                "unprocessed": len(turns) - sum(result.values()),
-                "report": str(report),
-                "uncertain": str(report.with_name("completeness-uncertain.jsonl")),
-                "failures": str(report.with_name("completeness-failures.jsonl")),
-            }, ensure_ascii=False, default=dict))
+            print(
+                json.dumps(
+                    {
+                        "coverage": coverage,
+                        "status": result,
+                        "unprocessed": len(turns) - sum(result.values()),
+                        "report": str(report),
+                        "uncertain": str(report.with_name("completeness-uncertain.jsonl")),
+                        "failures": str(report.with_name("completeness-failures.jsonl")),
+                    },
+                    ensure_ascii=False,
+                    default=dict,
+                )
+            )
     finally:
         await db.close()
 

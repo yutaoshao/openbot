@@ -22,16 +22,23 @@ def _document_aliases(path: Path) -> list[str]:
 
 
 def _fact_key(item: dict, fact: str) -> str:
-    return _single_line(str(item.get("preference_key") or item.get("fact_key") or (
-        fact.split("：", 1)[0] if "：" in fact else ""
-    )))
+    return _single_line(
+        str(
+            item.get("preference_key")
+            or item.get("fact_key")
+            or (fact.split("：", 1)[0] if "：" in fact else "")
+        )
+    )
 
 
 def _line_key(line: str) -> str:
     from src.memory.personal_events import metadata
 
-    return (metadata(line, "偏好键") or metadata(line, "事实键")
-            or (line[2:].split("：", 1)[0] if "：" in line else ""))
+    return (
+        metadata(line, "偏好键")
+        or metadata(line, "事实键")
+        or (line[2:].split("：", 1)[0] if "：" in line else "")
+    )
 
 
 def _supersede_claim(content: str, keys: set[str], new_source: str) -> str:
@@ -46,8 +53,7 @@ def _supersede_claim(content: str, keys: set[str], new_source: str) -> str:
     old_lines = [
         line
         for line in lines
-        if line.startswith("- ") and _line_key(line) in keys
-        and f"来源：{new_source}" not in line
+        if line.startswith("- ") and _line_key(line) in keys and f"来源：{new_source}" not in line
     ]
     if not old_lines:
         return content
@@ -65,8 +71,7 @@ def _conflicts_with_confirmed(content: str, fact: str, key: str) -> bool:
         return False
     section = content.split("## 已确认事实", 1)[1].split("\n## ", 1)[0]
     return any(
-        line.startswith("- ") and _line_key(line) == key
-        and not line.startswith(f"- {fact}；")
+        line.startswith("- ") and _line_key(line) == key and not line.startswith(f"- {fact}；")
         for line in section.splitlines()
     )
 
@@ -151,8 +156,12 @@ def append_claim(content: str, item: dict, *, source: str, stated_at: str, path:
         raise ValueError(f"Invalid personal event status: {status}")
     if kind == "confirmed" and (
         fact.startswith("体重：")
-        or re.search(r"体重.{0,24}(?:\d+(?:\.\d+)?|[一二三四五六七八九十两半]+)"
-                     r"(?:斤|kg|公斤|千克|克)", fact, flags=re.IGNORECASE)
+        or re.search(
+            r"体重.{0,24}(?:\d+(?:\.\d+)?|[一二三四五六七八九十两半]+)"
+            r"(?:斤|kg|公斤|千克|克)",
+            fact,
+            flags=re.IGNORECASE,
+        )
     ):
         kind = "event"
     basis = _single_line(str(item.get("basis") or ""))

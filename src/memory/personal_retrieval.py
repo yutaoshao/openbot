@@ -59,7 +59,7 @@ class PersonalRetrieval:
                     )
             missing = [item for item in chunks if not item["embedding"]]
             for offset in range(0, len(missing), _EMBEDDING_BATCH_SIZE):
-                batch = missing[offset:offset + _EMBEDDING_BATCH_SIZE]
+                batch = missing[offset : offset + _EMBEDDING_BATCH_SIZE]
                 vectors = await self.embedding.embed_batch([item["content"] for item in batch])
                 if len(vectors) != len(batch):
                     raise ValueError("Profile embedding batch size does not match the input")
@@ -91,7 +91,8 @@ class PersonalRetrieval:
         for match in direct:
             path = match.path.relative_to(self.profile.root).as_posix()
             by_path[path] = dict(
-                path=path, content=match.content,
+                path=path,
+                content=match.content,
                 revision=hashlib.sha256(match.content.encode()).hexdigest(),
                 score=float(match.score),
             )
@@ -134,8 +135,9 @@ class PersonalRetrieval:
         logger.info(
             "personal_profile.lookup",
             query=query,
-            candidates=[{"path": item["path"], "revision": item["revision"]}
-                        for item in candidates],
+            candidates=[
+                {"path": item["path"], "revision": item["revision"]} for item in candidates
+            ],
             sources=[
                 {"path": item.source, "revision": hashlib.sha256(item.content.encode()).hexdigest()}
                 for item in result
