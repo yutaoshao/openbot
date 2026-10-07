@@ -115,7 +115,7 @@ class ProceduralMemory:
 
     async def get_system_prompt_context(self, user_id: str, *, query: str = "") -> str:
         if self._profile is not None:
-            return self._profile.preference_context(query)
+            return self._profile.preference_context(query, include_global=False)
         prefs = await self.get_preferences(user_id)
         if not prefs:
             return ""

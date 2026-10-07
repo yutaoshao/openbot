@@ -67,12 +67,11 @@ async def compact_request_history(
         return False
     summary = await summarize_messages(model_gateway=model_gateway, messages=older)
     if not summary:
-        summary = _fallback_history_summary(older)
-        logger.warning(
-            "request_history.compression_fallback",
+        logger.error(
+            "request_history.compression_failed_preserving_original",
             message_count=len(older),
-            summary_chars=len(summary),
         )
+        return False
     references = set()
     for message in older:
         match = re.search(r"^\[(\d{4}-\d\d-\d\d \d\d:\d\d)\]", str(message.get("content", "")))
@@ -88,21 +87,3 @@ async def compact_request_history(
         {"role": "system", "content": f"Summary of earlier conversation:\n{summary}"}
     ]
     return True
-
-
-def _fallback_history_summary(messages: list[dict[str, Any]], *, max_chars: int = 12_000) -> str:
-    """Keep a bounded, explicitly labelled history excerpt when summarisation fails."""
-    prefix = "模型历史摘要不可用；以下是未经总结的近期历史片段，仅供参考，不能替代完整历史：\n"
-    parts: list[str] = []
-    used = len(prefix)
-    for message in reversed(messages):
-        content = str(message.get("content", "")).strip()
-        if not content:
-            continue
-        line = f"- {message.get('role', 'unknown')}: {content}"
-        if used + len(line) + 1 > max_chars:
-            break
-        parts.append(line)
-        used += len(line) + 1
-    parts.reverse()
-    return prefix + "\n".join(parts)

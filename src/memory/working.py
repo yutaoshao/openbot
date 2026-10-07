@@ -162,13 +162,12 @@ class WorkingMemory:
             messages=older,
         )
         if not summary:
-            summary = _fallback_summary(older)
-            logger.warning(
-                "working_memory.compression_fallback",
+            logger.error(
+                "working_memory.compression_failed_preserving_original",
                 conversation_id=self._conversation_id,
                 message_count=len(older),
-                summary_chars=len(summary),
             )
+            return self._summary or ""
         new_summary = _summary_with_history_references(summary, older)
         if self._summary:
             new_summary = f"{self._summary}\n\n{new_summary}"
@@ -219,21 +218,3 @@ def _validate_message_timestamp(message: dict[str, Any]) -> None:
 def _summary_with_history_references(summary: str, messages: list[dict[str, Any]]) -> str:
     references = history_file_references(messages)
     return f"{summary}\n\n" + "\n".join(references) if references else summary
-
-
-def _fallback_summary(messages: list[dict[str, Any]], *, max_chars: int = 12_000) -> str:
-    """Keep an explicit bounded excerpt when the summarisation model is empty."""
-    prefix = "模型历史摘要不可用；以下是未经总结的近期历史片段，仅供参考，不能替代完整历史：\n"
-    parts: list[str] = []
-    used = len(prefix)
-    for message in reversed(messages):
-        content = str(message.get("content", "")).strip()
-        if not content:
-            continue
-        line = f"- {message.get('role', 'unknown')}: {content}"
-        if used + len(line) + 1 > max_chars:
-            break
-        parts.append(line)
-        used += len(line) + 1
-    parts.reverse()
-    return prefix + "\n".join(parts)

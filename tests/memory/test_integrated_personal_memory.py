@@ -233,6 +233,50 @@ async def test_profile_context_injects_retrieved_paragraphs_only(memory):
     assert len(context) < 5_000
 
 
+async def test_profile_context_separates_answer_facts_and_evidence(memory):
+    profile, _, _ = memory
+    await profile.add_claim(
+        {
+            "topic": "个人",
+            "subject": "生活费",
+            "kind": "confirmed",
+            "fact": "滔的父亲给他1800元",
+            "fact_key": "living_expense_source",
+        },
+        source="message:source",
+        stated_at="2026-10-06",
+    )
+
+    answer = profile.context("生活费来源")
+    evidence = profile.context("生活费来源", include_evidence=True)
+
+    assert "滔的父亲给他1800元" in answer
+    assert "message:source" not in answer
+    assert "核验信息：" in evidence
+    assert "message:source" in evidence
+
+
+async def test_global_preferences_form_the_resident_core_layer(memory):
+    profile, _, _ = memory
+    await profile.add_claim(
+        {
+            "topic": "个人",
+            "subject": "交流偏好",
+            "kind": "confirmed",
+            "fact": "语言：中文",
+            "preference_key": "language",
+            "scope": "通用",
+        },
+        source="message:language",
+        stated_at="2026-10-06",
+    )
+
+    core = profile.core_context()
+
+    assert "语言：中文" in core
+    assert "message:language" not in core
+
+
 async def test_event_progression_reuses_id_and_does_not_turn_consultation_into_plan(memory):
     profile, _, _ = memory
     base = dict(topic="宠物", subject="猫咪", kind="event", event_name="第二针疫苗")
@@ -489,7 +533,7 @@ async def test_followup_receipt_retries_and_suppresses_paraphrased_question_afte
 
     gateway = Gateway()
     service = PersonalFollowups(profile=profile, repository=storage.followups, gateway=gateway)
-    context = profile.context("猫咪")
+    context = profile.context("猫咪", include_evidence=True)
     assert "猫咪第二针打了吗？" in await service.context(
         "猫咪疫苗", profile_context=context, history_context="用户说计划去打疫苗"
     )

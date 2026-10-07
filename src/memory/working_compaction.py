@@ -15,6 +15,7 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 _SUMMARY_BATCH_TOKEN_BUDGET = 32_000
+_SUMMARY_MERGE_TOKEN_BUDGET = 16_000
 
 _COMPRESS_PROMPT = """\
 Summarise the following conversation messages concisely.
@@ -73,10 +74,7 @@ async def summarize_messages(
             total_batches=len(batches),
             message_count=len(batch),
         )
-        response = await model_gateway.chat(
-            messages=[{"role": "user", "content": prompt}],
-        )
-        summary = response.text.strip()
+        summary = await _summary_with_retry(model_gateway, prompt)
         if not summary:
             logger.warning(
                 "working_memory.summary_empty",
@@ -85,7 +83,47 @@ async def summarize_messages(
             )
             return ""
         summaries.append(summary)
-    return "\n\n".join(summaries)
+    if len(summaries) == 1:
+        return summaries[0]
+    merged = await _merge_summaries(model_gateway, summaries)
+    return merged or ""
+
+
+async def _summary_with_retry(model_gateway: ModelGateway, prompt: str) -> str:
+    response = await model_gateway.chat(messages=[{"role": "user", "content": prompt}])
+    summary = response.text.strip()
+    if summary:
+        return summary
+    retry_prompt = (
+        "用最少文字提取以下对话中必须保留的事实、决定和待办。"
+        "不要解释，不要输出空内容。\n\n" + prompt
+    )
+    logger.info("working_memory.summary_retry")
+    retry = await model_gateway.chat(messages=[{"role": "user", "content": retry_prompt}])
+    return retry.text.strip()
+
+
+async def _merge_summaries(model_gateway: ModelGateway, summaries: list[str]) -> str:
+    content = "\n\n".join(f"摘要 {index}:\n{summary}" for index, summary in enumerate(summaries, 1))
+    if (
+        estimate_input_tokens([{"role": "user", "content": content}]).tokens
+        > _SUMMARY_MERGE_TOKEN_BUDGET
+    ):
+        logger.warning(
+            "working_memory.summary_merge_skipped",
+            summary_count=len(summaries),
+            reason="merge_budget",
+        )
+        return content
+    prompt = (
+        "合并以下分批摘要，去除重复内容，保留事实、决定、约束、待办和具体数值。"
+        "只输出合并后的摘要。\n\n" + content
+    )
+    response = await model_gateway.chat(messages=[{"role": "user", "content": prompt}])
+    merged = response.text.strip()
+    if not merged:
+        logger.warning("working_memory.summary_merge_empty", summary_count=len(summaries))
+    return merged or content
 
 
 async def extract_memory_items(
@@ -142,13 +180,23 @@ def _summary_batches(
     """Split summary input before it reaches a provider context window."""
     if token_budget <= 0:
         raise ValueError("Summary batch token budget must be positive")
+    turns: list[list[dict[str, Any]]] = []
+    current_turn: list[dict[str, Any]] = []
+    for message in messages:
+        if current_turn and message.get("role") == "user":
+            turns.append(current_turn)
+            current_turn = []
+        current_turn.append(message)
+    if current_turn:
+        turns.append(current_turn)
+
     batches: list[list[dict[str, Any]]] = []
     current: list[dict[str, Any]] = []
-    for message in messages:
-        candidate = [*current, message]
+    for turn in turns:
+        candidate = [*current, *turn]
         if current and estimate_input_tokens(candidate).tokens > token_budget:
             batches.append(current)
-            current = [message]
+            current = list(turn)
         else:
             current = candidate
     if current:

@@ -6,6 +6,7 @@ import asyncio
 from typing import TYPE_CHECKING
 
 from src.core.logging import get_logger
+from src.memory.context_intent import requires_evidence_context
 
 if TYPE_CHECKING:
     from src.memory.episodic import EpisodicMemory
@@ -50,11 +51,34 @@ class PromptBuilder:
 
     async def _memory_sections(self, user_input: str, user_id: str) -> list[str]:
         if self._profile is not None:
-            matches = await self._retrieval.recall(user_input) if self._retrieval else None
-            profile_context = await asyncio.to_thread(
-                self._profile.context, user_input, matches=matches
+            include_evidence = requires_evidence_context(user_input)
+            matches = (
+                await self._retrieval.recall(user_input, include_evidence=include_evidence)
+                if self._retrieval
+                else None
             )
-            past = await self._episodic.recall(user_input, user_id, limit=2)
+            profile_context = await asyncio.to_thread(
+                self._profile.context,
+                user_input,
+                matches=matches,
+                include_evidence=include_evidence,
+            )
+            profile_evidence_context = profile_context
+            if not include_evidence:
+                profile_evidence_context = await asyncio.to_thread(
+                    self._profile.context,
+                    user_input,
+                    matches=matches,
+                    include_evidence=True,
+                )
+            core_context = ""
+            core_builder = getattr(self._profile, "core_context", None)
+            if callable(core_builder):
+                core_context = await asyncio.to_thread(core_builder)
+            needs_history = include_evidence or "待跟进：" in profile_evidence_context
+            past = (
+                await self._episodic.recall(user_input, user_id, limit=2) if needs_history else []
+            )
             history_context = (
                 await asyncio.to_thread(
                     self._history.context,
@@ -62,16 +86,19 @@ class PromptBuilder:
                     profile_content=profile_context,
                     conversation_ids=[item["id"] for item in past if item.get("id")],
                 )
-                if self._history
+                if self._history and needs_history
                 else ""
             )
             return [
+                core_context,
                 await self._procedural_context(user_id, query=user_input),
                 profile_context,
                 history_context,
                 await self._semantic_context(user_input, user_id, exclude_personal=True),
                 await self._followups.context(
-                    user_input, profile_context=profile_context, history_context=history_context
+                    user_input,
+                    profile_context=profile_evidence_context,
+                    history_context=history_context,
                 )
                 if self._followups
                 else "",

@@ -46,7 +46,7 @@ async def test_add_persists_message_timestamp_separately_from_created_at(tmp_pat
     assert rows[0]["content"] == "hello"
 
 
-async def test_empty_summary_uses_explicit_fallback_and_persists_boundary(tmp_path) -> None:
+async def test_empty_summary_preserves_messages_and_boundary_on_failure(tmp_path) -> None:
     db = Database(StorageConfig(db_path=str(tmp_path / "memory.db")))
     await db.initialize()
     async with db.get_connection() as conn:
@@ -77,10 +77,10 @@ async def test_empty_summary_uses_explicit_fallback_and_persists_boundary(tmp_pa
 
     before = timeline.get_messages()
     summary = await timeline.compress(EmptyGateway())
-    assert "模型历史摘要不可用" in summary
-    assert timeline.get_messages() != before
+    assert summary == ""
+    assert timeline.get_messages() == before
     saved = await repo.get_working_summary()
-    assert saved and saved["boundary_id"] == "m1"
+    assert saved is None
     await db.close()
 
 

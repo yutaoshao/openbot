@@ -9,6 +9,7 @@ from collections import Counter
 from typing import Any
 
 from src.core.logging import get_logger
+from src.memory.personal_claims import searchable_claim_text, searchable_document_text
 from src.memory.personal_profile import PersonalProfile, ProfileMatch, _terms
 
 logger = get_logger(__name__)
@@ -41,7 +42,9 @@ class PersonalRetrieval:
             missing = [item for item in chunks if not item["embedding"]]
             for offset in range(0, len(missing), _EMBEDDING_BATCH_SIZE):
                 batch = missing[offset : offset + _EMBEDDING_BATCH_SIZE]
-                vectors = await self.embedding.embed_batch([item["content"] for item in batch])
+                vectors = await self.embedding.embed_batch(
+                    [searchable_document_text(item["content"]) for item in batch]
+                )
                 if len(vectors) != len(batch):
                     raise ValueError("Profile embedding batch size does not match the input")
                 for item, vector in zip(batch, vectors, strict=True):
@@ -76,13 +79,18 @@ class PersonalRetrieval:
                 )
         return chunks
 
-    async def recall(self, query: str, *, limit: int = 3) -> list[ProfileMatch]:
+    async def recall(
+        self, query: str, *, limit: int = 3, include_evidence: bool = False
+    ) -> list[ProfileMatch]:
         chunks = await self.rebuild()
         query_vector = await self.embedding.embed(query)
         # Paragraphs repeat the dossier title for display; exclude that title
         # from lexical scoring so a broad subject query does not rank every
         # paragraph equally.
-        keyword_scores = bm25(query, [_chunk_search_text(item) for item in chunks])
+        keyword_scores = bm25(
+            query,
+            [_chunk_search_text(item, include_evidence=include_evidence) for item in chunks],
+        )
         lexical = sorted(range(len(chunks)), key=lambda i: keyword_scores[i], reverse=True)
         vector_scores = [cosine(query_vector, item["embedding"]) for item in chunks]
         semantic = sorted(range(len(chunks)), key=lambda i: vector_scores[i], reverse=True)
@@ -90,14 +98,22 @@ class PersonalRetrieval:
         for ranking, values in ((lexical, keyword_scores), (semantic, vector_scores)):
             for rank, index in enumerate([i for i in ranking if values[i] > 0][:20]):
                 scores[index] = scores.get(index, 0) + 1 / (60 + rank + 1)
-        direct = await asyncio.to_thread(self.profile.matches, query, limit=max(limit, 12))
+        direct = await asyncio.to_thread(
+            self.profile.matches,
+            query,
+            limit=max(limit, 12),
+            include_evidence=include_evidence,
+        )
         by_path: dict[str, dict] = {}
+        direct_matches: dict[str, ProfileMatch] = {}
         direct_paths = {match.path.relative_to(self.profile.root).as_posix() for match in direct}
         for match in direct:
             path = match.path.relative_to(self.profile.root).as_posix()
+            direct_matches[path] = match
             by_path[path] = dict(
                 path=path,
                 content=match.content,
+                search_content=searchable_document_text(match.content),
                 revision=hashlib.sha256(match.content.encode()).hexdigest(),
                 score=float(match.score),
             )
@@ -111,10 +127,13 @@ class PersonalRetrieval:
                 by_path[path]["_chunk_score"] = score
             elif path not in direct_paths:
                 by_path[path]["score"] = max(by_path[path]["score"], score)
-        candidates = sorted(by_path.values(), key=lambda item: -item["score"])[:20]
+        candidates = [
+            {**item, "search_content": searchable_document_text(item["content"])}
+            for item in sorted(by_path.values(), key=lambda item: -item["score"])[:20]
+        ]
         if self.reranker and candidates:
             candidates = await self.reranker.rerank_dicts(
-                query, candidates, content_key="content", top_n=min(12, len(candidates))
+                query, candidates, content_key="search_content", top_n=min(12, len(candidates))
             )
         result: list[ProfileMatch] = []
         for item in candidates:
@@ -130,7 +149,17 @@ class PersonalRetrieval:
             if revision != item["revision"]:
                 logger.info("personal_index.stale_hit", path=item["path"], reason="edited")
                 continue
-            selected_sections = _retrieved_sections(chunks, scores, item["path"])
+            selected_sections = _retrieved_sections(
+                chunks, scores, item["path"], include_evidence=include_evidence
+            )
+            path_has_score = any(
+                scores.get(index, 0) > 0
+                for index, chunk in enumerate(chunks)
+                if chunk["path"] == item["path"]
+            )
+            direct_match = direct_matches.get(item["path"])
+            if not path_has_score and direct_match and direct_match.sections:
+                selected_sections = direct_match.sections
             result.append(
                 ProfileMatch(
                     path=self.profile.root / item["path"],
@@ -157,7 +186,12 @@ class PersonalRetrieval:
 
 
 def _retrieved_sections(
-    chunks: list[dict], scores: dict[int, float], path: str, *, limit: int = 8
+    chunks: list[dict],
+    scores: dict[int, float],
+    path: str,
+    *,
+    limit: int = 8,
+    include_evidence: bool = False,
 ) -> tuple[str, ...]:
     ranked = sorted(
         (
@@ -171,12 +205,22 @@ def _retrieved_sections(
         return tuple(item[2] for item in ranked[:limit])
     # A title-only match has no paragraph score. Keep a small deterministic
     # preview instead of expanding the whole dossier into the prompt.
-    return tuple(item["content"] for item in chunks if item["path"] == path)[:limit]
+    previews = [item["content"] for item in chunks if item["path"] == path]
+    if not include_evidence:
+        previews = [
+            item
+            for item in previews
+            if not any(
+                heading in item.splitlines()[1:2] for heading in ("## 历史修订", "## 待核实信息")
+            )
+        ]
+    return tuple(previews[:limit])
 
 
-def _chunk_search_text(item: dict) -> str:
+def _chunk_search_text(item: dict, *, include_evidence: bool = False) -> str:
     lines = item["content"].splitlines()
-    return "\n".join(lines[2:]) if len(lines) > 2 else item["content"]
+    content = "\n".join(lines[2:]) if len(lines) > 2 else item["content"]
+    return searchable_claim_text(content, include_evidence=include_evidence)
 
 
 def paragraphs(content: str) -> list[tuple[str, str]]:

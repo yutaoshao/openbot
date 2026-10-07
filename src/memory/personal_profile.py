@@ -11,6 +11,11 @@ from pathlib import Path
 from typing import Any
 
 from src.core.logging import get_logger
+from src.memory.personal_claims import (
+    parse_claim_line,
+    render_claim_section,
+    searchable_claim_text,
+)
 from src.memory.personal_documents import (
     HEADINGS,
     ProfileRevisionConflictError,
@@ -27,7 +32,9 @@ from src.memory.personal_extraction import extract_claims
 logger = get_logger(__name__)
 _HEAD_TOPIC = frozenset({"个人", "宠物", "健康", "关系", "项目"})
 _GENERIC = {"我的", "你的", "现在", "之前", "后来", "怎么", "什么", "为什么", "知道", "有没有"}
-_PROFILE_CONTEXT_CHAR_BUDGET = 24_000
+_CORE_CONTEXT_CHAR_BUDGET = 4_000
+_FACT_CONTEXT_CHAR_BUDGET = 12_000
+_EVIDENCE_CONTEXT_CHAR_BUDGET = 8_000
 
 
 def _slug(text: str) -> str:
@@ -47,10 +54,66 @@ def _terms(text: str) -> set[str]:
 
 
 def _render_match_content(match: ProfileMatch) -> str:
-    """Render only retrieved paragraphs when the retrieval layer supplied them."""
-    if not match.sections:
-        return match.content
-    return "\n\n".join(dict.fromkeys(section for section in match.sections if section))
+    """Render only retrieved answer paragraphs when the retrieval layer supplied them."""
+    sections_to_render = match.sections or (match.content,)
+    return "\n\n".join(
+        dict.fromkeys(
+            render_claim_section(section, include_evidence=False)
+            for section in sections_to_render
+            if section
+        )
+    )
+
+
+def _profile_paragraphs(content: str) -> list[str]:
+    title = content.split("\n", 1)[0]
+    heading = ""
+    output: list[str] = []
+    for line in content.splitlines()[1:]:
+        if line.startswith("## "):
+            heading = line
+        elif line.startswith("- "):
+            output.append(f"{title}\n{heading}\n{line}".strip())
+    return output
+
+
+def _ranked_profile_sections(
+    content: str, query: str, *, limit: int = 8, include_history: bool = False
+) -> tuple[str, ...]:
+    paragraphs = _profile_paragraphs(content)
+    if not paragraphs:
+        return ()
+    if not include_history:
+        visible = [
+            paragraph
+            for paragraph in paragraphs
+            if not any(
+                heading in paragraph.splitlines()[1:2]
+                for heading in ("## 历史修订", "## 待核实信息")
+            )
+        ]
+        paragraphs = visible or paragraphs
+    terms = _terms(query)
+    ranked = sorted(
+        (
+            (
+                len(
+                    terms
+                    & _terms(
+                        searchable_claim_text(
+                            paragraph.splitlines()[-1] if paragraph.splitlines() else paragraph
+                        )
+                    )
+                ),
+                index,
+                paragraph,
+            )
+            for index, paragraph in enumerate(paragraphs)
+        ),
+        key=lambda item: (-item[0], item[1]),
+    )
+    positive = [paragraph for score, _, paragraph in ranked if score > 0]
+    return tuple((positive or paragraphs)[:limit])
 
 
 @dataclass(frozen=True)
@@ -120,7 +183,9 @@ class PersonalProfile:
             raise ValueError("Personal-memory document must be Markdown")
         return path
 
-    def matches(self, query: str, *, limit: int = 3) -> list[ProfileMatch]:
+    def matches(
+        self, query: str, *, limit: int = 3, include_evidence: bool = False
+    ) -> list[ProfileMatch]:
         query_terms = _terms(query)
         matches: list[ProfileMatch] = []
         if self.root.exists():
@@ -147,17 +212,42 @@ class PersonalProfile:
                     )
                 )
             )
-            score += len(query_terms & _terms(content))
+            search_text = "\n".join(
+                searchable_claim_text(line, include_evidence=include_evidence)
+                for line in content.splitlines()
+            )
+            score += len(query_terms & _terms(search_text))
             if score >= 8:
-                matches.append(ProfileMatch(path, title, content, str(path), score))
+                matches.append(
+                    ProfileMatch(
+                        path,
+                        title,
+                        content,
+                        str(path),
+                        score,
+                        sections=_ranked_profile_sections(
+                            content, query, include_history=include_evidence
+                        ),
+                    )
+                )
         return sorted(matches, key=lambda item: (-item.score, str(item.path)))[:limit]
 
-    def context(self, query: str, *, matches: list[ProfileMatch] | None = None) -> str:
-        matches = self.matches(query) if matches is None else matches
+    def context(
+        self,
+        query: str,
+        *,
+        matches: list[ProfileMatch] | None = None,
+        include_evidence: bool = False,
+    ) -> str:
+        matches = (
+            self.matches(query, include_evidence=include_evidence) if matches is None else matches
+        )
         if not matches:
             return ""
-        items = ["个人档案（Markdown 原文是权威来源；推测不得表述成已确认事实）："]
+        items = ["相关个人事实（Markdown 原文是权威来源；推测不得表述成已确认事实）："]
         used_chars = len(items[0])
+        budget = _FACT_CONTEXT_CHAR_BUDGET
+        evidence_used = 0
         for match in matches:
             confirmed = (
                 match.content.split("## 已确认事实", 1)[1].split("\n## ", 1)[0]
@@ -173,8 +263,25 @@ class PersonalProfile:
                     age = f"\n按 {today} 计算年龄：{calculated}。"
                 except ValueError:
                     age = ""
-            rendered = f"来源：{match.source}\n{_render_match_content(match)}{age}"
-            remaining = _PROFILE_CONTEXT_CHAR_BUDGET - used_chars
+            rendered = _render_match_content(match)
+            if age:
+                rendered = f"{rendered}{age}"
+            if include_evidence:
+                sections_to_render = match.sections or (match.content,)
+                evidence = "\n".join(
+                    render_claim_section(section, include_evidence=True)
+                    for section in sections_to_render
+                    if section
+                )
+                evidence_lines = [
+                    line for line in evidence.splitlines() if line.startswith("  核验信息：")
+                ]
+                evidence_text = "\n".join(evidence_lines)
+                if evidence_text and evidence_used < _EVIDENCE_CONTEXT_CHAR_BUDGET:
+                    evidence_text = evidence_text[: _EVIDENCE_CONTEXT_CHAR_BUDGET - evidence_used]
+                    rendered += f"\n核验来源：{match.source}\n{evidence_text}"
+                    evidence_used += len(evidence_text)
+            remaining = budget - used_chars
             if remaining <= 0:
                 break
             if len(rendered) > remaining:
@@ -187,6 +294,29 @@ class PersonalProfile:
         )
         return "\n\n".join(items)
 
+    def core_context(self) -> str:
+        """Return a small resident layer derived from confirmed global preferences."""
+        facts: list[str] = []
+        for name in self.documents():
+            content, _ = self.read_document(name)
+            for heading, line in sections(content):
+                if heading != "已确认事实":
+                    continue
+                claim = parse_claim_line(line)
+                if claim is None or claim.evidence_map.get("偏好范围") != "通用":
+                    continue
+                facts.append(f"- {claim.fact}")
+        if not facts:
+            return ""
+        output = ["常驻个人事实（仅稳定的通用偏好，不含核验元数据）："]
+        used = len(output[0])
+        for fact in dict.fromkeys(facts):
+            if used + len(fact) + 1 > _CORE_CONTEXT_CHAR_BUDGET:
+                break
+            output.append(fact)
+            used += len(fact) + 1
+        return "\n".join(output)
+
     def events(self):
         return [
             event
@@ -194,12 +324,21 @@ class PersonalProfile:
             for event in events_from_document(name, self.read_document(name)[0])
         ]
 
-    def preference_context(self, query: str) -> str:
+    def preference_context(self, query: str, *, include_global: bool = True) -> str:
         entries = []
         for name in self.documents():
             content, revision = self.read_document(name)
             for line in preference_lines(content, query):
-                entries.append(f"{line}（档案：{name}；版本：{revision}）")
+                claim = parse_claim_line(line)
+                if claim is None:
+                    continue
+                scope = claim.evidence_map.get("偏好范围")
+                if scope == "通用" and not include_global:
+                    continue
+                if scope == "场景":
+                    entries.append(f"- {claim.fact}")
+                else:
+                    entries.append(f"- {claim.fact}（档案：{name}；版本：{revision}）")
         return "用户已确认的交流和行为偏好：\n" + "\n".join(entries) if entries else ""
 
     async def extract(

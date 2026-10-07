@@ -5,6 +5,7 @@ from datetime import UTC, datetime
 from src.agent.turn_outcome import FailedTurn
 from src.infrastructure.model_gateway import ModelResponse
 from src.memory.working import WorkingMemory
+from src.memory.working_compaction import _merge_summaries, summarize_messages
 
 TS1 = datetime(2026, 5, 1, 8, 30, tzinfo=UTC)
 TS2 = datetime(2026, 5, 1, 8, 31, tzinfo=UTC)
@@ -70,8 +71,8 @@ async def test_working_memory_compress_appends_history_file_references(
     assert "完整历史见 data/conversations/2026/05/01.jsonl" in summary
 
 
-async def test_working_memory_uses_explicit_fallback_for_empty_summary() -> None:
-    gateway = FakeModelGateway([""])
+async def test_working_memory_preserves_messages_when_summary_and_retry_are_empty() -> None:
+    gateway = FakeModelGateway(["", ""])
     wm = WorkingMemory(conversation_id="conv-empty-summary", token_budget=1)
 
     wm.add(_message("user", "old user", TS1))
@@ -79,15 +80,29 @@ async def test_working_memory_uses_explicit_fallback_for_empty_summary() -> None
     wm.add(_message("user", "recent user", TS3))
     wm.add(_message("assistant", "recent assistant", TS4))
 
+    original = [item.copy() for item in wm.get_messages()]
     summary = await wm.compress(gateway)
 
-    assert "模型历史摘要不可用" in summary
-    assert "old user" in summary
-    assert [message["role"] for message in wm.get_messages()] == [
-        "system",
-        "user",
-        "assistant",
-    ]
+    assert summary == ""
+    assert wm.get_messages() == original
+
+
+async def test_summary_retries_once_when_provider_returns_empty() -> None:
+    gateway = FakeModelGateway(["", "retry summary"])
+    summary = await summarize_messages(
+        model_gateway=gateway,
+        messages=[_message("user", "old user", TS1), _message("assistant", "old reply", TS2)],
+    )
+
+    assert summary == "retry summary"
+    assert len(gateway.calls) == 2
+
+
+async def test_summary_merge_keeps_all_batch_summaries_when_merge_is_empty() -> None:
+    gateway = FakeModelGateway([""])
+    merged = await _merge_summaries(gateway, ["first facts", "second facts"])
+
+    assert "first facts" in merged and "second facts" in merged
 
 
 async def test_working_memory_does_not_discard_failed_turn_without_summary() -> None:

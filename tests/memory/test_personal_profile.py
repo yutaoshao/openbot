@@ -104,7 +104,7 @@ async def test_age_annotation_ignores_superseded_birth_date(tmp_path: Path) -> N
         stated_at="2026-06-01",
     )
     context = profile.context("小白多大了")
-    assert "出生日期：未知" in context and "## 历史修订" in context
+    assert "出生日期：未知" in context and "## 历史修订" not in context
     assert "按 " not in context
 
 
@@ -185,7 +185,9 @@ async def test_related_weight_question_includes_birth_without_birthday_keyword(
     prompt = PromptBuilder(GeneralKnowledge(), NoPast(), NoPast(), personal_profile=profile)
     context = await prompt.enrich("system", "嘻嘻现在 2.9kg 算胖吗", "local")
     assert "出生日期：2026-03-28 07:40" in context
-    assert "data/conversations/2026/05/29.jsonl:40" in context
+    assert "data/conversations/2026/05/29.jsonl:40" not in context
+    evidence_context = profile.context("嘻嘻现在 2.9kg 算胖吗", include_evidence=True)
+    assert "data/conversations/2026/05/29.jsonl:40" in evidence_context
     assert "猫的体况评分" in context
     assert "现在的体重是 3kg" not in context
 
@@ -262,11 +264,8 @@ async def test_failed_compression_keeps_tool_chain_and_original_messages() -> No
         {"role": "tool", "tool_call_id": "a", "content": "result"},
     ]
     original = [item.copy() for item in messages]
-    assert await compact_request_history(messages, EmptyGateway(), recent_budget=20)
-    assert messages != original
-    assert "模型历史摘要不可用" in messages[1]["content"]
-    assert "older" in messages[1]["content"]
-    assert "current" in messages[2]["content"]
+    assert not await compact_request_history(messages, EmptyGateway(), recent_budget=20)
+    assert messages == original
     assert estimate_input_tokens(messages, [{"name": "lookup"}]).tokens > 0
     assert request_limit(272_000, 258_000, 16_384) == 241_616
 
