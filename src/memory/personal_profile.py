@@ -27,6 +27,7 @@ from src.memory.personal_extraction import extract_claims
 logger = get_logger(__name__)
 _HEAD_TOPIC = frozenset({"个人", "宠物", "健康", "关系", "项目"})
 _GENERIC = {"我的", "你的", "现在", "之前", "后来", "怎么", "什么", "为什么", "知道", "有没有"}
+_PROFILE_CONTEXT_CHAR_BUDGET = 24_000
 
 
 def _slug(text: str) -> str:
@@ -45,6 +46,13 @@ def _terms(text: str) -> set[str]:
     return tokens - _GENERIC
 
 
+def _render_match_content(match: ProfileMatch) -> str:
+    """Render only retrieved paragraphs when the retrieval layer supplied them."""
+    if not match.sections:
+        return match.content
+    return "\n\n".join(dict.fromkeys(section for section in match.sections if section))
+
+
 @dataclass(frozen=True)
 class ProfileMatch:
     path: Path
@@ -52,6 +60,9 @@ class ProfileMatch:
     content: str
     source: str
     score: int
+    # Retrieval may provide only relevant paragraphs while ``content`` stays
+    # the current authoritative document snapshot.
+    sections: tuple[str, ...] = ()
 
 
 class PersonalProfile:
@@ -146,6 +157,7 @@ class PersonalProfile:
         if not matches:
             return ""
         items = ["个人档案（Markdown 原文是权威来源；推测不得表述成已确认事实）："]
+        used_chars = len(items[0])
         for match in matches:
             confirmed = (
                 match.content.split("## 已确认事实", 1)[1].split("\n## ", 1)[0]
@@ -161,7 +173,14 @@ class PersonalProfile:
                     age = f"\n按 {today} 计算年龄：{calculated}。"
                 except ValueError:
                     age = ""
-            items.append(f"来源：{match.source}\n{match.content}{age}")
+            rendered = f"来源：{match.source}\n{_render_match_content(match)}{age}"
+            remaining = _PROFILE_CONTEXT_CHAR_BUDGET - used_chars
+            if remaining <= 0:
+                break
+            if len(rendered) > remaining:
+                rendered = rendered[:remaining].rstrip() + "\n[个人档案其余相关段落未展开]"
+            items.append(rendered)
+            used_chars += len(rendered)
         items.append(
             "事件的未知后续不得推断为已完成。只有本次提供了允许追问的候选时，"
             "才可主动追问其后续；没有候选时不要自行追问历史事件进展。"

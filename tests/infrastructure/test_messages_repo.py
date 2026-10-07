@@ -2,8 +2,6 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-import pytest
-
 from src.agent.conversation.shared_timeline import SharedTimelineMemory
 from src.core.config import StorageConfig
 from src.core.user_scope import SINGLE_USER_ID
@@ -48,7 +46,7 @@ async def test_add_persists_message_timestamp_separately_from_created_at(tmp_pat
     assert rows[0]["content"] == "hello"
 
 
-async def test_failed_summary_does_not_advance_persisted_boundary(tmp_path) -> None:
+async def test_empty_summary_uses_explicit_fallback_and_persists_boundary(tmp_path) -> None:
     db = Database(StorageConfig(db_path=str(tmp_path / "memory.db")))
     await db.initialize()
     async with db.get_connection() as conn:
@@ -78,10 +76,11 @@ async def test_failed_summary_does_not_advance_persisted_boundary(tmp_path) -> N
             return ModelResponse(text="")
 
     before = timeline.get_messages()
-    with pytest.raises(ValueError, match="empty summary"):
-        await timeline.compress(EmptyGateway())
-    assert timeline.get_messages() == before
-    assert await repo.get_working_summary() is None
+    summary = await timeline.compress(EmptyGateway())
+    assert "模型历史摘要不可用" in summary
+    assert timeline.get_messages() != before
+    saved = await repo.get_working_summary()
+    assert saved and saved["boundary_id"] == "m1"
     await db.close()
 
 

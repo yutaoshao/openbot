@@ -87,7 +87,7 @@ class OpenAIResponsesProvider:
     ) -> dict[str, Any]:
         request_kwargs: dict[str, Any] = {
             "model": self.model,
-            "input": messages,
+            "input": _responses_input(messages),
             "max_output_tokens": kwargs.get("max_tokens", self.config.max_tokens),
             "reasoning": {"effort": self.config.reasoning_effort},
             "text": {"verbosity": self.config.verbosity},
@@ -153,6 +153,45 @@ def _responses_function_tool(tool: dict[str, Any]) -> dict[str, Any]:
         "description": tool["description"],
         "parameters": tool["parameters"],
     }
+
+
+def _responses_input(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Translate chat-completions tool history to Responses input items."""
+    result: list[dict[str, Any]] = []
+    for message in messages:
+        role = message.get("role")
+        if role == "assistant" and message.get("tool_calls"):
+            content = message.get("content")
+            if content:
+                result.append({"role": "assistant", "content": content})
+            for tool_call in message["tool_calls"]:
+                function = tool_call.get("function") or {}
+                result.append(
+                    {
+                        "type": "function_call",
+                        "call_id": tool_call.get("id", ""),
+                        "name": function.get("name", ""),
+                        "arguments": function.get("arguments", "{}"),
+                    }
+                )
+            continue
+        if role == "tool":
+            result.append(
+                {
+                    "type": "function_call_output",
+                    "call_id": message.get("tool_call_id", ""),
+                    "output": str(message.get("content", "")),
+                }
+            )
+            continue
+        result.append(
+            {
+                key: value
+                for key, value in message.items()
+                if key not in {"tool_calls", "reasoning_content", "tool_call_id"}
+            }
+        )
+    return result
 
 
 def _message_text(output_item: Any) -> str:

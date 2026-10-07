@@ -70,6 +70,26 @@ async def test_working_memory_compress_appends_history_file_references(
     assert "完整历史见 data/conversations/2026/05/01.jsonl" in summary
 
 
+async def test_working_memory_uses_explicit_fallback_for_empty_summary() -> None:
+    gateway = FakeModelGateway([""])
+    wm = WorkingMemory(conversation_id="conv-empty-summary", token_budget=1)
+
+    wm.add(_message("user", "old user", TS1))
+    wm.add(_message("assistant", "old assistant", TS2))
+    wm.add(_message("user", "recent user", TS3))
+    wm.add(_message("assistant", "recent assistant", TS4))
+
+    summary = await wm.compress(gateway)
+
+    assert "模型历史摘要不可用" in summary
+    assert "old user" in summary
+    assert [message["role"] for message in wm.get_messages()] == [
+        "system",
+        "user",
+        "assistant",
+    ]
+
+
 async def test_working_memory_does_not_discard_failed_turn_without_summary() -> None:
     gateway = FakeModelGateway([])
     wm = WorkingMemory(conversation_id="conv-failed", token_budget=1)

@@ -25,6 +25,11 @@ Telegram / 飞书 / 微信 / WebSocket / REST
 消息事件循环之外读取 JSONL 归档与 SQLite。`data/personal_memory/` 下的 Markdown
 档案是个人事实与事件的可编辑权威；写入时检查文档版本，保护人工编辑。
 
+个人档案的检索索引按段落生成；`PromptBuilder` 使用命中的段落和有界上下文，保留来源字段以便
+追溯，但不会因为命中一个主题就把整个主题文档注入模型。Responses provider 会把内部保存的
+chat-completions 风格工具调用历史转换为 Responses API 的 `function_call` 和
+`function_call_output` 输入项。
+
 成功回合结束后，`PostTurnMemory` 持有后台任务直至停机。`OnlineMemorySync` 只处理
 符合条件的完整轮次，串行提取，并在每轮成功后推进游标。离线历史回扫通过
 `PersonalBackfillRepo` 使用独立进度，不会随普通消息自动运行。回扫盘点、核对与写入

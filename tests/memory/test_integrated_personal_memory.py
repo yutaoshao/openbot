@@ -208,6 +208,31 @@ async def test_direct_dossier_reranks_using_relevant_old_record(memory):
     assert "保险赔付进度：尚未确定" in reranker.content
 
 
+async def test_profile_context_injects_retrieved_paragraphs_only(memory):
+    profile, storage, _ = memory
+    path = profile.root / "项目" / "研究.md"
+    path.parent.mkdir(parents=True)
+    path.write_text(
+        "# 研究\n\n## 事件经过\n"
+        + "\n".join(
+            [
+                *(f"- 最近阶段{i}：整理资料；来源：message:{i}" for i in range(60)),
+                "- 保险赔付进度：尚未确定；来源：message:old",
+            ]
+        )
+    )
+    retrieval = PersonalRetrieval(
+        profile, index=storage.personal_index, embedding=MeaningEmbedding()
+    )
+
+    matches = await retrieval.recall("研究的保险赔付进度")
+    context = profile.context("研究的保险赔付进度", matches=matches)
+
+    assert "保险赔付进度：尚未确定" in context
+    assert "最近阶段0：整理资料" not in context
+    assert len(context) < 5_000
+
+
 async def test_event_progression_reuses_id_and_does_not_turn_consultation_into_plan(memory):
     profile, _, _ = memory
     base = dict(topic="宠物", subject="猫咪", kind="event", event_name="第二针疫苗")

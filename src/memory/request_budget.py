@@ -10,9 +10,12 @@ from typing import Any
 
 import tiktoken
 
+from src.core.logging import get_logger
+
 _ENCODING = tiktoken.get_encoding("o200k_base")
 UNKNOWN_CONTEXT_LIMIT = 128_000
 ESTIMATED_REQUEST_OVERHEAD = 4_096
+logger = get_logger(__name__)
 
 
 @dataclass(frozen=True)
@@ -64,7 +67,12 @@ async def compact_request_history(
         return False
     summary = await summarize_messages(model_gateway=model_gateway, messages=older)
     if not summary:
-        raise ValueError("Request history compression returned an empty summary")
+        summary = _fallback_history_summary(older)
+        logger.warning(
+            "request_history.compression_fallback",
+            message_count=len(older),
+            summary_chars=len(summary),
+        )
     references = set()
     for message in older:
         match = re.search(r"^\[(\d{4}-\d\d-\d\d \d\d:\d\d)\]", str(message.get("content", "")))
@@ -80,3 +88,21 @@ async def compact_request_history(
         {"role": "system", "content": f"Summary of earlier conversation:\n{summary}"}
     ]
     return True
+
+
+def _fallback_history_summary(messages: list[dict[str, Any]], *, max_chars: int = 12_000) -> str:
+    """Keep a bounded, explicitly labelled history excerpt when summarisation fails."""
+    prefix = "模型历史摘要不可用；以下是未经总结的近期历史片段，仅供参考，不能替代完整历史：\n"
+    parts: list[str] = []
+    used = len(prefix)
+    for message in reversed(messages):
+        content = str(message.get("content", "")).strip()
+        if not content:
+            continue
+        line = f"- {message.get('role', 'unknown')}: {content}"
+        if used + len(line) + 1 > max_chars:
+            break
+        parts.append(line)
+        used += len(line) + 1
+    parts.reverse()
+    return prefix + "\n".join(parts)

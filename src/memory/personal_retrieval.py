@@ -79,7 +79,10 @@ class PersonalRetrieval:
     async def recall(self, query: str, *, limit: int = 3) -> list[ProfileMatch]:
         chunks = await self.rebuild()
         query_vector = await self.embedding.embed(query)
-        keyword_scores = bm25(query, [item["content"] for item in chunks])
+        # Paragraphs repeat the dossier title for display; exclude that title
+        # from lexical scoring so a broad subject query does not rank every
+        # paragraph equally.
+        keyword_scores = bm25(query, [_chunk_search_text(item) for item in chunks])
         lexical = sorted(range(len(chunks)), key=lambda i: keyword_scores[i], reverse=True)
         vector_scores = [cosine(query_vector, item["embedding"]) for item in chunks]
         semantic = sorted(range(len(chunks)), key=lambda i: vector_scores[i], reverse=True)
@@ -127,6 +130,7 @@ class PersonalRetrieval:
             if revision != item["revision"]:
                 logger.info("personal_index.stale_hit", path=item["path"], reason="edited")
                 continue
+            selected_sections = _retrieved_sections(chunks, scores, item["path"])
             result.append(
                 ProfileMatch(
                     path=self.profile.root / item["path"],
@@ -134,6 +138,7 @@ class PersonalRetrieval:
                     content=content,
                     source=str(self.profile.root / item["path"]),
                     score=item["score"],
+                    sections=selected_sections,
                 )
             )
         logger.info(
@@ -149,6 +154,29 @@ class PersonalRetrieval:
             used_vectors=bool(query_vector),
         )
         return result
+
+
+def _retrieved_sections(
+    chunks: list[dict], scores: dict[int, float], path: str, *, limit: int = 8
+) -> tuple[str, ...]:
+    ranked = sorted(
+        (
+            (score, index, item["content"])
+            for index, item in enumerate(chunks)
+            if item["path"] == path and (score := scores.get(index, 0)) > 0
+        ),
+        key=lambda value: (-value[0], value[1]),
+    )
+    if ranked:
+        return tuple(item[2] for item in ranked[:limit])
+    # A title-only match has no paragraph score. Keep a small deterministic
+    # preview instead of expanding the whole dossier into the prompt.
+    return tuple(item["content"] for item in chunks if item["path"] == path)[:limit]
+
+
+def _chunk_search_text(item: dict) -> str:
+    lines = item["content"].splitlines()
+    return "\n".join(lines[2:]) if len(lines) > 2 else item["content"]
 
 
 def paragraphs(content: str) -> list[tuple[str, str]]:

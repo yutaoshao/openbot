@@ -262,9 +262,11 @@ async def test_failed_compression_keeps_tool_chain_and_original_messages() -> No
         {"role": "tool", "tool_call_id": "a", "content": "result"},
     ]
     original = [item.copy() for item in messages]
-    with pytest.raises(ValueError, match="empty summary"):
-        await compact_request_history(messages, EmptyGateway(), recent_budget=20)
-    assert messages == original
+    assert await compact_request_history(messages, EmptyGateway(), recent_budget=20)
+    assert messages != original
+    assert "模型历史摘要不可用" in messages[1]["content"]
+    assert "older" in messages[1]["content"]
+    assert "current" in messages[2]["content"]
     assert estimate_input_tokens(messages, [{"name": "lookup"}]).tokens > 0
     assert request_limit(272_000, 258_000, 16_384) == 241_616
 

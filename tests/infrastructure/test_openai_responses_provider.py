@@ -5,7 +5,7 @@ from types import SimpleNamespace
 import pytest
 
 from src.core.config import ModelProviderConfig
-from src.infrastructure.providers.openai_responses import OpenAIResponsesProvider
+from src.infrastructure.providers.openai_responses import OpenAIResponsesProvider, _responses_input
 
 
 class _FakeResponses:
@@ -109,6 +109,40 @@ async def test_chat_rejects_invalid_tool_arguments() -> None:
 
     with pytest.raises(ValueError, match="Invalid JSON arguments for tool 'read_file'"):
         await provider.chat(messages=[])
+
+
+def test_responses_input_translates_tool_history() -> None:
+    messages = [
+        {"role": "user", "content": "读取 README"},
+        {
+            "role": "assistant",
+            "content": "我来读取。",
+            "reasoning_content": "internal",
+            "tool_calls": [
+                {
+                    "id": "call-1",
+                    "type": "function",
+                    "function": {
+                        "name": "read_file",
+                        "arguments": '{"path":"README.md"}',
+                    },
+                }
+            ],
+        },
+        {"role": "tool", "tool_call_id": "call-1", "content": "内容"},
+    ]
+
+    assert _responses_input(messages) == [
+        {"role": "user", "content": "读取 README"},
+        {"role": "assistant", "content": "我来读取。"},
+        {
+            "type": "function_call",
+            "call_id": "call-1",
+            "name": "read_file",
+            "arguments": '{"path":"README.md"}',
+        },
+        {"type": "function_call_output", "call_id": "call-1", "output": "内容"},
+    ]
 
 
 async def test_chat_rejects_unsupported_output_type() -> None:
