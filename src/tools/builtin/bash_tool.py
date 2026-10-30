@@ -20,6 +20,7 @@ from src.tools.effects import (
     STATUS_TIMEOUT,
     tool_effect,
 )
+from src.tools.processes import kill_owned_process_group, start_owned_process
 from src.tools.registry import ToolResult
 
 EFFECT_COMMAND_EXECUTED = "command_executed"
@@ -81,24 +82,29 @@ class BashTool:
 
 
 async def _run_command(command: str, cwd: Path, timeout: float | None) -> ToolResult:
-    process = await asyncio.create_subprocess_shell(
-        command,
-        cwd=str(cwd),
-        executable=_shell(),
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+    process = await start_owned_process(
+        asyncio.create_subprocess_shell(
+            command,
+            cwd=str(cwd),
+            executable=_shell(),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            start_new_session=True,
+        )
     )
     try:
         stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=timeout)
     except TimeoutError:
-        process.kill()
-        await process.communicate()
+        await kill_owned_process_group(process)
         return ToolResult(
             content=f"Command timed out after {timeout:.2f}s",
             is_error=True,
             metadata={"cwd": str(cwd), "exit_code": None},
             effects=(_effect(cwd, None, STATUS_TIMEOUT, EFFECT_NONE),),
         )
+    except asyncio.CancelledError:
+        await kill_owned_process_group(process)
+        raise
     return _process_result(cwd, process.returncode or 0, stdout, stderr)
 
 

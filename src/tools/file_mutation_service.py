@@ -39,10 +39,22 @@ class FileMutationError(RuntimeError):
 class FileMutationService:
     """Own text mutation locking, snapshots, atomic commits, and receipts."""
 
-    def __init__(self, root: Path, snapshot_directory: Path = SNAPSHOT_DIRECTORY) -> None:
+    def __init__(
+        self,
+        root: Path,
+        snapshot_directory: Path = SNAPSHOT_DIRECTORY,
+        *,
+        snapshot_root: Path | None = None,
+    ) -> None:
         self._root = project_root(root)
-        self._snapshot_root = (self._root / snapshot_directory).resolve()
-        if not self._snapshot_root.is_relative_to(self._root):
+        if snapshot_root is not None and not snapshot_root.is_absolute():
+            raise ValueError("trusted snapshot root must be absolute")
+        self._snapshot_root = (
+            snapshot_root.resolve()
+            if snapshot_root is not None
+            else (self._root / snapshot_directory).resolve()
+        )
+        if snapshot_root is None and not self._snapshot_root.is_relative_to(self._root):
             raise ValueError("snapshot directory must stay inside project root")
         self._locks: dict[Path, threading.Lock] = {}
         self._locks_guard = threading.Lock()
@@ -50,6 +62,15 @@ class FileMutationService:
     @property
     def project_root(self) -> Path:
         return self._root
+
+    @property
+    def snapshot_root(self) -> Path:
+        return self._snapshot_root
+
+    def _snapshot_reference(self, snapshot: Path) -> str:
+        if snapshot.is_relative_to(self._root):
+            return relative_to_root(self._root, snapshot)
+        return str(snapshot)
 
     def create(self, target: Path, content: str) -> FileMutationReceipt:
         """Create a new text file and reject existing targets."""
@@ -93,7 +114,7 @@ class FileMutationService:
                 before_size=len(before_content),
                 after_size=len(current_content),
                 changed_ranges=changed_line_ranges(before_content, current_content),
-                snapshot_path=relative_to_root(self._root, snapshot),
+                snapshot_path=self._snapshot_reference(snapshot),
                 appended_sha256=content_sha256(appended_content),
             )
 
@@ -119,7 +140,7 @@ class FileMutationService:
                 before_size=len(before_content),
                 after_size=len(current_content),
                 changed_ranges=changed_line_ranges(before_content, current_content),
-                snapshot_path=relative_to_root(self._root, snapshot),
+                snapshot_path=self._snapshot_reference(snapshot),
             )
 
     def replace(
@@ -144,7 +165,7 @@ class FileMutationService:
                 before_size=len(before_content),
                 after_size=len(current_content),
                 changed_ranges=changed_line_ranges(before_content, current_content),
-                snapshot_path=relative_to_root(self._root, snapshot),
+                snapshot_path=self._snapshot_reference(snapshot),
             )
 
     @contextmanager

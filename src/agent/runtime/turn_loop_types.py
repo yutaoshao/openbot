@@ -31,6 +31,7 @@ class TurnLoopContext:
     route_decision: RouteDecision | None
     contract: TaskContract
     project_root: Path | None
+    snapshot_root: Path | None = None
     clock: Callable[[], float] = time.monotonic
 
 
@@ -47,6 +48,7 @@ class TurnLoopSnapshot:
     cost_usd: float
     final_model: str
     tool_calls: tuple[dict[str, Any], ...]
+    snapshot_root: Path | None = None
 
 
 @dataclass(frozen=True, kw_only=True)

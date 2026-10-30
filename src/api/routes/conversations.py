@@ -7,6 +7,8 @@ from typing import TYPE_CHECKING
 from fastapi import APIRouter, HTTPException, Query, Request
 
 from src.api.schemas import ConversationDetail, ConversationSummary, MessageItem
+from src.application.chat_runs import ChatRunConflictError
+from src.core.user_scope import SINGLE_USER_ID
 
 if TYPE_CHECKING:
     from src.infrastructure.storage import Storage
@@ -103,10 +105,23 @@ async def delete_conversation(
 ) -> dict[str, str]:
     """Delete a conversation and all its messages."""
     storage = _get_storage(request)
-
-    conv = await storage.conversations.get(conversation_id)
-    if conv is None:
-        raise HTTPException(status_code=404, detail="Conversation not found")
-
-    await storage.conversations.delete(conversation_id)
+    if not request.app.state.execution_coordinator.accepting:
+        raise HTTPException(status_code=409, detail="The service is restarting")
+    manager = getattr(request.app.state, "chat_runs", None)
+    if manager is not None:
+        try:
+            manager.begin_delete(conversation_id)
+        except ChatRunConflictError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+    try:
+        async with request.app.state.execution_coordinator.serialize(SINGLE_USER_ID):
+            conv = await storage.conversations.get(conversation_id)
+            if conv is None:
+                raise HTTPException(status_code=404, detail="Conversation not found")
+            await storage.conversations.delete(conversation_id)
+            if manager is not None:
+                manager.forget_conversation(conversation_id)
+    finally:
+        if manager is not None:
+            manager.end_delete(conversation_id)
     return {"status": "deleted", "conversation_id": conversation_id}

@@ -116,6 +116,8 @@ async def update_settings(
     request: Request,
     payload: Annotated[Any, Body(...)],
 ) -> dict[str, Any]:
+    if getattr(request.app.state, "desktop_service", None) is not None:
+        raise HTTPException(409, "桌面托管实例请通过桌面服务设置保存并重启。")
     config = _get_config(request)
     service = _get_settings_service(request)
 
@@ -148,6 +150,11 @@ async def update_settings(
 async def apply_saved_settings(request: Request) -> SettingsApplyResponse:
     application = _get_application(request)
     restart_required, restart_reasons = _current_restart_notice(request)
+    if getattr(request.app.state, "desktop_service", None) is not None:
+        from src.desktop.service import pause_for_restart
+
+        if not pause_for_restart(request.app):
+            raise HTTPException(409, "还有对话或任务正在执行或排队，请结束后再重启。")
     await application.request_restart()
     return SettingsApplyResponse(
         status="restarting",

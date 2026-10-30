@@ -157,6 +157,8 @@ class ToolStatusItem(BaseModel):
     enabled: bool
     config: dict
     last_used: str | None = None
+    requires_authorization: bool = False
+    authorized: bool | None = None
 
 
 class ToolConfigUpdateRequest(BaseModel):

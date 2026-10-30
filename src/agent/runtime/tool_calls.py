@@ -15,6 +15,8 @@ from .tool_output_store import offload_tool_output_if_needed
 logger = get_logger(__name__)
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from src.agent.agent import Agent
     from src.agent.state import TaskState
     from src.infrastructure.model_types import ToolCall
@@ -39,6 +41,7 @@ async def execute_tool_calls_for_round(
     task_timeout: int,
     iterations: int,
     messages: list[dict[str, Any]],
+    checkpoint: Callable[[dict[str, Any]], None],
 ):
     """Yield tool-status chunks, then a final ``ToolExecutionBatch`` event."""
     executed_calls: list[dict[str, Any]] = []
@@ -54,6 +57,7 @@ async def execute_tool_calls_for_round(
             task_timeout=task_timeout,
             iterations=iterations,
             messages=messages,
+            checkpoint=checkpoint,
         )
         executed_calls.append(executed_call)
     yield ToolExecutionBatch(executed_calls=executed_calls)
@@ -70,8 +74,23 @@ async def _execute_tool_call(
     task_timeout: int,
     iterations: int,
     messages: list[dict[str, Any]],
+    checkpoint: Callable[[dict[str, Any]], None],
 ) -> dict[str, Any]:
     tool_start = time.monotonic()
+    executed_arguments = dict(tool_call.arguments)
+
+    def record_result(result: ToolResult, arguments: dict[str, Any]) -> None:
+        nonlocal executed_arguments
+        executed_arguments = dict(arguments)
+        checkpoint(
+            _execution_record(
+                tool_call,
+                result,
+                int((time.monotonic() - tool_start) * 1000),
+                arguments=executed_arguments,
+            )
+        )
+
     tool_result = await _run_tool_call(
         agent,
         tool_call,
@@ -79,8 +98,13 @@ async def _execute_tool_call(
         platform,
         task_state,
         _timeout_override(task_timeout, task_start),
+        checkpoint=record_result,
     )
     tool_latency = int((time.monotonic() - tool_start) * 1000)
+    executed_call = _execution_record(
+        tool_call, tool_result, tool_latency, arguments=executed_arguments
+    )
+    checkpoint(executed_call)
     _record_tool_context(
         agent,
         conversation_id=conversation_id,
@@ -96,7 +120,7 @@ async def _execute_tool_call(
         iterations,
     )
     _log_tool_call(tool_call.name, tool_result, tool_latency)
-    return _execution_record(tool_call, tool_result, tool_latency)
+    return executed_call
 
 
 async def _run_tool_call(
@@ -106,6 +130,8 @@ async def _run_tool_call(
     platform: str,
     task_state: TaskState | None,
     timeout_override: float | None,
+    *,
+    checkpoint: Callable[[ToolResult, dict[str, Any]], None],
 ) -> ToolResult:
     tool_result = await execute_tool_call(
         agent.tool_registry,
@@ -117,6 +143,7 @@ async def _run_tool_call(
         platform=platform,
         task_state=task_state,
         timeout_override=timeout_override,
+        checkpoint=checkpoint,
     )
     return offload_tool_output_if_needed(
         tool_result,
@@ -126,11 +153,15 @@ async def _run_tool_call(
 
 
 def _execution_record(
-    tool_call: ToolCall, tool_result: ToolResult, tool_latency: int
+    tool_call: ToolCall,
+    tool_result: ToolResult,
+    tool_latency: int,
+    *,
+    arguments: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     return {
         "name": tool_call.name,
-        "arguments": tool_call.arguments,
+        "arguments": dict(tool_call.arguments if arguments is None else arguments),
         "result_preview": tool_result.content[:200],
         "is_error": tool_result.is_error,
         "metadata": dict(tool_result.metadata),

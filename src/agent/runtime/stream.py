@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from typing import TYPE_CHECKING
 
 from src.agent.state.task_contract_planner import (
@@ -10,6 +11,7 @@ from src.agent.state.task_contract_planner import (
 )
 from src.agent.state.task_contract_resources import (
     agent_project_root,
+    agent_snapshot_root,
     resolve_agent_contract_resources,
 )
 from src.agent.turn_outcome import CompletedTurn, FailedTurn, TurnOutcome, replace_turn_content
@@ -19,6 +21,7 @@ from src.memory.message_format import strip_internal_timestamp_prefixes
 
 from . import prompting
 from .finalize import finalize_agent_run, verify_and_publish_final_response
+from .interruption import TurnCancelled, persist_interrupted_turn
 from .loop_helpers import reply_chunks
 from .stream_context import choose_route, current_task_state
 from .turn_loop import TurnLoopExecution
@@ -43,42 +46,78 @@ async def run_stream_inner(
     trace_context: TraceContext,
 ) -> AsyncIterator[StreamChunk]:
     """Prepare, execute, verify, persist, and stream one turn."""
-    execution = await _prepare_turn_loop(agent, request, trace_context)
-    completion: LoopCompletion | None = None
-    async for event in execution.events():
-        if isinstance(event, StreamChunk):
-            yield event
-        else:
-            completion = event
-    assert completion is not None
-    outcome = await _verified_stop_outcome(agent, completion)
+    execution: TurnLoopExecution | None = None
+    prepared = False
+    try:
+        messages = await prepare_agent_turn(agent, request)
+        prepared = True
+        execution = await _prepare_turn_loop(agent, request, trace_context, messages=messages)
+        completion: LoopCompletion | None = None
+        async for event in execution.events():
+            if isinstance(event, StreamChunk):
+                yield event
+            else:
+                completion = event
+        assert completion is not None
+        outcome = await _verified_stop_outcome(agent, completion)
+    except TurnCancelled:
+        raise
+    except asyncio.CancelledError as exc:
+        content = ""
+        if prepared:
+            content = await persist_interrupted_turn(
+                agent,
+                request,
+                partial_text=execution.partial_text if execution else "",
+                snapshot=execution.interrupted_snapshot() if execution else None,
+            )
+        raise TurnCancelled(content) from exc
+    except Exception:
+        if prepared:
+            await persist_interrupted_turn(
+                agent,
+                request,
+                partial_text=execution.partial_text if execution else "",
+                snapshot=execution.interrupted_snapshot() if execution else None,
+                reason="execution_error",
+            )
+        raise
     snapshot = completion.snapshot
-    await finalize_agent_run(
-        agent,
-        conversation_id=snapshot.request.conversation_id,
-        outcome=outcome,
-        model=snapshot.final_model,
-        tokens_in=snapshot.tokens_in,
-        tokens_out=snapshot.tokens_out,
-        latency_ms=0,
-        iterations=snapshot.iterations,
-        all_tool_calls=list(snapshot.tool_calls),
+    finalization = asyncio.create_task(
+        finalize_agent_run(
+            agent,
+            conversation_id=snapshot.request.conversation_id,
+            outcome=outcome,
+            model=snapshot.final_model,
+            tokens_in=snapshot.tokens_in,
+            tokens_out=snapshot.tokens_out,
+            latency_ms=0,
+            iterations=snapshot.iterations,
+            all_tool_calls=list(snapshot.tool_calls),
+        )
     )
+    try:
+        await asyncio.shield(finalization)
+    except asyncio.CancelledError:
+        # Once the verified terminal write begins, a late stop cannot append a
+        # second contradictory terminal or interrupt the durable message pair.
+        await finalization
     for chunk in reply_chunks(
         outcome.content,
         pending_final_text=completion.pending_text,
         pending_final_chunks=list(completion.pending_chunks),
     ):
         yield chunk
-    yield _done_chunk(snapshot)
+    yield _done_chunk(snapshot, outcome)
 
 
 async def _prepare_turn_loop(
     agent: Agent,
     request: TurnRequest,
     trace_context: TraceContext,
+    *,
+    messages: list[dict],
 ) -> TurnLoopExecution:
-    messages = await prepare_agent_turn(agent, request)
     task_state = current_task_state(agent.conversation_manager, request.conversation_id)
     route_decision = choose_route(
         agent.model_gateway, agent.tool_registry, request.input_text, task_state
@@ -108,6 +147,7 @@ async def _prepare_turn_loop(
             route_decision=route_decision,
             contract=resolve_agent_contract_resources(contract, agent),
             project_root=agent_project_root(agent),
+            snapshot_root=agent_snapshot_root(agent),
         )
     )
 
@@ -131,6 +171,7 @@ async def _verified_stop_outcome(
         outcome.content,
         ledger_from_tool_calls(list(snapshot.tool_calls)),
         project_root=snapshot.project_root,
+        snapshot_root=snapshot.snapshot_root,
     )
     if stop_decision.message:
         outcome = replace_turn_content(outcome, stop_decision.message)
@@ -146,7 +187,7 @@ def _strip_internal_timestamps(outcome: TurnOutcome) -> TurnOutcome:
     )
 
 
-def _done_chunk(snapshot: TurnLoopSnapshot) -> StreamChunk:
+def _done_chunk(snapshot: TurnLoopSnapshot, outcome: TurnOutcome) -> StreamChunk:
     return StreamChunk(
         type="done",
         usage=Usage(
@@ -156,4 +197,6 @@ def _done_chunk(snapshot: TurnLoopSnapshot) -> StreamChunk:
         ),
         model=snapshot.final_model,
         iterations=snapshot.iterations,
+        turn_outcome="failed" if isinstance(outcome, FailedTurn) else "completed",
+        failure_reason=outcome.reason if isinstance(outcome, FailedTurn) else "",
     )

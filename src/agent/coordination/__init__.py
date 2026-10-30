@@ -2,6 +2,6 @@
 
 from __future__ import annotations
 
-from .execution import UserExecutionCoordinator
+from .execution import ExecutionAdmissionClosedError, UserExecutionCoordinator
 
-__all__ = ["UserExecutionCoordinator"]
+__all__ = ["ExecutionAdmissionClosedError", "UserExecutionCoordinator"]

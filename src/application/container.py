@@ -38,6 +38,7 @@ from src.tools.registry import ToolRegistry
 from .bootstrap import register_builtin_tools
 from .lifecycle import start_application, stop_application, wait_for_api_ready
 from .message_dispatch import on_message_receive
+from .runtime import RuntimeEnvironment
 from .settings import SettingsService
 
 logger = get_logger(__name__)
@@ -56,9 +57,10 @@ if TYPE_CHECKING:
 class Application:
     """Main application orchestrator."""
 
-    def __init__(self) -> None:
-        self.config_path = "config.yaml"
-        self.config = load_config(self.config_path)
+    def __init__(self, runtime: RuntimeEnvironment | None = None) -> None:
+        self.runtime = runtime or RuntimeEnvironment()
+        self.config_path = str(self.runtime.config_path)
+        self.config = self.runtime.config or load_config(self.config_path)
         self._shutdown_event = asyncio.Event()
         self._restart_requested = False
         self._restart_task: asyncio.Task[None] | None = None
@@ -85,7 +87,9 @@ class Application:
         self.deep_research = DeepResearch(
             model_gateway=self.model_gateway, event_bus=self.event_bus
         )
-        self.skill_registry = SkillRegistry()
+        self.skill_registry = SkillRegistry(
+            list(self.runtime.skills_dirs) if self.runtime.skills_dirs is not None else None
+        )
         self.msg_hub = MsgHub(self.event_bus)
         self.telegram: TelegramAdapter | None = None
         self.feishu: FeishuAdapter | FeishuLongConnectionAdapter | None = None
@@ -104,6 +108,8 @@ class Application:
             self.deep_research,
             self.skill_registry,
             lambda: self.scheduler,
+            work_dir=self.runtime.work_dir,
+            snapshot_root=self.runtime.snapshot_root,
         )
         self.semantic_memory = SemanticMemory(
             self.storage,
@@ -119,11 +125,14 @@ class Application:
             self.database,
             self.reranker_service,
         )
-        self.personal_profile = PersonalProfile()
+        self.personal_profile = PersonalProfile(root=self.runtime.data_root / "personal_memory")
         self.procedural_memory = ProceduralMemory(
             self.storage, self.model_gateway, profile=self.personal_profile
         )
-        self.personal_history = PersonalHistory(db_path=Path(self.config.storage.db_path))
+        self.personal_history = PersonalHistory(
+            root=self.runtime.data_root / "conversations",
+            db_path=Path(self.config.storage.db_path),
+        )
         self.personal_retrieval = PersonalRetrieval(
             self.personal_profile,
             index=self.storage.personal_index,
@@ -141,7 +150,7 @@ class Application:
             self.semantic_memory,
             self.episodic_memory,
             self.procedural_memory,
-            conversation_journal=ConversationJournal(),
+            conversation_journal=ConversationJournal(root=self.runtime.data_root / "conversations"),
             personal_profile=self.personal_profile,
             personal_history=self.personal_history,
             personal_retrieval=self.personal_retrieval,

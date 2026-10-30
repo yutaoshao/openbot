@@ -39,7 +39,14 @@ async def update_tool_config(
         update_payload.update(payload.config)
 
     try:
-        updated = registry.update_config(tool_name, update_payload)
+        desktop_service = getattr(request.app.state, "desktop_service", None)
+        updated = (
+            desktop_service.update_tool_config(registry, tool_name, update_payload)
+            if desktop_service is not None
+            else registry.update_config(tool_name, update_payload)
+        )
     except KeyError as e:
         raise HTTPException(status_code=404, detail="Tool not found") from e
+    except PermissionError as e:
+        raise HTTPException(status_code=403, detail=str(e)) from e
     return ToolStatusItem(**updated)

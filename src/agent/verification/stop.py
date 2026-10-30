@@ -96,9 +96,10 @@ class ToolLedger:
         requirement: TaskRequirement,
         *,
         project_root: Path | None = None,
+        snapshot_root: Path | None = None,
     ) -> bool:
         if requirement.action == ACTION_FILE_WRITE:
-            return self._satisfies_file_write(requirement, project_root)
+            return self._satisfies_file_write(requirement, project_root, snapshot_root)
         expected_effect = _ACTION_EFFECTS.get(requirement.action)
         if expected_effect is None:
             return True
@@ -134,6 +135,7 @@ class ToolLedger:
         self,
         requirement: TaskRequirement,
         project_root: Path | None,
+        snapshot_root: Path | None,
     ) -> bool:
         if any(resource.error for resource in requirement.resources):
             return False
@@ -143,7 +145,7 @@ class ToolLedger:
             if event.status == STATUS_COMPLETED
             and event.action in FILE_MUTATION_ACTIONS
             and event.effect == EFFECT_FILE_WRITTEN
-            and verified_file_mutation(event, project_root)
+            and verified_file_mutation(event, project_root, snapshot_root=snapshot_root)
         ]
         if not requirement.target_paths and not requirement.allowed_write_dirs:
             return bool(writes)
@@ -185,13 +187,16 @@ def verify_stop(
     ledger: ToolLedger,
     *,
     project_root: Path | None = None,
+    snapshot_root: Path | None = None,
 ) -> StopDecision:
     """Check that the reply exposes failures and satisfies required actions."""
     cleaned = " ".join(final_text.strip().split())
     if _is_vague(cleaned) or _is_internal_summary(cleaned):
         return StopDecision(False, "本轮未完成：模型调用工具后没有生成有效最终回复。")
     for requirement in contract.required_actions:
-        if not ledger.satisfies(requirement, project_root=project_root):
+        if not ledger.satisfies(
+            requirement, project_root=project_root, snapshot_root=snapshot_root
+        ):
             return StopDecision(
                 False,
                 missing_requirement_message(requirement, _ACTION_EFFECTS, ledger.events),

@@ -70,6 +70,7 @@ class ToolRegistry:
         self._last_used: dict[str, str | None] = {}  # tool_name -> ISO timestamp
         self._visibility: dict[str, str] = {}
         self._keywords: dict[str, set[str]] = {}
+        self._execution_permissions: dict[str, bool] = {}
 
     def register(
         self,
@@ -93,6 +94,26 @@ class ToolRegistry:
     def get(self, name: str) -> Tool | None:
         """Get a tool by name."""
         return self._tools.get(name)
+
+    def configure_execution_permissions(self, permissions: dict[str, bool]) -> None:
+        """Set an instance-owned authorization policy independently of tool config."""
+        unknown = permissions.keys() - self._tools.keys()
+        if unknown:
+            raise KeyError(next(iter(unknown)))
+        self._execution_permissions = dict(permissions)
+
+    def set_execution_permission(self, name: str, authorized: bool) -> None:
+        """Change an explicitly managed permission; ordinary config cannot grant it."""
+        if name not in self._execution_permissions:
+            raise KeyError(name)
+        self._execution_permissions = {**self._execution_permissions, name: authorized}
+
+    def is_execution_allowed(self, name: str) -> bool:
+        return (
+            name in self._tools
+            and self._enabled.get(name, True)
+            and self._execution_permissions.get(name, True)
+        )
 
     def list_all(self) -> list[Tool]:
         """List all registered tools."""
@@ -123,7 +144,7 @@ class ToolRegistry:
                 "parameters": tool.parameters,
             }
             for tool in self._tools.values()
-            if self._enabled.get(tool.name, True) and tool.name in allowed_names
+            if self.is_execution_allowed(tool.name) and tool.name in allowed_names
         ]
 
     def get_default_active_names(self) -> set[str]:
@@ -131,7 +152,7 @@ class ToolRegistry:
         return {
             name
             for name, visibility in self._visibility.items()
-            if visibility == CORE_VISIBILITY and self._enabled.get(name, True)
+            if visibility == CORE_VISIBILITY and self.is_execution_allowed(name)
         }
 
     def match_deferred(self, text: str) -> set[str]:
@@ -179,9 +200,10 @@ class ToolRegistry:
                 "description": tool.description,
                 "category": tool.category,
                 "visibility": self._visibility.get(tool.name, CORE_VISIBILITY),
-                "enabled": self._enabled.get(tool.name, True),
+                "enabled": self.is_execution_allowed(tool.name),
                 "config": self._config.get(tool.name, {}),
                 "last_used": self._last_used.get(tool.name),
+                **self._permission_status(tool.name),
             }
             for tool in self._tools.values()
         ]
@@ -196,10 +218,13 @@ class ToolRegistry:
         if not tool:
             raise KeyError(name)
 
+        if updates.get("enabled") and not self._execution_permissions.get(name, True):
+            raise PermissionError(f"Tool '{name}' requires explicit execution authorization")
         if "enabled" in updates:
-            self._enabled[name] = bool(updates.pop("enabled"))
-        if updates:
-            self._config.setdefault(name, {}).update(updates)
+            self._enabled[name] = bool(updates["enabled"])
+        config = {key: value for key, value in updates.items() if key != "enabled"}
+        if config:
+            self._config[name] = {**self._config.get(name, {}), **config}
 
         logger.info("tool_registry.config_updated", name=name)
         return {
@@ -207,10 +232,16 @@ class ToolRegistry:
             "description": tool.description,
             "category": tool.category,
             "visibility": self._visibility.get(name, CORE_VISIBILITY),
-            "enabled": self._enabled.get(name, True),
+            "enabled": self.is_execution_allowed(name),
             "config": self._config.get(name, {}),
             "last_used": self._last_used.get(name),
+            **self._permission_status(name),
         }
+
+    def _permission_status(self, name: str) -> dict[str, bool]:
+        if name not in self._execution_permissions:
+            return {}
+        return {"requires_authorization": True, "authorized": self._execution_permissions[name]}
 
     def record_usage(self, name: str) -> None:
         """Record that a tool was used (updates last_used timestamp)."""

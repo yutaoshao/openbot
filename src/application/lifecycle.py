@@ -72,7 +72,11 @@ async def _start_services(app: Application) -> None:
             access_log=False,
         )
         app.api_server = UvicornServerNoSignals(uvicorn_config)
-        app.api_task = asyncio.create_task(_serve_api(app.api_server))
+        runtime = getattr(app, "runtime", None)
+        api_socket = getattr(runtime, "api_socket", None)
+        app.api_task = asyncio.create_task(
+            _serve_api(app.api_server, sockets=[api_socket] if api_socket else None)
+        )
         await wait_for_api_ready(app)
     if app.api_app:
         app.api_app.state.wechat_runtime_status = "disabled"
@@ -85,6 +89,7 @@ async def _start_services(app: Application) -> None:
         app.event_bus,
         app.msg_hub,
         config=app.config.scheduler,
+        execution_coordinator=getattr(app, "execution_coordinator", None),
     )
     await app.scheduler.start()
     await start_housekeeping(app)
@@ -92,10 +97,10 @@ async def _start_services(app: Application) -> None:
         app.api_app.state.scheduler = app.scheduler
 
 
-async def _serve_api(server: UvicornServerNoSignals) -> None:
+async def _serve_api(server: UvicornServerNoSignals, *, sockets=None) -> None:
     """Keep Uvicorn's process exit inside the application's startup boundary."""
     try:
-        await server.serve()
+        await server.serve(sockets=sockets)
     except SystemExit as exc:
         raise RuntimeError(
             f"API server exited at {server.config.host}:{server.config.port} (status {exc.code})"
@@ -106,6 +111,12 @@ async def stop_application(app: Application) -> None:
     """Gracefully stop all services."""
     logger.info("app.stopping")
     errors: list[Exception] = []
+    coordinator = getattr(app, "execution_coordinator", None)
+    if coordinator is not None:
+        coordinator.stop_accepting()
+    await _stop_component("chat_runs", lambda: _stop_chat_runs(app), errors)
+    if coordinator is not None:
+        await _stop_component("executions", coordinator.stop_all, errors)
     await _stop_component("api", lambda: _stop_api(app), errors)
     await _stop_component("housekeeping", lambda: stop_housekeeping(app), errors)
     if app.scheduler:
@@ -126,6 +137,13 @@ async def stop_application(app: Application) -> None:
     logger.info("app.stopped")
     if errors:
         raise ExceptionGroup("Application shutdown failed", errors)
+
+
+async def _stop_chat_runs(app: Application) -> None:
+    api_app = getattr(app, "api_app", None)
+    manager = getattr(getattr(api_app, "state", None), "chat_runs", None)
+    if manager is not None:
+        await manager.stop_all()
 
 
 async def _stop_api(app: Application) -> None:

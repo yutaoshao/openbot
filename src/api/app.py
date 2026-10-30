@@ -52,8 +52,17 @@ _DEFAULT_CORS_ORIGINS = [
 @asynccontextmanager
 async def _api_lifespan(_app: FastAPI):
     logger.info("api.starting")
-    yield
-    logger.info("api.stopping")
+    try:
+        yield
+    finally:
+        manager = getattr(_app.state, "chat_runs", None)
+        if manager is not None:
+            await manager.stop_all()
+        desktop = getattr(_app.state, "desktop_service", None)
+        login = getattr(desktop, "wechat_login", None)
+        if login is not None:
+            await login.cancel()
+        logger.info("api.stopping")
 
 
 async def _handle_unexpected_error(request: Request, _exc: Exception) -> JSONResponse:
@@ -105,6 +114,8 @@ def create_api_app(
     The ``agent`` dependency is optional at startup time to allow running
     API smoke tests and wiring runtime dependencies in the application layer.
     """
+    from src.application.chat_runs import ChatRunManager
+
     app = _create_base_app(config)
     app.state.agent = agent
     app.state.storage = storage
@@ -119,6 +130,9 @@ def create_api_app(
     app.state.settings_service = settings_service
     app.state.application = application
     app.state.execution_coordinator = _request_execution_coordinator(application)
+    app.state.chat_runs = (
+        ChatRunManager(agent, app.state.execution_coordinator) if agent is not None else None
+    )
     app.state.restart_required = False
     app.state.restart_reasons = []
     # Populated later by Application.start() for webhook routes
@@ -127,6 +141,9 @@ def create_api_app(
     app.state.wechat = None
     app.state.wechat_runtime_status = None
     _register_api_routes(app)
+    runtime = getattr(application, "runtime", None)
+    if runtime is not None and runtime.configure_api is not None:
+        runtime.configure_api(app)
     _register_frontend_route(app, config)
     return app
 

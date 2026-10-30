@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
+from dataclasses import replace
 from typing import TYPE_CHECKING, Any
 
 from src.agent.turn_outcome import CompletedTurn, FailedTurn, TurnOutcome
@@ -42,6 +44,26 @@ class TurnLoopExecution:
         self._final_model = ""
         self._tool_calls: list[dict[str, Any]] = []
         self._recent_tool_signatures: list[str] = []
+        self._partial_chunks: list[str] = []
+        self._pending_tool = ""
+        self._pending_tool_index: int | None = None
+
+    @property
+    def partial_text(self) -> str:
+        return "".join(self._partial_chunks)
+
+    def interrupted_snapshot(self) -> TurnLoopSnapshot:
+        if not self._pending_tool:
+            return self._snapshot()
+        snapshot = self._snapshot()
+        pending = {
+            "name": self._pending_tool,
+            "is_error": True,
+            "result_preview": "Execution interrupted; external effects may already have occurred.",
+            "metadata": {"interrupted": True},
+            "effects": [],
+        }
+        return replace(snapshot, tool_calls=(*snapshot.tool_calls, pending))
 
     async def events(self) -> AsyncIterator[StreamChunk | LoopCompletion]:
         """Yield tool status chunks followed by exactly one loop completion."""
@@ -63,11 +85,12 @@ class TurnLoopExecution:
             tool_batch: ToolExecutionBatch | None = None
             async for event in self._execute_round_tools(model_round):
                 if isinstance(event, StreamChunk):
+                    self._pending_tool = event.tool_name
+                    self._pending_tool_index = None
                     yield event
-                else:
+                elif isinstance(event, ToolExecutionBatch):
                     tool_batch = event
             assert tool_batch is not None
-            self._tool_calls.extend(tool_batch.executed_calls)
             stuck_completion = self._stuck_completion(model_round)
             if stuck_completion is not None:
                 yield stuck_completion
@@ -97,6 +120,7 @@ class TurnLoopExecution:
         await self._prepare_request_budget(tools)
         model_round: ModelRoundResult | None = None
         text_chunks: list[StreamChunk] = []
+        self._partial_chunks = []
         async for event in model_round_events(
             self._context.agent.model_gateway,
             self._messages,
@@ -105,6 +129,7 @@ class TurnLoopExecution:
         ):
             if isinstance(event, StreamChunk) and event.type == "text":
                 text_chunks.append(event)
+                self._partial_chunks.append(event.text)
             elif isinstance(event, ModelRoundResult):
                 model_round = event
         assert model_round is not None
@@ -173,6 +198,7 @@ class TurnLoopExecution:
             self._context.contract,
             self._tool_calls,
             project_root=self._context.project_root,
+            snapshot_root=self._context.snapshot_root,
         )
         if failure_message is None:
             return self._completion(
@@ -208,8 +234,19 @@ class TurnLoopExecution:
             task_timeout=self._context.agent.config.task_timeout,
             iterations=self._iterations,
             messages=self._messages,
+            checkpoint=self._checkpoint_tool_execution,
         ):
             yield event
+
+    def _checkpoint_tool_execution(self, record: dict[str, Any]) -> None:
+        """Capture returned effects synchronously before cancellable postprocessing."""
+        captured = deepcopy(record)
+        if self._pending_tool_index is None:
+            self._pending_tool_index = len(self._tool_calls)
+            self._tool_calls.append(captured)
+        else:
+            self._tool_calls[self._pending_tool_index] = captured
+        self._pending_tool = ""
 
     def _append_model_tool_calls(self, model_round: ModelRoundResult) -> None:
         logger.info(
@@ -313,4 +350,5 @@ class TurnLoopExecution:
             cost_usd=self._usage.cost_usd,
             final_model=self._final_model,
             tool_calls=tuple(self._tool_calls),
+            snapshot_root=self._context.snapshot_root,
         )

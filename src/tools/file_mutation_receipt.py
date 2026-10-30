@@ -115,7 +115,9 @@ def mutation_receipt_from_effect(effect: ToolEffect) -> FileMutationReceipt | No
         return None
 
 
-def verified_file_mutation(effect: ToolEffect, project_root: Path | None) -> bool:
+def verified_file_mutation(
+    effect: ToolEffect, project_root: Path | None, *, snapshot_root: Path | None = None
+) -> bool:
     """Verify a structured mutation receipt against the final filesystem state."""
     receipt = mutation_receipt_from_effect(effect)
     if not _effect_matches_receipt(effect, receipt):
@@ -133,7 +135,7 @@ def verified_file_mutation(effect: ToolEffect, project_root: Path | None) -> boo
     if not _current_content_matches(receipt, current_content):
         return False
     try:
-        return _source_content_matches(receipt, project_root, current_content)
+        return _source_content_matches(receipt, project_root, current_content, snapshot_root)
     except UnicodeDecodeError:
         return False
 
@@ -179,10 +181,13 @@ def _source_content_matches(
     receipt: FileMutationReceipt,
     project_root: Path,
     current_content: bytes,
+    snapshot_root: Path | None,
 ) -> bool:
     if receipt.operation == FILE_CREATED:
         return _created_receipt_matches(receipt, current_content)
     snapshot = _resolved_project_path(project_root, receipt.snapshot_path)
+    if snapshot is None and snapshot_root is not None:
+        snapshot = _resolved_project_path(snapshot_root, receipt.snapshot_path)
     if snapshot is None or not snapshot.is_file():
         return False
     try:

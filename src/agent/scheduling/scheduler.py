@@ -13,10 +13,12 @@ from typing import TYPE_CHECKING, Any
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
+from src.agent.coordination import ExecutionAdmissionClosedError, UserExecutionCoordinator
 from src.agent.scheduling.cron import build_cron_trigger, compute_next_run, resolve_timezone
 from src.agent.scheduling.delivery import deliver_schedule_result
 from src.agent.scheduling.delivery_policy import assert_supported_schedule_target
 from src.core.logging import get_logger
+from src.core.user_scope import SINGLE_USER_ID
 
 if TYPE_CHECKING:
     from src.agent.agent import Agent
@@ -43,11 +45,14 @@ class AgentScheduler:
         event_bus: EventBus,
         msg_hub: MsgHub,
         config: SchedulerConfig | None = None,
+        *,
+        execution_coordinator: UserExecutionCoordinator | None = None,
     ) -> None:
         self._storage = storage
         self._agent = agent
         self._event_bus = event_bus
         self._msg_hub = msg_hub
+        self._execution_coordinator = execution_coordinator or UserExecutionCoordinator()
         self._timezone = resolve_timezone(config.timezone if config else "")
         self._scheduler = AsyncIOScheduler(timezone=self._timezone)
 
@@ -205,6 +210,13 @@ class AgentScheduler:
 
     async def _execute_schedule(self, schedule_id: str) -> None:
         """Called by APScheduler when a cron trigger fires."""
+        try:
+            async with self._execution_coordinator.serialize(SINGLE_USER_ID):
+                await self._execute_schedule_inner(schedule_id)
+        except ExecutionAdmissionClosedError:
+            logger.info("scheduler.admission_closed", schedule_id=schedule_id)
+
+    async def _execute_schedule_inner(self, schedule_id: str) -> None:
         sched = await self._storage.schedules.get(schedule_id)
         if sched is None or sched["status"] != "active":
             return

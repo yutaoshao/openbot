@@ -80,6 +80,18 @@ def agent_project_root(agent: Any) -> Path | None:
     return None
 
 
+def agent_snapshot_root(agent: Any) -> Path | None:
+    """Read only the snapshot root injected into trusted file tools, never a receipt path."""
+    registry = getattr(agent, "tool_registry", None)
+    if registry is None:
+        return None
+    for tool in registry.list_all():
+        root = getattr(tool, "snapshot_root", None)
+        if isinstance(root, Path):
+            return root
+    return None
+
+
 def _log_resolved_contract(contract: TaskContract) -> None:
     logger.info(
         "task_contract_resources_resolved",

@@ -1,9 +1,10 @@
-"""Sandboxed Python code execution tool."""
+"""Python execution in a separate process with a restricted environment."""
 
 from __future__ import annotations
 
 import asyncio
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
 from typing import Any
@@ -15,6 +16,7 @@ from src.tools.effects import (
     STATUS_TIMEOUT,
     tool_effect,
 )
+from src.tools.processes import kill_owned_process_group, start_owned_process
 from src.tools.registry import ToolResult
 
 # Safety: maximum execution time in seconds
@@ -22,7 +24,10 @@ MAX_TIMEOUT = 30
 
 
 class CodeExecutorTool:
-    """Execute Python code in a sandboxed subprocess."""
+    """Execute Python with the service interpreter and current user's permissions."""
+
+    def __init__(self, root: Path | None = None) -> None:
+        self._root = root
 
     @property
     def name(self) -> str:
@@ -71,26 +76,36 @@ class CodeExecutorTool:
             return _result("No code provided", True, STATUS_ERROR)
 
         try:
-            return _process_result(*(await _run_python(code, timeout)))
+            return _process_result(*(await _run_python(code, timeout, self._root)))
         except TimeoutError:
             return _result(f"Execution timed out after {timeout} seconds", True, STATUS_TIMEOUT)
         except Exception as e:
             return _result(f"Execution failed: {e}", True, STATUS_ERROR)
 
 
-async def _run_python(code: str, timeout: int) -> tuple[int, bytes, bytes]:
+async def _run_python(code: str, timeout: int, root: Path | None) -> tuple[int, bytes, bytes]:
     with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False) as handle:
         handle.write(code)
         script_path = handle.name
     try:
-        process = await asyncio.create_subprocess_exec(
-            "python3",
-            script_path,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            env={"PATH": "/usr/bin:/usr/local/bin"},
+        process = await start_owned_process(
+            asyncio.create_subprocess_exec(
+                sys.executable,
+                "-B",
+                "-s",
+                script_path,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                env={"PATH": "/usr/bin:/usr/local/bin"},
+                cwd=root,
+                start_new_session=True,
+            )
         )
-        stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=timeout)
+        try:
+            stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=timeout)
+        except (TimeoutError, asyncio.CancelledError):
+            await kill_owned_process_group(process)
+            raise
         return process.returncode or 0, stdout, stderr
     finally:
         Path(script_path).unlink(missing_ok=True)

@@ -46,6 +46,10 @@ class CreateFileTool:
         return self._mutations.project_root
 
     @property
+    def snapshot_root(self) -> Path:
+        return self._mutations.snapshot_root
+
+    @property
     def name(self) -> str:
         return "create_file"
 
@@ -101,6 +105,10 @@ class AppendFileTool:
         return self._mutations.project_root
 
     @property
+    def snapshot_root(self) -> Path:
+        return self._mutations.snapshot_root
+
+    @property
     def name(self) -> str:
         return "append_file"
 
@@ -154,6 +162,10 @@ class ReplaceFileTool:
     @property
     def project_root(self) -> Path:
         return self._mutations.project_root
+
+    @property
+    def snapshot_root(self) -> Path:
+        return self._mutations.snapshot_root
 
     @property
     def name(self) -> str:

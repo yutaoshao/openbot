@@ -52,6 +52,7 @@ class ClaudeProvider:
         )
         self.client = anthropic.AsyncAnthropic(
             api_key=config.api_key,
+            base_url=config.base_url,
             timeout=timeout,
             max_retries=0,  # We handle retries in ModelGateway
         )

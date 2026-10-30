@@ -73,6 +73,10 @@ class EditFileTool:
         return self._mutations.project_root
 
     @property
+    def snapshot_root(self) -> Path:
+        return self._mutations.snapshot_root
+
+    @property
     def name(self) -> str:
         return "edit_file"
 

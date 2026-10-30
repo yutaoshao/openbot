@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
@@ -9,6 +10,8 @@ from src.agent.conversation.message_flow import UserMessageArchiveMetadata
 from src.agent.prompts import build_prompt_fragments
 from src.core.user_scope import SINGLE_USER_ID
 from src.memory.message_format import render_llm_message
+
+from .interruption import TurnCancelled, persist_interrupted_turn
 
 if TYPE_CHECKING:
     from src.agent.agent import Agent
@@ -82,25 +85,38 @@ async def _conversation_turn_messages(
         resolved_user_id,
         agent.config.recent_token_budget,
     )
-    await agent.conversation_manager.add_user_message(
-        request.conversation_id,
-        request.input_text,
-        timestamp=request.message_timestamp,
-        archive_metadata=UserMessageArchiveMetadata(
-            source_message_id=request.source_message_id,
-            platform_user_id=request.platform_user_id,
-            user_id=resolved_user_id,
-        ),
+    stored = asyncio.create_task(
+        agent.conversation_manager.add_user_message(
+            request.conversation_id,
+            request.input_text,
+            timestamp=request.message_timestamp,
+            archive_metadata=UserMessageArchiveMetadata(
+                source_message_id=request.source_message_id,
+                platform_user_id=request.platform_user_id,
+                user_id=resolved_user_id,
+            ),
+        )
     )
-    task_state = agent.conversation_manager.get_task_state(request.conversation_id)
-    return await agent.conversation_manager.prepare_context_budget(
-        request.conversation_id,
-        build_system_prompt(agent, input_text=request.input_text, task_state=task_state),
-        request.input_text,
-        resolved_user_id,
-        config=agent.config,
-        message_timestamp=request.message_timestamp,
-    )
+    try:
+        # A local user-message write must finish before its cancellation terminal.
+        await asyncio.shield(stored)
+        task_state = agent.conversation_manager.get_task_state(request.conversation_id)
+        return await agent.conversation_manager.prepare_context_budget(
+            request.conversation_id,
+            build_system_prompt(agent, input_text=request.input_text, task_state=task_state),
+            request.input_text,
+            resolved_user_id,
+            config=agent.config,
+            message_timestamp=request.message_timestamp,
+        )
+    except asyncio.CancelledError as exc:
+        await stored
+        content = await persist_interrupted_turn(agent, request)
+        raise TurnCancelled(content) from exc
+    except Exception:
+        await stored
+        await persist_interrupted_turn(agent, request, reason="preparation_error")
+        raise
 
 
 async def _standalone_turn_messages(

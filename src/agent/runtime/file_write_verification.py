@@ -23,13 +23,14 @@ def file_write_verification_failure(
     tool_calls: list[dict[str, Any]],
     *,
     project_root: Path | None = None,
+    snapshot_root: Path | None = None,
 ) -> str | None:
     """Return an explicit failure when a required mutation lacks a valid receipt."""
     requirement = contract.requirement_for(ACTION_FILE_WRITE)
     if requirement is None:
         return None
     ledger = ledger_from_tool_calls(tool_calls)
-    if ledger.satisfies(requirement, project_root=project_root):
+    if ledger.satisfies(requirement, project_root=project_root, snapshot_root=snapshot_root):
         return None
     logger.warning(
         "file_write_verification_failed",

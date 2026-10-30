@@ -39,9 +39,12 @@ def register_builtin_tools(
     deep_research: DeepResearch,
     skill_registry: SkillRegistry,
     scheduler_provider: Callable[[], AgentScheduler | None],
+    *,
+    work_dir: Path = Path("."),
+    snapshot_root: Path | None = None,
 ) -> None:
     """Register all built-in tools."""
-    file_mutations = FileMutationService(Path("."))
+    file_mutations = FileMutationService(work_dir, snapshot_root=snapshot_root)
     registry.register(
         ToolSearchTool(registry),
         visibility=CORE_VISIBILITY,
@@ -57,12 +60,12 @@ def register_builtin_tools(
         keywords=["read url", "fetch page", "网页", "文档"],
     )
     registry.register(
-        CodeExecutorTool(),
+        CodeExecutorTool(root=work_dir),
         visibility=CORE_VISIBILITY,
         keywords=["run code", "python", "calculate", "计算"],
     )
     registry.register(
-        FileManagerTool(root=Path(".")),
+        FileManagerTool(root=work_dir),
         visibility=CORE_VISIBILITY,
         keywords=["file", "workspace", "read file", "文件"],
     )
@@ -87,17 +90,17 @@ def register_builtin_tools(
         keywords=["replace file", "rewrite file", "完整替换", "重写文件"],
     )
     registry.register(
-        BashTool(root=Path(".")),
+        BashTool(root=work_dir),
         visibility=CORE_VISIBILITY,
         keywords=["bash", "shell", "terminal", "git", "pytest", "终端", "命令"],
     )
     registry.register(
-        GlobTool(root=Path(".")),
+        GlobTool(root=work_dir),
         visibility=CORE_VISIBILITY,
         keywords=["glob", "find file", "list files", "文件搜索"],
     )
     registry.register(
-        GrepTool(root=Path(".")),
+        GrepTool(root=work_dir),
         visibility=CORE_VISIBILITY,
         keywords=["grep", "ripgrep", "search code", "内容搜索", "搜索代码"],
     )

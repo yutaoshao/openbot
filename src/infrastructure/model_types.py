@@ -72,6 +72,8 @@ class StreamChunk:
     usage: Usage | None = None
     model: str = ""
     iterations: int = 0
+    turn_outcome: Literal["completed", "failed"] | None = None
+    failure_reason: str = ""
 
 
 @runtime_checkable
