@@ -1,0 +1,49 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "OpenBot",
+  "version": "0.1.0",
+  "identifier": "com.openbot.desktop",
+  "build": {
+    "devUrl": "http://127.0.0.1:5173/desktop/",
+    "frontendDist": "../../frontend/dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "OpenBot",
+        "url": "/desktop/index.html",
+        "width": 1366,
+        "height": 900,
+        "minWidth": 960,
+        "minHeight": 640
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost http://127.0.0.1:* ws://127.0.0.1:*"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": [
+      "app"
+    ],
+    "icon": [
+      "icons/icon.icns"
+    ],
+    "resources": {
+      "../../frontend/dist/": "frontend/",
+      "../service_entry.py": "service_entry.py",
+      "../probe/runtime_probe.py": "probe/runtime_probe.py",
+      "../probe/runtime-sources.json": "probe/runtime-sources.json",
+      "../runtime/": "runtime/"
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "",
+      "endpoints": [],
+      "requireSignedVersion": true
+    }
+  }
+}

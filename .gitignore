@@ -30,6 +30,12 @@ node_modules/
 frontend/dist/
 *.tsbuildinfo
 
+# Desktop build outputs and bundled third-party runtime
+desktop/src-tauri/target/
+desktop/src-tauri/gen/
+desktop/runtime/*
+!desktop/runtime/README.md
+
 # Misc
 *.log
 scripts/openbot-watch.sh

@@ -1,0 +1,14 @@
+{
+  "repository": "yutaoshao/openbot",
+  "updateEndpoint": "https://github.com/yutaoshao/openbot/releases/latest/download/latest.json",
+  "target": "aarch64-apple-darwin",
+  "metadataAsset": "latest.json",
+  "updaterArtifact": "OpenBot.app.tar.gz",
+  "status": "not_published_needs_signing_configuration",
+  "requiredInputs": [
+    "Developer ID Application signing identity",
+    "Apple notarization configuration",
+    "Tauri update public key and privately stored signing key",
+    "Verified minimum macOS version"
+  ]
+}

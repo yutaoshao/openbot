@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "main-desktop",
+  "description": "Local desktop window; service and autostart use fixed native commands, without arbitrary filesystem or shell permissions.",
+  "windows": ["main"],
+  "permissions": ["core:default"]
+}

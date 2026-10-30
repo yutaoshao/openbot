@@ -30,7 +30,7 @@ management APIs bind to localhost by default, and secrets live in `.env`.
 ## Requirements
 
 - Python 3.12+
-- Node.js 18+ for the frontend build
+- Node.js 20+ for the frontend build (Node.js 24 used for this preview)
 - [uv](https://docs.astral.sh/uv/)
 - `rg` / ripgrep on `PATH` for `grep` and `glob` tools
 - API keys for the model/search/platform adapters you enable
@@ -239,6 +239,57 @@ Local-only files:
 
 Do not commit runtime data, logs, local provider endpoints, or local API keys.
 
+## Mac desktop application (development)
+
+`desktop/` contains an Apple Silicon Tauri 2 application sharing the Python Agent
+and Web business logic. Its neutral interface accepts a model provider, endpoint,
+model name and API key, plus a shared working directory. Configuration, conversations,
+memory, file snapshots and runtime logs stay in a separate application data directory.
+
+Closing the window keeps the service running; the menu bar can reopen it or quit.
+Login startup defaults to off. Shell/Python require explicit authorization shared by
+desktop, Web, channels and scheduled work. They use the current user's permissions;
+the working directory is not a full sandbox. Stopping targets a specific execution
+and does not undo effects that have already occurred.
+
+Use the application's browser-console action to open its own local Web instance.
+Browser credentials remain in page memory; refresh or a service restart requires
+reopening from the application. Source deployments retain their existing startup
+and Web access. See [desktop/README.md](desktop/README.md) for build and verification.
+Settings include fallback/routed models, messaging channels, embeddings/reranking,
+Tavily credentials, and WeChat QR login. Credentials remain private and are never
+returned to the page. Before initial setup, a stopped standard schema-11 deployment
+can be previewed and copied into an empty instance; imported channels and schedules
+stay paused, and execution permissions must be granted again.
+
+Native updates require a release endpoint and verification key built into the app.
+This development build reports updates as unconfigured. The bundle is unsigned;
+real accounts, signed/notarized distribution, actual upgrades, and clean-machine
+acceptance remain unverified. See the desktop guide for supported import layouts.
+
+### Isolated interactive Demo
+
+An API-isolated interactive preview uses synthetic data. It does not read local
+configuration, credentials, or history, and does not connect to models or channels.
+It demonstrates history selection, streaming Markdown, simulated stopping, service
+states, and the existing management pages. This preview toolchain uses Node.js 24;
+the existing Web console remains available.
+
+```bash
+cd frontend
+npm ci
+npm run dev -- --host 127.0.0.1 --port 5173
+```
+
+Open the [desktop preview](http://127.0.0.1:5173/desktop-demo/). Theme, language, and
+management controls are at the bottom left; simulated states are at the top right.
+Edits and authorization affect only in-memory fixtures and reset on reload. Stopping
+in this entry is simulated; the real application uses backend execution and cancellation
+state. Attachments are outside v1.
+
+Assembly scripts provide standalone Python, production dependencies, rg and tokenizer
+resources. Generated runtimes are not tracked by Git.
+
 ## Architecture
 
 OpenBot is split into five main areas:
@@ -296,6 +347,8 @@ telegram:
 OpenBot is designed for trusted local use.
 
 - The `bash` tool runs local shell commands with host permissions.
+- Python snippets use the running service's Python environment; user site packages
+  are not loaded. They still run with the current user's filesystem permissions.
 - File tools operate under the project root.
 - File mutations use explicit `create_file`, `append_file`, `edit_file`, and
   `replace_file` operations. `replace_file` requires the current SHA-256, which
