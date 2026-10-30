@@ -42,8 +42,10 @@ export function ConversationsPage(): JSX.Element {
 
   const remove = useMutation({
     mutationFn: (id: string) => api.del(`/api/conversations/${id}`),
-    onSuccess: () => {
+    onSuccess: (_result, id) => {
       void qc.invalidateQueries({ queryKey: ["conversations"] });
+      void qc.invalidateQueries({ queryKey: ["desktop-history", id] });
+      void qc.invalidateQueries({ queryKey: ["conversation", id] });
       setSelectedId("");
     },
   });
@@ -149,6 +151,7 @@ export function ConversationsPage(): JSX.Element {
               >
                 {t("memory.delete")}
               </button>
+              {remove.error && <p role="alert">{remove.error.message}</p>}
               <table className="table" style={{ marginTop: "var(--space-4)" }}>
                 <thead>
                   <tr>

@@ -1,7 +1,7 @@
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 
 import { useI18n } from "../i18n";
-import { api, wsBaseUrl } from "../lib/api";
+import { api, wsBaseUrl, wsProtocols } from "../lib/api";
 import { renderMarkdown } from "../lib/markdown";
 
 type StreamEvent = {
@@ -52,7 +52,8 @@ export function ChatPage(): JSX.Element {
       return socketRef.current;
     }
 
-    const ws = new WebSocket(wsUrl);
+    const protocols = wsProtocols();
+    const ws = protocols ? new WebSocket(wsUrl, protocols) : new WebSocket(wsUrl);
     socketRef.current = ws;
 
     await new Promise<void>((resolve, reject) => {

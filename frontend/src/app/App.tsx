@@ -1,6 +1,8 @@
+import { lazy, Suspense } from "react";
 import { Route, Routes } from "react-router-dom";
 
 import { Layout } from "./Layout";
+import { BrowserSessionGate } from "../desktop/BrowserSessionGate";
 import {
   ChatPage,
   ConversationsPage,
@@ -14,9 +16,18 @@ import {
   ToolsPage,
 } from "./route-loaders";
 
+const DesktopDemo = lazy(() => import("../demo/DesktopDemo"));
+const DesktopApp = lazy(() => import("../desktop/DesktopApp"));
+
 export default function App(): JSX.Element {
   return (
-    <Routes>
+    <BrowserSessionGate><Routes>
+      <Route path="/desktop/*" element={
+        <Suspense fallback={<div role="status">OpenBot…</div>}><DesktopApp /></Suspense>
+      } />
+      <Route path="/desktop-demo/*" element={
+        <Suspense fallback={<div role="status">OpenBot…</div>}><DesktopDemo /></Suspense>
+      } />
       <Route path="/" element={<Layout />}>
         <Route index element={<DashboardPage />} />
         <Route path="chat" element={<ChatPage />} />
@@ -29,6 +40,6 @@ export default function App(): JSX.Element {
         <Route path="help" element={<HelpPage />} />
         <Route path="settings" element={<SettingsPage />} />
       </Route>
-    </Routes>
+    </Routes></BrowserSessionGate>
   );
 }

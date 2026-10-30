@@ -1,3 +1,4 @@
+import { pagePath } from "../lib/page-path";
 import { Link } from "react-router-dom";
 
 import { useQuery } from "@tanstack/react-query";
@@ -104,8 +105,8 @@ export function DashboardPage(): JSX.Element {
           <h2 className="dashboard-hero-title">{heroTitle}</h2>
           <p className="dashboard-hero-text">{heroSummary}</p>
           <div className="dashboard-hero-actions">
-            <Link className="btn" to="/monitoring" viewTransition>{t("dashboard.openMonitoring")}</Link>
-            <Link className="btn secondary" to="/logs" viewTransition>{t("dashboard.viewLogs")}</Link>
+            <Link className="btn" to={pagePath("/monitoring")} viewTransition>{t("dashboard.openMonitoring")}</Link>
+            <Link className="btn secondary" to={pagePath("/logs")} viewTransition>{t("dashboard.viewLogs")}</Link>
           </div>
         </section>
 

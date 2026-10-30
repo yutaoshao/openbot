@@ -1,7 +1,12 @@
+import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { useI18n } from "../i18n";
 import { api } from "../lib/api";
+import { isDesktopDemoPath } from "../demo/location";
+import { isDesktopPath } from "../desktop/location";
+import { authorizeExecution, type ExecutionTool } from "../desktop/ExecutionPermissions";
+import { useDesktopStatus } from "../desktop/DesktopSettings";
 
 type ToolItem = {
   name: string;
@@ -15,6 +20,9 @@ type ToolItem = {
 export function ToolsPage(): JSX.Element {
   const { t, formatDateTime, formatNumber } = useI18n();
   const qc = useQueryClient();
+  const [authorization, setAuthorization] = useState<ToolItem | null>(null);
+  const live = isDesktopPath(window.location.pathname);
+  const status = useDesktopStatus(live);
   const list = useQuery({
     queryKey: ["tools"],
     queryFn: () => api.get<ToolItem[]>("/api/tools"),
@@ -27,6 +35,14 @@ export function ToolsPage(): JSX.Element {
       }),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ["tools"] });
+    },
+  });
+  const grant = useMutation({
+    mutationFn: (tool: ToolItem) => authorizeExecution(tool.name as ExecutionTool, true),
+    onSuccess: () => {
+      setAuthorization(null);
+      void qc.invalidateQueries({ queryKey: ["tools"] });
+      void qc.invalidateQueries({ queryKey: ["desktop-status"] });
     },
   });
 
@@ -43,6 +59,25 @@ export function ToolsPage(): JSX.Element {
           })}</p>
         </div>
       </section>
+
+      {authorization && <section className="surface-panel demo-permission-review" role="dialog"
+        aria-labelledby="demo-permission-title">
+        <h2 id="demo-permission-title">{t("desktop.executionTitle", { tool: authorization.name })}</h2>
+        <p>{t("desktop.executionDetail")}</p>
+        <p className="field-help">{t(live ? "desktopLive.executionHint" : "desktop.executionPreview")}</p>
+        <div className="filter-row">
+          <button className="btn" type="button" disabled={grant.isPending} onClick={() => {
+            if (live) grant.mutate(authorization);
+            else { toggle.mutate(authorization); setAuthorization(null); }
+          }}>
+            {t("desktop.executionAllow")}
+          </button>
+          <button className="btn secondary" type="button" onClick={() => setAuthorization(null)}>
+            {t("desktop.executionCancel")}
+          </button>
+        </div>
+      </section>}
+      {(toggle.error || grant.error) && <p role="alert">{(toggle.error || grant.error)?.message}</p>}
 
       <div className="tool-grid">
         {tools.map((tool) => (
@@ -71,7 +106,14 @@ export function ToolsPage(): JSX.Element {
             <button
               className="btn secondary"
               type="button"
-              onClick={() => toggle.mutate(tool)}
+              disabled={toggle.isPending || grant.isPending}
+              onClick={() => {
+                const needsLiveGrant = live && ["bash", "code_executor"].includes(tool.name)
+                  && !status.data?.permissions[tool.name as ExecutionTool];
+                if (!tool.enabled && (needsLiveGrant || (isDesktopDemoPath(window.location.pathname) && ["bash", "python"].includes(tool.name)))) {
+                  setAuthorization(tool);
+                } else toggle.mutate(tool);
+              }}
             >
               {tool.enabled ? t("tools.disable") : t("tools.enable")}
             </button>

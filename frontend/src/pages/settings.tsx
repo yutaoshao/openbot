@@ -6,6 +6,10 @@ import { Icon } from "../components/Icon";
 import { SettingsSectionHeader } from "../components/SettingsSectionHeader";
 import { useI18n, type Language } from "../i18n";
 import { api } from "../lib/api";
+import { isDesktopDemoPath } from "../demo/location";
+import { isDesktopPath } from "../desktop/location";
+import { DesktopPreferencesPage } from "../desktop/DesktopPreferencesPage";
+import { browserSessionBearer } from "../desktop/browser-session";
 import { operatorQueryDefaults } from "../lib/query-defaults";
 import {
   buildSecrets,
@@ -35,6 +39,13 @@ type SettingsApplyResponse = {
 };
 
 export function SettingsPage(): JSX.Element {
+  if (isDesktopPath(window.location.pathname) || isDesktopDemoPath(window.location.pathname) || browserSessionBearer()) {
+    return <DesktopPreferencesPage />;
+  }
+  return <WebSettingsPage />;
+}
+
+function WebSettingsPage(): JSX.Element {
   const qc = useQueryClient();
   const { language, setLanguage, t } = useI18n();
   const [enabled, setEnabled] = useState(true);
