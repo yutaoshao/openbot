@@ -168,3 +168,42 @@ it("refreshes saved login state when confirmation wins a delayed cancellation wi
   expect(screen.getByRole("textbox", { name: /Allowed Telegram user IDs/ })).toHaveValue("67890");
   expect(api.put).not.toHaveBeenCalled();
 });
+
+it("translates a retained Telegram ID validation error when the interface language changes", async () => {
+  localStorage.setItem("openbot_language", "zh-CN");
+  const user = renderDesktop("/desktop/settings/services");
+  const ids = await screen.findByRole<HTMLInputElement>("textbox", { name: /允许的 Telegram 用户 ID/ });
+  await user.clear(ids);
+  await user.type(ids, "bad");
+  expect(ids.validationMessage).toBe("请填写有效的正整数用户 ID，并用逗号分隔。");
+  await user.click(screen.getByRole("link", { name: "常规" }));
+  await user.selectOptions(screen.getByRole("combobox", { name: "语言" }), "en-US");
+  await user.click(category("Models & channels"));
+  expect(ids).toHaveValue("bad");
+  expect(ids.validationMessage).toBe("Enter valid positive integer user IDs separated by commas.");
+  await user.click(category("General"));
+  await user.selectOptions(screen.getByRole("combobox", { name: "Language" }), "zh-CN");
+  await user.click(screen.getByRole("link", { name: "模型与渠道" }));
+  expect(ids.validationMessage).toBe("请填写有效的正整数用户 ID，并用逗号分隔。");
+  await user.clear(ids);
+  expect(ids.validity.valid).toBe(true);
+  await user.type(ids, "123，456");
+  expect(ids.validationMessage).toBe("");
+  vi.mocked(api.put).mockResolvedValueOnce({ requires_restart: true });
+  await user.click(screen.getByRole("button", { name: "保存并重启服务" }));
+  await waitFor(() => expect(api.put).toHaveBeenCalledWith("/api/desktop/services", expect.objectContaining({
+    configuration: expect.objectContaining({ telegram: expect.objectContaining({ allowed_user_ids: [123, 456] }) }),
+  })));
+});
+
+it.each(["1e3", "0x10"])("uses the interface-language error for unsupported numeric ID syntax %s", async (value) => {
+  const user = renderDesktop("/desktop/settings/services");
+  const ids = await screen.findByRole<HTMLInputElement>("textbox", { name: /Allowed Telegram user IDs/ });
+  await user.click(screen.getByRole("checkbox", { name: "Telegram enabled" }));
+  await user.clear(ids);
+  await user.type(ids, value);
+  expect(ids.validity.customError).toBe(true);
+  expect(ids.validationMessage).toBe("Enter valid positive integer user IDs separated by commas.");
+  await user.click(screen.getByRole("button", { name: "Save and restart service" }));
+  expect(api.put).not.toHaveBeenCalled();
+});

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useI18n } from "../i18n";
 import { ChoiceField, NumberField, ServiceGroup, ServiceToggle, TextField } from "./ServiceFields";
 import type { ServicesConfiguration } from "./service-types";
@@ -8,6 +8,12 @@ export function ChannelServices({ value, onChange }: {
 }) {
   const { t } = useI18n();
   const [allowedIds, setAllowedIds] = useState(value.telegram.allowed_user_ids.join(", "));
+  const allowedIdsInput = useRef<HTMLInputElement>(null);
+  // Native validation text survives renders, including language changes.
+  useEffect(() => {
+    const input = allowedIdsInput.current;
+    if (input?.validity.customError) input.setCustomValidity(t("desktopServices.invalidUserIds"));
+  }, [t]);
   const telegram = value.telegram;
   const feishu = value.feishu;
   const wechat = value.wechat;
@@ -18,11 +24,11 @@ export function ChannelServices({ value, onChange }: {
       <ChoiceField label={t("settings.telegramMode")} value={telegram.mode} choices={[["polling", "Polling"], ["webhook", "Webhook"]]}
         onChange={(mode) => onChange({ ...value, telegram: { ...telegram, mode } })} />
       <label className="desktop-service-field"><span className="field-label">{t("desktopServices.allowedUsers")}</span>
-        <input className="input" value={allowedIds} pattern="[0-9,， ]*" onChange={(e) => {
+        <input ref={allowedIdsInput} className="input" value={allowedIds} pattern="[0-9,， ]*" onChange={(e) => {
           const next = e.target.value;
           setAllowedIds(next);
           const ids = next.split(/[,，]/).map((s) => s.trim()).filter(Boolean).map(Number);
-          const valid = ids.every((id) => Number.isSafeInteger(id) && id > 0);
+          const valid = !e.target.validity.patternMismatch && ids.every((id) => Number.isSafeInteger(id) && id > 0);
           e.target.setCustomValidity(valid ? "" : t("desktopServices.invalidUserIds"));
           if (valid) onChange({ ...value, telegram: { ...telegram, allowed_user_ids: ids } });
         }} />
