@@ -130,12 +130,6 @@ html[data-desktop] body { background: var(--surface); }
 .demo-admin .page-eyebrow { color: var(--text-subtle); }
 .demo-admin .btn { border-radius: 6px; box-shadow: none; background: var(--accent); color: var(--solid-contrast); }
 .demo-admin .btn.secondary { border: 1px solid var(--border); background: var(--surface); color: var(--text); }
-.demo-admin .dashboard-hero { border: 1px solid var(--border); border-radius: 10px; background: var(--surface-muted); color: var(--text); box-shadow: none; }
-.demo-admin .dashboard-hero::after { display: none; }
-.demo-admin .dashboard-hero-kicker { padding: 4px 8px; background: var(--surface-subtle); color: var(--text-muted); font-size: 11px; font-weight: 500; letter-spacing: 0; text-transform: none; }
-.demo-admin .dashboard-hero-title { color: var(--text); font-size: 26px; font-weight: 600; letter-spacing: -.5px; }
-.demo-admin .dashboard-hero-text { color: var(--text-muted); }
-.demo-admin .dashboard-bar { border-radius: 4px; background: var(--accent-strong); }
 .demo-permission-review { border-color: var(--border-strong); }
 .demo-permission-review h2 { margin: 0; font-size: 17px; font-weight: 500; }
 .demo-permission-review p { font-size: 13px; line-height: 1.8; }

@@ -59,6 +59,8 @@ uv run python main.py
 
 Open the dashboard at [http://127.0.0.1:8000/](http://127.0.0.1:8000/).
 
+Overview, monitoring, and logs share a monochrome statistics layout across Web and desktop, with light/dark themes, chart tooltips, and log filters. See [Statistics](docs/spec/frontend/statistics.md) for reporting windows and unavailable-data behavior.
+
 ## Memory and further reading
 
 Personal dossiers live under `data/personal_memory/`. Runtime retrieval separates answer facts from provenance: ordinary questions receive only ranked fact paragraphs, while evidence, history, and outcome questions can load provenance and original messages; stable global preferences form a small resident layer. Related original messages remain searchable, and the dashboard checks dossier revisions when saving. See [architecture](ARCHITECTURE.md) for the message path and [advanced operations](ADVANCED.md) for migration, backfill, and context budgets.

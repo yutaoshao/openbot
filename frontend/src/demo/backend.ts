@@ -91,7 +91,7 @@ function dispatch(path: string, init: RequestInit): unknown {
   if (route.startsWith("/api/desktop/")) return desktopSettingsRequest(route, method, body);
   const idAfter = (prefix: string) => decodeURIComponent(route.slice(prefix.length));
 
-  if (method === "GET" && route.startsWith("/api/metrics/")) return demoMetrics(idAfter("/api/metrics/"));
+  if (method === "GET" && route.startsWith("/api/metrics/")) return demoMetrics(idAfter("/api/metrics/"), url.searchParams.get("period") ?? "30d");
   if (method === "GET" && ["/api/logs", "/api/logs/stats"].includes(route)) return readLogs(route, url.searchParams);
   if (route === "/api/settings") {
     if (method === "GET") return state.settings;

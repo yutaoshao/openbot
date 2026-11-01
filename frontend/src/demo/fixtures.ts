@@ -69,16 +69,20 @@ export function createDemoFixtures() {
 
 export type DemoFixtures = ReturnType<typeof createDemoFixtures>;
 
-export function demoMetrics(name: string): unknown {
-  const daily = Array.from({ length: 14 }, (_, index) => ({
-    date: `2026-10-${String(index + 16).padStart(2, "0")}`,
-    avg: 1100 + index * 31, p50: 900 + index * 21, p95: 1900 + index * 42,
-    tokens_in: 1800 + index * 240, tokens_out: 520 + index * 80, cost_usd: 0.02 + index * 0.004,
+export function demoMetrics(name: string, period = "30d"): unknown {
+  const variation = [0, 120, -80, 210, -120, 50, -180, 90, 160, -110, 40, -50, 70, -200];
+  const today = new Date();
+  const history = Array.from({ length: 14 }, (_, index) => ({
+    date: new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate() - 13 + index)).toISOString().slice(0, 10),
+    avg: 1100 + index * 31 + variation[index], p50: 900 + index * 21 + variation[index], p95: 1900 + index * 42 + variation[index] * 1.8,
+    tokens_in: 1800 + index * 240 + variation[index] * 4, tokens_out: 520 + index * 80 + variation[index] * 2,
+    cost_usd: Number((0.02 + index * 0.004 + variation[index] * 0.00001).toFixed(4)),
   }));
+  const daily = period === "7d" ? history.slice(-7) : period === "today" ? history.slice(-1) : history;
   if (name === "overview") return { total_requests: 24, success_count: 23, error_count: 1, error_rate: 1 / 24, success_rate: 23 / 24, avg_steps: 2.1, avg_turns: 1.4, llm_api_calls: 36 };
   if (name === "latency") return { avg_response_time: 1300, p50: 1100, p95: 2300, p99: 2800, daily };
   if (name === "tokens") return { daily };
-  if (name === "cost") return { daily, total_cost_usd: 0.644, avg_cost_usd_per_request: 0.0268 };
+  if (name === "cost") return { daily, total_cost_usd: Number(daily.reduce((sum, day) => sum + day.cost_usd, 0).toFixed(4)), avg_cost_usd_per_request: 0.0268 };
   if (name === "tools") return { tools: [{ tool: "file_manager", count: 12, error_rate: 0 }, { tool: "grep", count: 8, error_rate: 0 }, { tool: "web_search", count: 4, error_rate: 0 }] };
   throw new Error(`Demo 未实现指标：${name}`);
 }

@@ -1,7 +1,8 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 
 import { useQuery } from "@tanstack/react-query";
 
+import { StatisticValue, StatisticsPage } from "../components/statistics/shared";
 import { useI18n } from "../i18n";
 import { api } from "../lib/api";
 import { liveLogsQueryDefaults } from "../lib/query-defaults";
@@ -29,10 +30,10 @@ const SURFACES = ["all", "cognitive", "operational", "contextual"] as const;
 const LEVELS = ["all", "info", "warning", "error"] as const;
 const PLATFORMS = ["all", "web", "telegram", "feishu", "wechat", "scheduler"] as const;
 
-function levelTone(level: string): string {
-  if (level === "error") return "degraded";
-  if (level === "warning") return "stable";
-  return "stable";
+function logTone(level: string): string {
+  if (level === "error") return "statistics-tone-error";
+  if (level === "warning") return "statistics-tone-warning";
+  return "statistics-tone-neutral";
 }
 
 export function LogsPage(): JSX.Element {
@@ -68,10 +69,13 @@ export function LogsPage(): JSX.Element {
 
   const stats = useQuery({
     ...liveLogsQueryDefaults,
-    queryKey: ["logs", "stats"],
+    queryKey: ["logs", "stats", platform],
     queryFn: () => api.get<LogStats>(`/api/logs/stats${platform !== "all" ? `?platform=${platform}` : ""}`),
     refetchInterval: 10000,
   });
+
+  const statsSnapshot = stats.isError ? undefined : stats.data;
+  const formatLogCount = (value: number | undefined) => value == null ? "—" : formatNumber(value);
 
   const surfaceLabel = (value: string) => (
     value === "all" ? t("logs.filter.all") : t(`logs.surface.${value}`)
@@ -84,7 +88,7 @@ export function LogsPage(): JSX.Element {
   );
 
   return (
-    <div className="stack-layout">
+    <StatisticsPage><div className="stack-layout statistics-logs">
       <section className="page-header">
         <div>
           <p className="page-eyebrow">{t("nav.logs")}</p>
@@ -93,51 +97,64 @@ export function LogsPage(): JSX.Element {
         </div>
       </section>
 
-      <div className="stats-row">
-        <MetricLogCard label={t("logs.total")} value={formatNumber(stats.data?.total ?? 0)} tone="stable" badge={t("dashboard.statusStable")} />
-        <MetricLogCard label={t("logs.cognitive")} value={formatNumber(stats.data?.by_surface.cognitive ?? 0)} tone="stable" badge={t("dashboard.statusStable")} />
-        <MetricLogCard label={t("logs.operational")} value={formatNumber(stats.data?.by_surface.operational ?? 0)} tone="stable" badge={t("dashboard.statusStable")} />
-        <MetricLogCard label={t("logs.contextual")} value={formatNumber(stats.data?.by_surface.contextual ?? 0)} tone="stable" badge={t("dashboard.statusStable")} />
-        <MetricLogCard label={t("logs.warnings")} value={formatNumber(stats.data?.by_level.warning ?? 0)} tone="stable" badge={t("logs.level.warning")} />
-        <MetricLogCard label={t("logs.errors")} value={formatNumber(stats.data?.by_level.error ?? 0)} tone="degraded" badge={t("dashboard.statusDegraded")} />
+      <div className="stats-row statistics-log-metrics">
+        <MetricLogCard label={t("logs.total")} value={formatLogCount(statsSnapshot?.total)} />
+        <MetricLogCard label={t("logs.cognitive")} value={formatLogCount(statsSnapshot?.by_surface.cognitive)} />
+        <MetricLogCard label={t("logs.operational")} value={formatLogCount(statsSnapshot?.by_surface.operational)} />
+        <MetricLogCard label={t("logs.contextual")} value={formatLogCount(statsSnapshot?.by_surface.contextual)} />
+        <MetricLogCard label={t("logs.warnings")} value={formatLogCount(statsSnapshot?.by_level.warning)} tone={(statsSnapshot?.by_level.warning ?? 0) > 0 ? "warning" : "neutral"} />
+        <MetricLogCard label={t("logs.errors")} value={formatLogCount(statsSnapshot?.by_level.error)} tone={(statsSnapshot?.by_level.error ?? 0) > 0 ? "error" : "neutral"} />
       </div>
 
-      <section className="surface-panel">
-        <div className="filter-row">
-          <select className="select" aria-label={t("logs.filter.platform")} value={platform} onChange={(event) => setPlatform(event.target.value)}>
-            {PLATFORMS.map((item) => (
-              <option key={item} value={item}>{platformLabel(item)}</option>
-            ))}
-          </select>
-          <select className="select" aria-label={t("logs.filter.surface")} value={surface} onChange={(event) => setSurface(event.target.value)}>
-            {SURFACES.map((item) => (
-              <option key={item} value={item}>{surfaceLabel(item)}</option>
-            ))}
-          </select>
-          <select className="select" aria-label={t("logs.filter.level")} value={level} onChange={(event) => setLevel(event.target.value)}>
-            {LEVELS.map((item) => (
-              <option key={item} value={item}>{levelLabel(item)}</option>
-            ))}
-          </select>
-          <input
-            className="input"
-            placeholder={t("logs.filter.traceOrInteraction")}
-            aria-label={t("logs.filter.traceOrInteraction")}
-            value={traceFilter}
-            onChange={(event) => setTraceFilter(event.target.value)}
-          />
-          <span className="status-badge stable">{t("logs.autoRefresh")}</span>
+      {stats.isPending && <p className="surface-panel-note" role="status">{t("common.dataLoading")}</p>}
+      {stats.isError && <div role="alert"><p>{t("common.dataUnavailable")}</p>
+        <button className="btn secondary" type="button" disabled={stats.isFetching} onClick={() => void stats.refetch()}>{t("desktop.reconnect")}</button>
+      </div>}
+
+      <section className="surface-panel statistics-log-toolbar">
+        <div className="filter-row statistics-log-filters">
+          <LogFilter label={t("logs.table.platform")}>
+            <select className="select" aria-label={t("logs.filter.platform")} value={platform} onChange={(event) => setPlatform(event.target.value)}>
+              {PLATFORMS.map((item) => (
+                <option key={item} value={item}>{platformLabel(item)}</option>
+              ))}
+            </select>
+          </LogFilter>
+          <LogFilter label={t("logs.table.surface")}>
+            <select className="select" aria-label={t("logs.filter.surface")} value={surface} onChange={(event) => setSurface(event.target.value)}>
+              {SURFACES.map((item) => (
+                <option key={item} value={item}>{surfaceLabel(item)}</option>
+              ))}
+            </select>
+          </LogFilter>
+          <LogFilter label={t("logs.table.level")}>
+            <select className="select" aria-label={t("logs.filter.level")} value={level} onChange={(event) => setLevel(event.target.value)}>
+              {LEVELS.map((item) => (
+                <option key={item} value={item}>{levelLabel(item)}</option>
+              ))}
+            </select>
+          </LogFilter>
+          <LogFilter label={t("logs.table.trace")} className="statistics-trace-field">
+            <input
+              className="input"
+              placeholder={t("logs.filter.traceOrInteraction")}
+              aria-label={t("logs.filter.traceOrInteraction")}
+              value={traceFilter}
+              onChange={(event) => setTraceFilter(event.target.value)}
+            />
+          </LogFilter>
+          <span className="statistics-refresh">{t("logs.autoRefresh")}</span>
         </div>
       </section>
 
-      <section className="surface-panel">
+      <section className="surface-panel statistics-log-results">
         <div className="surface-panel-header">
           <div>
-            <p className="surface-panel-label">{t("logs.entries", { count: formatNumber(logs.data?.length ?? 0) })}</p>
+            <p className="surface-panel-label">{t("logs.entries", { count: logs.data ? formatNumber(logs.data.length) : "—" })}</p>
             <h3 className="surface-panel-title">{t("nav.logs")}</h3>
           </div>
         </div>
-        <table className="table table-ops">
+        <table className="table table-ops statistics-log-table">
           <thead>
             <tr>
               <th>{t("logs.table.time")}</th>
@@ -154,7 +171,7 @@ export function LogsPage(): JSX.Element {
               <tr key={entry.id}>
                 <td className="mono">{formatDateTime(entry.timestamp, { dateStyle: "short", timeStyle: "medium" })}</td>
                 <td>
-                  <span className={`status-badge ${levelTone(entry.level)}`}>{levelLabel(entry.level)}</span>
+                  <span className={`status-badge ${logTone(entry.level)}`}>{levelLabel(entry.level)}</span>
                 </td>
                 <td>{entry.surface ? surfaceLabel(entry.surface) : "-"}</td>
                 <td>{entry.platform ? platformLabel(entry.platform) : "-"}</td>
@@ -165,6 +182,7 @@ export function LogsPage(): JSX.Element {
                       className="trace-filter-button"
                       type="button"
                       aria-label={t("logs.filterTrace")}
+                      title={entry.trace_id}
                       onClick={() => setTraceFilter(entry.trace_id ?? "")}
                     >
                       {entry.trace_id.slice(0, 8)}
@@ -176,27 +194,29 @@ export function LogsPage(): JSX.Element {
             ))}
           </tbody>
         </table>
-        {logs.isLoading ? <p className="surface-panel-note">{t("common.loading")}</p> : null}
-        {!logs.isLoading && (logs.data?.length ?? 0) === 0 ? (
+        {logs.isLoading && <p className="surface-panel-note" role="status">{t("common.loading")}</p>}
+        {logs.isError && <div role="alert"><p>{t("common.dataUnavailable")}</p>
+          <button className="btn secondary" type="button" disabled={logs.isFetching} onClick={() => void logs.refetch()}>{t("desktop.reconnect")}</button>
+        </div>}
+        {logs.isSuccess && logs.data.length === 0 ? (
           <div className="empty-state">{t("logs.empty")}</div>
         ) : null}
       </section>
-    </div>
+    </div></StatisticsPage>
   );
 }
 
-function MetricLogCard(
-  { label, value, tone, badge }: { label: string; value: string; tone: "stable" | "degraded"; badge: string },
-): JSX.Element {
-  return (
-    <section className="metric-card">
-      <span>{label}</span>
-      <strong>{value}</strong>
-      <div>
-        <span className={`status-badge ${tone}`}>{badge}</span>
-      </div>
-    </section>
-  );
+function LogFilter({ label, children, className = "" }: { label: string; children: ReactNode; className?: string }): JSX.Element {
+  return <label className={`statistics-filter ${className}`}><span>{label}</span>{children}</label>;
+}
+
+function MetricLogCard({ label, value, tone = "neutral" }: {
+  label: string; value: string; tone?: "neutral" | "warning" | "error";
+}): JSX.Element {
+  return <section className={`metric-card statistics-tone-${tone}`}>
+    <span>{label}</span>
+    <StatisticValue>{value}</StatisticValue>
+  </section>;
 }
 
 function formatData(raw: string): string {
