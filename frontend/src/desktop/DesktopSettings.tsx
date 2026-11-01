@@ -15,7 +15,7 @@ export function useDesktopStatus(enabled = true) {
   return useQuery({ queryKey: ["desktop-status"], queryFn: () => api.get<DesktopStatus>("/api/desktop/status"), enabled, refetchInterval: 2000, retry: false });
 }
 
-function LoginStartup(): JSX.Element {
+export function LoginStartup(): JSX.Element {
   const { t } = useI18n();
   const cache = useQueryClient();
   const status = useQuery({ queryKey: ["desktop-autostart"], queryFn: () => desktopInvoke<boolean>("desktop_autostart"), retry: false });
@@ -32,7 +32,7 @@ function LoginStartup(): JSX.Element {
   </section>;
 }
 
-function WebConsole(): JSX.Element {
+export function WebConsole(): JSX.Element {
   const { t } = useI18n();
   const open = useMutation({ mutationFn: () => desktopInvoke("desktop_open_web") });
   return <section className="surface-panel settings-section">

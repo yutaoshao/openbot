@@ -75,9 +75,10 @@ function ServicesEditor({ snapshot, busy }: { snapshot: ServicesSnapshot; busy: 
   </form>;
 }
 
-export function DesktopServices({ busy }: { busy: boolean }) {
+export function DesktopServices({ busy, active = true }: { busy: boolean; active?: boolean }) {
   const { t } = useI18n();
-  const query = useQuery({ queryKey: ["desktop-services"], queryFn: () => api.get<ServicesSnapshot>("/api/desktop/services"), retry: false });
+  const query = useQuery({ queryKey: ["desktop-services"], queryFn: () => api.get<ServicesSnapshot>("/api/desktop/services"),
+    enabled: active, staleTime: 0, retry: false });
   return <>
     <section className="surface-panel settings-section" id="services">
       <h2>{t("desktopServices.title")}</h2>
@@ -86,6 +87,6 @@ export function DesktopServices({ busy }: { busy: boolean }) {
       {query.error && <p role="alert">{query.error.message} <button className="btn ghost" onClick={() => void query.refetch()}>{t("desktop.reconnect")}</button></p>}
       {query.data?.configuration && <ServicesEditor snapshot={query.data} busy={busy} />}
     </section>
-    {query.data?.configuration && <WeChatLogin enabled={query.data.configuration.wechat.enabled} loggedIn={query.data.wechat.logged_in} />}
+    {active && query.data?.configuration && <WeChatLogin enabled={query.data.configuration.wechat.enabled} loggedIn={query.data.wechat.logged_in} />}
   </>;
 }

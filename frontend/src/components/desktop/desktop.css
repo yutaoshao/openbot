@@ -75,15 +75,6 @@ html[data-desktop] body { background: var(--surface); }
 .demo-history-item span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .demo-history-item:hover, .demo-history-item.is-selected { color: var(--text); background: var(--surface-subtle); }
 .demo-sidebar-bottom { position: relative; margin-top: 16px; }
-.demo-management-toggle { display: flex; gap: 9px; align-items: center; width: 100%; padding: 10px; border: 0; border-radius: 7px; color: var(--text-muted); background: transparent; text-align: left; font-size: 12px; }
-.demo-management-toggle svg:last-child { margin-left: auto; }
-.demo-management-toggle:hover { color: var(--text); background: var(--surface-subtle); }
-.demo-management-menu { display: grid; gap: 2px; max-height: min(420px, 65vh); overflow-y: auto; margin-bottom: 12px; padding-bottom: 12px; border-bottom: 1px solid var(--border); }
-.demo-management-link { display: flex; gap: 9px; align-items: center; padding: 8px 10px; border-radius: 6px; color: var(--text-muted); font-size: 12px; }
-.demo-management-link:hover, .demo-management-link.is-selected { color: var(--text); background: var(--surface-subtle); }
-.demo-sidebar-utilities { display: flex; gap: 12px; align-items: center; margin: 12px 10px 1px; padding-top: 14px; border-top: 1px solid var(--border); }
-.demo-sidebar-utilities button { display: inline-flex; justify-content: center; align-items: center; min-width: 20px; padding: 0; border: 0; color: var(--text-muted); background: transparent; font-size: 11px; }
-.demo-sidebar-utilities span { margin-left: auto; color: var(--text-subtle); font-size: 10px; }
 .demo-main { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
 .demo-titlebar { display: flex; flex: none; justify-content: space-between; align-items: center; gap: 16px; height: 56px; padding: 0 28px; color: var(--text-muted); font-size: 12px; }
 .demo-preview-controls { display: flex; gap: 12px; align-items: center; }

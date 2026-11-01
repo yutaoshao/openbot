@@ -1,12 +1,13 @@
 import { Suspense, useEffect, useState } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { Route, Routes, useLocation, useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 
 import { useI18n } from "../i18n";
 import { ChatWorkspace } from "../components/desktop/ChatWorkspace";
 import { DesktopSidebar } from "../components/desktop/DesktopSidebar";
-import { managementScreens } from "../components/desktop/management";
 import { useDemoChat } from "./use-demo-chat";
+import { SettingsWorkspace } from "../desktop/SettingsWorkspace";
+import { demoLinkPath } from "./location";
 import type { DemoScenario } from "./chat-types";
 import "../components/desktop/desktop.css";
 
@@ -16,8 +17,7 @@ function DemoWorkspace(): JSX.Element {
   const location = useLocation();
   const chat = useDemoChat();
   const [theme, setTheme] = useState<"light" | "dark">("light");
-  const management = location.pathname.includes("/manage/");
-  const screen = managementScreens.find((item) => location.pathname.endsWith(`/manage/${item.key}`));
+  const settingsMode = /\/desktop-demo\/(?:manage|settings)(?:\/|$)/.test(location.pathname);
 
   useEffect(() => {
     const root = document.documentElement;
@@ -36,35 +36,31 @@ function DemoWorkspace(): JSX.Element {
   useEffect(() => {
     const handleKey = (event: KeyboardEvent) => {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "n" && !chat.busy) {
-        event.preventDefault(); chat.selectConversation(null); navigate("/desktop-demo");
+        event.preventDefault(); chat.selectConversation(null); navigate(demoLinkPath("/desktop-demo"));
       }
     };
     window.addEventListener("keydown", handleKey);
     return () => window.removeEventListener("keydown", handleKey);
   }, [chat, navigate]);
 
+  if (settingsMode) return <SettingsWorkspace basePath="/desktop-demo" theme={theme} onThemeChange={setTheme} statusLabel={t("desktop.synthetic")} />;
+
   return <div className="desktop-demo">
-    <DesktopSidebar chat={chat} theme={theme} toggleTheme={() => setTheme((value) => value === "light" ? "dark" : "light")} />
+    <DesktopSidebar chat={chat} />
     <main className="demo-main">
       <header className="demo-titlebar">
-        <span>{screen ? t(screen.label) : chat.title}</span>
+        <span>{chat.title}</span>
         <div className="demo-preview-controls">
           <span className="demo-preview-label">{t("desktop.synthetic")}</span>
           <select aria-label={t("desktop.scenario")} value={chat.scenario} disabled={chat.busy}
-            onChange={(event) => { chat.chooseScenario(event.target.value as DemoScenario); navigate("/desktop-demo"); }}>
+            onChange={(event) => { chat.chooseScenario(event.target.value as DemoScenario); navigate(demoLinkPath("/desktop-demo")); }}>
             {(["ready", "empty", "starting", "offline", "error", "long"] as const).map((state) =>
               <option key={state} value={state}>{t(`desktop.state.${state}`)}</option>)}
           </select>
         </div>
       </header>
       <Suspense fallback={<div className="demo-page-loading" role="status">{t("common.loading")}</div>}>
-        <div className={management ? "demo-admin" : "demo-chat-slot"}>
-          <Routes>
-            <Route index element={<ChatWorkspace chat={chat} />} />
-            {managementScreens.map(({ key, page: Page }) => <Route key={key} path={`manage/${key}`} element={<Page />} />)}
-            <Route path="*" element={<ChatWorkspace chat={chat} />} />
-          </Routes>
-        </div>
+        <div className="demo-chat-slot"><ChatWorkspace chat={chat} /></div>
       </Suspense>
     </main>
   </div>;

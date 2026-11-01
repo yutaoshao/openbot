@@ -1,11 +1,11 @@
 import { Suspense, useEffect, useState } from "react";
 import { QueryClient, QueryClientProvider, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Route, Routes, useLocation, useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { LoaderCircle } from "lucide-react";
 
 import { ChatWorkspace } from "../components/desktop/ChatWorkspace";
 import { DesktopSidebar } from "../components/desktop/DesktopSidebar";
-import { managementScreens } from "../components/desktop/management";
+import { SettingsWorkspace } from "./SettingsWorkspace";
 import { useI18n } from "../i18n";
 import { DesktopSetupForm, useDesktopStatus } from "./DesktopSettings";
 import { DesktopImport } from "./DesktopImport";
@@ -35,7 +35,7 @@ function useDesktopTheme() {
     document.documentElement.setAttribute("data-theme", theme);
     localStorage.setItem("openbot_desktop_theme_v1", theme);
   }, [theme]);
-  return { theme, toggleTheme: () => setTheme((value) => value === "light" ? "dark" : "light") };
+  return { theme, onThemeChange: setTheme };
 }
 
 function ConnectionScreen({ starting, detail, retry }: { starting?: boolean; detail?: string; retry?: () => void }): JSX.Element {
@@ -48,15 +48,14 @@ function ConnectionScreen({ starting, detail, retry }: { starting?: boolean; det
   </div></main>;
 }
 
-type SessionProps = { theme: "light" | "dark"; toggleTheme: () => void; instanceId: string };
+type SessionProps = { theme: "light" | "dark"; onThemeChange: (theme: "light" | "dark") => void; instanceId: string };
 
-function ReadyWorkspace({ theme, toggleTheme, instanceId }: SessionProps): JSX.Element {
+function ReadyWorkspace({ theme, onThemeChange, instanceId }: SessionProps): JSX.Element {
   const { t } = useI18n();
   const chat = useDesktopChat(instanceId);
   const navigate = useNavigate();
   const location = useLocation();
-  const management = location.pathname.includes("/manage/");
-  const screen = managementScreens.find((item) => location.pathname.endsWith(`/manage/${item.key}`));
+  const settingsMode = /^\/desktop\/(?:manage|settings)(?:\/|$)/.test(location.pathname);
   useEffect(() => {
     const keydown = (event: KeyboardEvent) => {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "n" && !chat.busy) {
@@ -66,25 +65,20 @@ function ReadyWorkspace({ theme, toggleTheme, instanceId }: SessionProps): JSX.E
     window.addEventListener("keydown", keydown);
     return () => window.removeEventListener("keydown", keydown);
   }, [chat, navigate]);
+  if (settingsMode) return <SettingsWorkspace basePath="/desktop" theme={theme} onThemeChange={onThemeChange} statusLabel={t("desktopLive.connected")} />;
   return <div className="desktop-demo">
-    <DesktopSidebar chat={chat} theme={theme} toggleTheme={toggleTheme} basePath="/desktop" footer={t("desktopLive.localService")} />
+    <DesktopSidebar chat={chat} basePath="/desktop" />
     <main className="demo-main">
-      <header className="demo-titlebar"><span>{screen ? t(screen.label) : chat.title}</span>
+      <header className="demo-titlebar"><span>{chat.title}</span>
         <span className="demo-preview-label">{t("desktopLive.connected")}</span></header>
       <Suspense fallback={<p role="status">{t("common.loading")}</p>}>
-        <div className={management ? "demo-admin" : "demo-chat-slot"}>
-          <Routes>
-            <Route index element={<ChatWorkspace chat={chat} />} />
-            {managementScreens.map(({ key, page: Page }) => <Route key={key} path={`manage/${key}`} element={<Page />} />)}
-            <Route path="*" element={<ChatWorkspace chat={chat} />} />
-          </Routes>
-        </div>
+        <div className="demo-chat-slot"><ChatWorkspace chat={chat} /></div>
       </Suspense>
     </main>
   </div>;
 }
 
-function SessionContent({ theme, toggleTheme, instanceId }: SessionProps): JSX.Element {
+function SessionContent({ theme, onThemeChange, instanceId }: SessionProps): JSX.Element {
   const { t, language, setLanguage } = useI18n();
   const status = useDesktopStatus();
   if (status.isPending) return <ConnectionScreen starting detail="common.loading" />;
@@ -94,7 +88,7 @@ function SessionContent({ theme, toggleTheme, instanceId }: SessionProps): JSX.E
     <DesktopSetupForm status={status.data} onboarding />
     <DesktopImport busy={status.data.busy} result={status.data.import_result} />
   </main>;
-  return <ReadyWorkspace theme={theme} toggleTheme={toggleTheme} instanceId={instanceId} />;
+  return <ReadyWorkspace theme={theme} onThemeChange={onThemeChange} instanceId={instanceId} />;
 }
 
 function DesktopSession(props: SessionProps): JSX.Element {

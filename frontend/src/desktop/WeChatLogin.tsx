@@ -29,16 +29,21 @@ export function WeChatLogin({ enabled, loggedIn }: { enabled: boolean; loggedIn:
     alive.current = true;
     return () => {
       alive.current = false;
-      if (active(current.current)) void api.del(`/api/desktop/wechat/login/${encodeURIComponent(current.current!.session_id)}`).catch(() => {});
+      if (active(current.current)) void api.del(`/api/desktop/wechat/login/${encodeURIComponent(current.current!.session_id)}`)
+        .then(() => cache.invalidateQueries({ queryKey: ["desktop-services"] })).catch(() => {});
     };
-  }, []);
+  }, [cache]);
   useEffect(() => {
     if (displayed?.status === "confirmed") void cache.invalidateQueries({ queryKey: ["desktop-services"] });
   }, [displayed?.status, cache]);
   const begin = useMutation({
     mutationFn: () => api.post<LoginSession>("/api/desktop/wechat/login", {}),
     onSuccess: (next) => {
-      if (!alive.current) { void api.del(`/api/desktop/wechat/login/${encodeURIComponent(next.session_id)}`).catch(() => {}); return; }
+      if (!alive.current) {
+        void api.del(`/api/desktop/wechat/login/${encodeURIComponent(next.session_id)}`)
+          .then(() => cache.invalidateQueries({ queryKey: ["desktop-services"] })).catch(() => {});
+        return;
+      }
       setSession(next);
     },
   });

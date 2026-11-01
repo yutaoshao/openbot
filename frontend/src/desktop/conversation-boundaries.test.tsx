@@ -34,7 +34,7 @@ function DesktopHarness(): JSX.Element {
   return <>
     <button onClick={() => setManagement(true)}>Open conversation management</button><button onClick={() => setManagement(false)}>Back to chat</button>
     <output data-testid="selection">{chat.selectedId ?? "new"}</output>
-    <DesktopSidebar chat={chat} theme="light" toggleTheme={() => {}} basePath="/desktop" />
+    <DesktopSidebar chat={chat} basePath="/desktop" />
     {management ? <div data-testid="management-view"><ConversationsPage /></div> : <ChatWorkspace chat={chat} />}
   </>;
 }
@@ -61,7 +61,7 @@ afterEach(() => { cleanup(); vi.clearAllMocks(); localStorage.clear(); sessionSt
 describe("desktop conversation boundaries", () => {
   it("keeps the sidebar's 100 rows separate from the management page's 20 rows on refresh", async () => {
     const { client, Wrapper } = setup();
-    render(<Wrapper><DesktopSidebar chat={emptyChat} theme="light" toggleTheme={() => {}} basePath="/desktop" /><ConversationsPage /></Wrapper>);
+    render(<Wrapper><DesktopSidebar chat={emptyChat} basePath="/desktop" /><ConversationsPage /></Wrapper>);
     await waitFor(() => {
       expect(client.getQueryData(["conversations", "desktop-sidebar", ""])).toHaveLength(100);
       expect(client.getQueryData(["conversations", ""])).toHaveLength(20);
