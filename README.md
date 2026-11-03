@@ -248,6 +248,12 @@ and Web business logic. Its neutral interface accepts a model provider, endpoint
 model name and API key, plus a shared working directory. Configuration, conversations,
 memory, file snapshots and runtime logs stay in a separate application data directory.
 
+Chat replies support Chinese Markdown, tables with content-based column widths,
+and code blocks with a language label and a top-right copy button.
+Copying preserves the source text, indentation and line breaks; it is disabled
+during generation and reports failures. Chat, sidebars and settings share thin
+scrollbars, and external links retain a confirmation step before opening.
+
 Closing the window keeps the service running; the menu bar can reopen it or quit.
 Login startup defaults to off. Shell/Python require explicit authorization shared by
 desktop, Web, channels and scheduled work. They use the current user's permissions;

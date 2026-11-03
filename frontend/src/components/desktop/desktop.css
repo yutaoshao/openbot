@@ -3,6 +3,7 @@
 @import "tailwindcss/utilities.css" layer(utilities);
 @import "@fontsource-variable/geist";
 @import "@fontsource-variable/geist-mono";
+@import "./reading.css";
 @source "../../../node_modules/streamdown/dist/*.js";
 
 @theme inline {
@@ -90,12 +91,7 @@ html[data-desktop] body { background: var(--surface); }
 .demo-message-assistant p { margin: 0 0 14px; }
 .demo-message-assistant :is(h1, h2, h3) { margin: 24px 0 12px; font-size: 16px; font-weight: 600; }
 .demo-message-assistant :is(ol, ul) { padding-left: 22px; list-style: revert; }
-.demo-message-assistant pre { max-width: 100%; overflow-x: auto; padding: 16px; border: 1px solid var(--border); border-radius: 8px; background: var(--terminal); color: var(--terminal-text); font-family: var(--font-mono); font-size: 12px; line-height: 1.75; }
 .demo-message-assistant code { font-family: var(--font-mono); font-size: .9em; }
-.demo-message-assistant table { display: block; max-width: 100%; overflow-x: auto; margin: 18px 0; border-collapse: collapse; font-size: 12px; }
-.demo-message-assistant :is(th, td) { min-width: 118px; padding: 10px 14px; border-bottom: 1px solid var(--border); text-align: left; }
-.demo-message-assistant th { font-weight: 500; }
-.demo-message-assistant a { text-decoration: underline; text-underline-offset: 3px; }
 .demo-composer-dock { flex: none; padding: 8px 32px 15px; }
 .demo-composer { display: flex; align-items: flex-end; gap: 12px; width: min(760px, 100%); margin: 0 auto; padding: 10px 10px 10px 16px; border: 1px solid var(--border-strong); border-radius: 18px; background: var(--surface); box-shadow: 0 1px 4px rgb(0 0 0 / .08); }
 .demo-composer-textarea { flex: 1; min-height: 26px; max-height: 180px; width: 100%; padding: 2px 0; border: 0; outline: none; box-shadow: none; resize: none; color: var(--text); font-size: 13px; line-height: 24px; }

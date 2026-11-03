@@ -5,6 +5,7 @@ import { useI18n } from "../i18n";
 import { api } from "../lib/api";
 import { recordDemoTurn } from "./backend";
 import type { DemoDetail, DemoPhase, DemoScenario } from "./chat-types";
+import { markdownReply } from "./markdown-fixture";
 
 type SimulatedRun = {
   controller: AbortController;
@@ -29,7 +30,8 @@ function waitForFrame(signal: AbortSignal, delay: number): Promise<void> {
 export function useDemoChat() {
   const { t } = useI18n();
   const cache = useQueryClient();
-  const [selectedId, setSelectedId] = useState<string | null>("demo-weekly");
+  const [selectedId, setSelectedId] = useState<string | null>(() =>
+    new URLSearchParams(window.location.search).get("preview") === "markdown" ? "demo-markdown" : "demo-weekly");
   const [scenario, setScenario] = useState<DemoScenario>("ready");
   const [phase, setPhase] = useState<DemoPhase>("idle");
   const [pendingInput, setPendingInput] = useState("");
@@ -90,7 +92,7 @@ export function useDemoChat() {
     setPendingInput(input);
     setOutput("");
     setPhase("tool");
-    const reply = t(scenario === "long" ? "desktop.longReply" : "desktop.reply");
+    const reply = selectedId === "demo-markdown" ? markdownReply : t(scenario === "long" ? "desktop.longReply" : "desktop.reply");
     try {
       await waitForFrame(run.controller.signal, 850);
       setPhase("streaming");

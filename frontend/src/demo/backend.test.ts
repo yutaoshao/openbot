@@ -83,7 +83,7 @@ describe("isolated Demo backend", () => {
     expect(await demoRequest("/api/conversations?q=" + encodeURIComponent("周报"))).toHaveLength(1);
     await demoRequest("/api/conversations/demo-weekly", { method: "DELETE" });
     await expect(demoRequest("/api/conversations/demo-weekly")).rejects.toThrow("404");
-    expect(await demoRequest("/api/conversations")).toHaveLength(2);
+    expect(await demoRequest("/api/conversations")).toHaveLength(3);
   });
 
   it("shares simulated chat turns with history and keeps known fixtures after reset", async () => {

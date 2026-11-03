@@ -1,4 +1,5 @@
 import type { Settings } from "../lib/settings-view";
+import { markdownReply } from "./markdown-fixture";
 
 export type DemoEntity = Record<string, unknown> & { id: string };
 export type DemoProfile = { name: string; content: string; revision: string };
@@ -20,11 +21,16 @@ export function createDemoFixtures() {
     restart_required: false, restart_reasons: [],
   };
   const conversations: DemoEntity[] = [
+    { id: "demo-markdown", title: "中文排版与参考链接", summary: "加粗、链接及流式输出的虚构样例。", platform: "web", updated_at: now, message_count: 2 },
     { id: "demo-design", title: "青禾设计周", summary: "整理活动介绍与准备事项。", platform: "web", updated_at: now, message_count: 4 },
     { id: "demo-weekly", title: "周报整理", summary: "将本周事项整理成简短周报。", platform: "web", updated_at: "2026-10-28T14:00:00Z", message_count: 2 },
     { id: "demo-notes", title: "阅读笔记", summary: "从笔记中提取下一步行动。", platform: "telegram", updated_at: "2026-10-27T08:00:00Z", message_count: 2 },
   ];
   const messages: Record<string, DemoEntity[]> = {
+    "demo-markdown": [
+      { id: "markdown-u1", role: "user", content: "迪卡侬那么多款，哪些更适合我？", created_at: now },
+      { id: "markdown-a1", role: "assistant", content: markdownReply, created_at: now },
+    ],
     "demo-design": [
       { id: "design-u1", role: "user", content: "帮我写一段青禾设计周的活动介绍，简洁一点。", created_at: now },
       { id: "design-a1", role: "assistant", content: "青禾设计周，和有想法的人一起，把日常重新设计。\n\n从一场分享、一件作品开始，发现更好的生活方式。", created_at: now },

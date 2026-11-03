@@ -40,7 +40,7 @@ describe("Demo turn lifecycle", () => {
     expect(result.current.busy).toBe(false);
     expect(result.current.failure).toBeTruthy();
     const after = await demoRequest<unknown[]>("/api/conversations");
-    expect(after).toHaveLength(2);
+    expect(after).toHaveLength(3);
 
     act(() => { result.current.selectConversation(null); });
     let second: Promise<void>;
@@ -49,8 +49,8 @@ describe("Demo turn lifecycle", () => {
     await act(async () => { result.current.stop(); await second!; });
     expect(result.current.busy).toBe(false);
     const rows = await demoRequest<Array<{ id: string }>>("/api/conversations");
-    expect(rows).toHaveLength(3);
-    const created = rows.find((row) => !["demo-design", "demo-notes"].includes(row.id));
+    expect(rows).toHaveLength(4);
+    const created = rows.find((row) => !["demo-design", "demo-notes", "demo-markdown"].includes(row.id));
     const detail = await demoRequest<{ messages: unknown[] }>(`/api/conversations/${created?.id}`);
     expect(detail.messages).toHaveLength(2);
     expect(fetch).not.toHaveBeenCalled();

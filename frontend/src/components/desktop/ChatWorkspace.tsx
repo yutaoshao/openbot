@@ -1,10 +1,10 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { ArrowDown, ChevronDown, FileSearch, LoaderCircle, RotateCcw } from "lucide-react";
-import { Streamdown } from "streamdown";
 
 import { useI18n } from "../../i18n";
 import { Button } from "../ui/button";
 import { ChatComposer } from "./ChatComposer";
+import { ChatMarkdown } from "./ChatMarkdown";
 import type { ChatViewModel } from "./chat-view";
 
 export function ChatWorkspace({ chat }: { chat: ChatViewModel }): JSX.Element {
@@ -74,7 +74,7 @@ export function ChatWorkspace({ chat }: { chat: ChatViewModel }): JSX.Element {
             {chat.messages.map((message) => <article key={message.id}
               className={`demo-message demo-message-${message.role}`} aria-label={t(`chat.role.${message.role}`)}>
               {message.role === "user" ? <p>{message.content}</p> :
-                <Streamdown mode="static" controls={false}>{message.content}</Streamdown>}
+                <ChatMarkdown mode="static">{message.content}</ChatMarkdown>}
               {message.outcome && <p className="demo-stopped" role="status">{t(message.outcome === "cancelled" ? "desktopLive.historyStopped" : "desktopLive.historyIncomplete")}</p>}
             </article>)}
             {chat.pendingInput && <article className="demo-message demo-message-user"><p>{chat.pendingInput}</p></article>}
@@ -86,7 +86,7 @@ export function ChatWorkspace({ chat }: { chat: ChatViewModel }): JSX.Element {
               </button>
               {toolOpen && <p className="demo-tool-detail">{chat.toolDetail ?? t("desktop.toolDetail")}</p>}
               {chat.output && <div className="demo-message demo-message-assistant">
-                <Streamdown mode="streaming" isAnimating controls={false}>{chat.output}</Streamdown>
+                <ChatMarkdown mode="streaming" isAnimating>{chat.output}</ChatMarkdown>
               </div>}
             </div>}
             {!chat.busy && chat.stopped && <p className="demo-stopped" role="status">{chat.stoppedDetail ?? t("desktop.stopped")}</p>}
