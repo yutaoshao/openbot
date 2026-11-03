@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useI18n } from "../i18n";
 import { api, type JsonValue } from "../lib/api";
+import { useSettingsDraft } from "./SettingsDrafts";
 import { ChannelServices, RetrievalServices } from "./ChannelServices";
 import { ModelServices } from "./ModelServices";
 import { SecretField, ServiceGroup } from "./ServiceFields";
@@ -22,28 +23,31 @@ function ServicesEditor({ snapshot, busy }: { snapshot: ServicesSnapshot; busy: 
   const { t } = useI18n();
   const cache = useQueryClient();
   const [configuration, setConfiguration] = useState(snapshot.configuration);
+  const [saved, setSaved] = useState(snapshot.configuration);
   const [secrets, setSecrets] = useState<SecretDraft>({ values: {}, cleared: [] });
   const [restarting, setRestarting] = useState(false);
   const [invalid, setInvalid] = useState(false);
   const save = useMutation({
-    mutationFn: () => api.put<{ requires_restart: boolean }>("/api/desktop/services", {
-      configuration: configuration as unknown as JsonValue,
-      secrets: Object.fromEntries(Object.entries(secrets.values).filter(([, value]) => value.trim())),
-      clear_secrets: secrets.cleared,
+    mutationFn: (submitted: { configuration: typeof configuration; secrets: SecretDraft }) => api.put<{ requires_restart: boolean }>("/api/desktop/services", {
+      configuration: submitted.configuration as unknown as JsonValue,
+      secrets: Object.fromEntries(Object.entries(submitted.secrets.values).filter(([, value]) => value.trim())),
+      clear_secrets: submitted.secrets.cleared,
     }),
-    onSuccess: (result) => {
+    onSuccess: (result, submitted) => {
+      setSaved(submitted.configuration);
       setSecrets({ values: {}, cleared: [] }); setRestarting(result.requires_restart);
       if (!result.requires_restart) void cache.invalidateQueries({ queryKey: ["desktop-services"] });
     },
   });
-  const changed = JSON.stringify(configuration) !== JSON.stringify(snapshot.configuration)
+  const changed = JSON.stringify(configuration) !== JSON.stringify(saved)
     || secrets.cleared.length > 0 || Object.values(secrets.values).some((v) => v.trim());
+  useSettingsDraft(Boolean(changed), save.isPending);
   return <form className="desktop-services-form" onInvalidCapture={(event) => {
     let container = (event.target as HTMLElement).closest("details");
     while (container) { container.open = true; container = container.parentElement?.closest("details") ?? null; }
     setInvalid(true);
   }} onInputCapture={() => setInvalid(false)} onSubmit={(event) => {
-    event.preventDefault(); if (!save.isPending && !restarting && !busy && changed) save.mutate();
+    event.preventDefault(); if (!save.isPending && !restarting && !busy && changed) save.mutate({ configuration, secrets });
   }}>
     <fieldset disabled={save.isPending || restarting} className="desktop-service-editor">
       <details className="desktop-settings-details" open>

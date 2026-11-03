@@ -1,4 +1,4 @@
-import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { BrowserRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
@@ -91,7 +91,7 @@ it("keeps native navigation and the selected conversation when returning from se
     expect(link.getAttribute("href")).not.toContain("desktop-demo");
   }
   expect(api.get).toHaveBeenCalledWith("/api/desktop/status");
-  await user.click(screen.getByRole("link", { name: "Back to chat" }));
+  await user.click(screen.getByRole("button", { name: "Close" }));
   expect(window.location.pathname).toBe("/desktop");
   expect(await screen.findByRole("button", { name: "Native history" })).toHaveAttribute("aria-current", "page");
   expect(localStorage.getItem("openbot_desktop_selection_v1")).toBe("native-history");
@@ -206,4 +206,91 @@ it.each(["1e3", "0x10"])("uses the interface-language error for unsupported nume
   expect(ids.validationMessage).toBe("Enter valid positive integer user IDs separated by commas.");
   await user.click(screen.getByRole("button", { name: "Save and restart service" }));
   expect(api.put).not.toHaveBeenCalled();
+});
+
+it("clears the close warning when connection edits are reverted or saved", async () => {
+  const user = renderDesktop("/desktop/settings/connection");
+  const model = await screen.findByRole("textbox", { name: "Model name" });
+  fireEvent.change(model, { target: { value: "changed" } });
+  fireEvent.change(model, { target: { value: "native-initial-model" } });
+  await user.click(screen.getByRole("button", { name: "Close" }));
+  expect(window.location.pathname).toBe("/desktop");
+  await user.click(screen.getByRole("link", { name: "Settings" }));
+  await user.click(category("Connection"));
+  fireEvent.change(await screen.findByRole("textbox", { name: "Model name" }), { target: { value: "saved-model" } });
+  vi.mocked(api.post).mockResolvedValueOnce({ requires_restart: false });
+  await user.click(screen.getByRole("button", { name: "Save and restart service" }));
+  await waitFor(() => expect(screen.getByRole("textbox", { name: "Model name" })).toBeEnabled());
+  await user.click(screen.getByRole("button", { name: "Close" }));
+  expect(window.location.pathname).toBe("/desktop");
+  expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+});
+
+it("retains a failed connection save, asks before discarding, and blocks close during a pending save", async () => {
+  const user = renderDesktop("/desktop/settings/connection");
+  const model = await screen.findByRole("textbox", { name: "Model name" });
+  fireEvent.change(model, { target: { value: "failed-model" } });
+  vi.mocked(api.post).mockRejectedValueOnce(new Error("synthetic save failure"));
+  await user.click(screen.getByRole("button", { name: "Save and restart service" }));
+  expect(await screen.findByRole("alert")).toHaveTextContent("synthetic save failure");
+  await user.click(screen.getByRole("button", { name: "Close" }));
+  expect(screen.getByRole("dialog", { name: "Unsaved configuration changes" })).toBeInTheDocument();
+  await user.click(screen.getByRole("button", { name: "Keep editing" }));
+  expect(model).toHaveValue("failed-model");
+  let finish!: (value: { requires_restart: boolean }) => void;
+  vi.mocked(api.post).mockReturnValueOnce(new Promise((resolve) => { finish = resolve; }));
+  await user.click(screen.getByRole("button", { name: "Save and restart service" }));
+  expect(screen.getByRole("button", { name: "Close" })).toBeDisabled();
+  fireEvent(screen.getByRole("dialog", { name: "Settings" }), new Event("cancel", { cancelable: true }));
+  expect(window.location.pathname).toBe("/desktop/settings/connection");
+  finish({ requires_restart: false });
+  await waitFor(() => expect(screen.getByRole("button", { name: "Close" })).toBeEnabled());
+  await user.click(screen.getByRole("button", { name: "Close" }));
+  expect(window.location.pathname).toBe("/desktop");
+});
+
+it("tracks invalid Telegram drafts even when they never reach the configuration object", async () => {
+  const user = renderDesktop("/desktop/settings/services");
+  const ids = await screen.findByRole("textbox", { name: /Allowed Telegram user IDs/ });
+  const original = (ids as HTMLInputElement).value;
+  fireEvent.change(ids, { target: { value: "invalid" } });
+  await user.click(screen.getByRole("button", { name: "Close" }));
+  await user.click(screen.getByRole("button", { name: "Keep editing" }));
+  expect(ids).toHaveValue("invalid");
+  fireEvent.change(ids, { target: { value: original } });
+  await user.click(screen.getByRole("button", { name: "Close" }));
+  expect(window.location.pathname).toBe("/desktop");
+});
+
+it("keeps secret drafts after a failed save and clears the warning after a successful save", async () => {
+  const user = renderDesktop("/desktop/settings/services");
+  const secret = await screen.findByLabelText("Telegram Bot Token");
+  await user.click(screen.getByText("Secrets", { selector: "summary" }));
+  fireEvent.change(secret, { target: { value: "synthetic-secret" } });
+  vi.mocked(api.put).mockRejectedValueOnce(new Error("synthetic secret failure"));
+  await user.click(screen.getByRole("button", { name: "Save and restart service" }));
+  expect(await screen.findByRole("alert")).toHaveTextContent("synthetic secret failure");
+  await user.click(screen.getByRole("button", { name: "Close" }));
+  await user.click(screen.getByRole("button", { name: "Keep editing" }));
+  expect(secret).toHaveValue("synthetic-secret");
+  vi.mocked(api.put).mockResolvedValueOnce({ requires_restart: false });
+  await user.click(screen.getByRole("button", { name: "Save and restart service" }));
+  await waitFor(() => expect(secret).toHaveValue(""));
+  await user.click(screen.getByRole("button", { name: "Close" }));
+  expect(window.location.pathname).toBe("/desktop");
+});
+
+it("closes without a warning after immediate preferences and cancels an active QR login on close", async () => {
+  const user = renderDesktop("/desktop/settings/appearance");
+  await user.click(await screen.findByRole("radio", { name: "Dark" }));
+  await user.click(category("General"));
+  await user.selectOptions(screen.getByRole("combobox", { name: "Language" }), "zh-CN");
+  await user.click(screen.getByRole("button", { name: "关闭" }));
+  expect(window.location.pathname).toBe("/desktop");
+  await user.click(screen.getByRole("link", { name: "设置" }));
+  await user.click(screen.getByRole("link", { name: "模型与渠道" }));
+  await user.click(await screen.findByRole("button", { name: "获取登录二维码" }));
+  await user.click(screen.getByRole("button", { name: "关闭" }));
+  await waitFor(() => expect(api.del).toHaveBeenCalledWith("/api/desktop/wechat/login/native-login"));
+  expect(window.location.pathname).toBe("/desktop");
 });

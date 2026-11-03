@@ -1,0 +1,39 @@
+.desktop-settings-modal {
+  width: min(1100px, calc(100vw - 48px));
+  height: min(800px, 88dvh);
+  max-width: none;
+  max-height: calc(100dvh - 48px);
+  margin: auto;
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: 0 12px 48px #0002;
+}
+.desktop-settings-modal[open] { display: flex; flex-direction: column; }
+.desktop-settings-modal::backdrop { background: #0005; }
+.desktop-settings-header { display: flex; flex: none; align-items: center; justify-content: space-between; height: 48px; padding: 0 16px; border-bottom: 1px solid var(--border); }
+.desktop-settings-header h1 { margin: 0; font-size: 14px; font-weight: 600; }
+.desktop-settings-close { display: grid; place-items: center; width: 32px; height: 32px; padding: 0; border: 0; border-radius: 6px; background: transparent; color: var(--text-muted); cursor: pointer; }
+.desktop-settings-close:hover { background: var(--surface-subtle); color: var(--text); }
+.desktop-settings-close:focus-visible { outline: 2px solid var(--text-muted); outline-offset: 2px; }
+.desktop-settings-modal .desktop-preferences-search { min-height: 32px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); }
+.desktop-settings-modal .desktop-preferences-content { padding: 20px 28px 40px; }
+.desktop-settings-modal .desktop-preferences-status { margin-bottom: 16px; }
+.desktop-settings-modal .desktop-preferences-page-body .desktop-preference-page > .page-header { margin-bottom: 24px; }
+.desktop-settings-modal .page-title { font-size: 22px; }
+.desktop-settings-modal .page-subtitle { margin-top: 8px; font-size: 13px; }
+.desktop-settings-modal .desktop-preference-sections { gap: 24px; }
+.desktop-settings-modal .desktop-preference-group { padding: 0; border: 0; border-radius: 0; }
+.desktop-settings-modal .desktop-preference-group .desktop-preference-row { padding: 16px 0; }
+.desktop-settings-modal .desktop-preferences-content .surface-panel { padding: 16px; }
+.desktop-settings-modal .desktop-preference-value-link { max-width: 280px; }
+
+.desktop-settings-close:disabled { opacity: .4; cursor: default; }
+.desktop-discard-dialog { width: min(420px, calc(100vw - 64px)); padding: 24px; margin: auto; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); color: var(--text); box-shadow: 0 12px 48px #0002; }
+.desktop-discard-dialog::backdrop { background: #0003; }
+.desktop-discard-dialog h2 { margin: 0 0 12px; font-size: 16px; }
+.desktop-discard-dialog p { margin: 0; font-size: 13px; color: var(--text-muted); }
+.desktop-discard-actions { display: flex; justify-content: flex-end; gap: 12px; margin-top: 24px; }

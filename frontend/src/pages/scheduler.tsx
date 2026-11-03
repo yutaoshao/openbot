@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { useI18n } from "../i18n";
+import { useSettingsDraft } from "../desktop/SettingsDrafts";
 import { api } from "../lib/api";
 
 type Schedule = {
@@ -39,6 +40,8 @@ export function SchedulerPage(): JSX.Element {
   const [editName, setEditName] = useState("");
   const [editPrompt, setEditPrompt] = useState("");
   const [editCron, setEditCron] = useState("");
+  const [editingOriginal, setEditingOriginal] = useState<Schedule | null>(null);
+  const [savedCreate, setSavedCreate] = useState<{ name: string; prompt: string; cron: string } | null>(null);
   const qc = useQueryClient();
 
   useEffect(() => {
@@ -46,6 +49,11 @@ export function SchedulerPage(): JSX.Element {
     setName((current) => (current === previousDefaults.name ? defaults.name : current));
     setPrompt((current) => (current === previousDefaults.prompt ? defaults.prompt : current));
     setCron((current) => (current === previousDefaults.cron ? defaults.cron : current));
+    setSavedCreate((saved) => saved ? {
+      name: saved.name === previousDefaults.name ? defaults.name : saved.name,
+      prompt: saved.prompt === previousDefaults.prompt ? defaults.prompt : saved.prompt,
+      cron: saved.cron === previousDefaults.cron ? defaults.cron : saved.cron,
+    } : null);
     previousDefaultsRef.current = defaults;
   }, [defaults]);
 
@@ -55,8 +63,9 @@ export function SchedulerPage(): JSX.Element {
   });
 
   const create = useMutation({
-    mutationFn: () => api.post<Schedule>("/api/schedules", { name, prompt, cron, status: "active" }),
-    onSuccess: () => {
+    mutationFn: (submitted: typeof defaults) => api.post<Schedule>("/api/schedules", { ...submitted, status: "active" }),
+    onSuccess: (_result, submitted) => {
+      setSavedCreate(submitted);
       void qc.invalidateQueries({ queryKey: ["schedules"] });
     },
   });
@@ -77,6 +86,10 @@ export function SchedulerPage(): JSX.Element {
     },
   });
 
+  const baseline = savedCreate ?? defaults;
+  const createDirty = name !== baseline.name || prompt !== baseline.prompt || cron !== baseline.cron;
+  const editDirty = Boolean(editingId && editingOriginal && (editName !== editingOriginal.name || editPrompt !== editingOriginal.prompt || editCron !== editingOriginal.cron));
+  useSettingsDraft(createDirty || editDirty, create.isPending || update.isPending || remove.isPending);
   const schedules = list.data ?? [];
   const statusLabel = (status: string) => (
     status === "active" || status === "paused" ? t(`scheduler.status.${status}`) : status
@@ -109,7 +122,7 @@ export function SchedulerPage(): JSX.Element {
             <label className="field-label">{t("scheduler.cron")}</label>
             <input className="input mono" value={cron} onChange={(event) => setCron(event.target.value)} />
           </div>
-          <button className="btn" type="button" onClick={() => create.mutate()}>
+          <button className="btn" type="button" onClick={() => create.mutate({ name, prompt, cron })} disabled={create.isPending}>
             {t("scheduler.create")}
           </button>
         </section>
@@ -189,6 +202,7 @@ export function SchedulerPage(): JSX.Element {
                               className="btn ghost"
                               type="button"
                               onClick={() => {
+                                setEditingOriginal(item);
                                 setEditingId(item.id);
                                 setEditName(item.name);
                                 setEditPrompt(item.prompt);

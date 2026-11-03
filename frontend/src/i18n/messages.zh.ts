@@ -259,6 +259,8 @@ export const zhMessages: MessageDictionary = {
   "settings.secretMissingBadge": "缺失",
   "settings.envManaged": "通过 {env} 管理",
   "settings.localDraftSaved": "所有修改都已同步到本地草稿",
+  "desktop.preferences.discardHint": "关闭设置将放弃尚未保存的修改。",
+  "desktop.preferences.keepEditing": "继续编辑",
   "settings.unsavedChanges": "存在未保存的配置修改",
   "settings.savedToConfig": "已保存的设置与 config.yaml 一致",
   "settings.localOnly": "管理访问范围",

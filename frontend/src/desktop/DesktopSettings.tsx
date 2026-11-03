@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { useI18n } from "../i18n";
 import { api } from "../lib/api";
+import { useSettingsDraft } from "./SettingsDrafts";
 import { ExecutionPermissions } from "./ExecutionPermissions";
 import { DesktopImport } from "./DesktopImport";
 import { DesktopServices } from "./DesktopServices";
@@ -49,22 +50,25 @@ export function DesktopSetupForm({ status, onboarding = false }: { status: Deskt
   const [apiKey, setApiKey] = useState("");
   const [workDir, setWorkDir] = useState(status.work_dir);
   const [restartPending, setRestartPending] = useState(false);
+  const draft = { provider, baseUrl, model, workDir };
+  const [saved, setSaved] = useState(draft);
   const picker = useMutation({
     mutationFn: () => desktopInvoke<string | null>("desktop_choose_directory"),
     onSuccess: (path) => { if (path) setWorkDir(path); },
   });
   const save = useMutation({
-    mutationFn: () => api.post<{ requires_restart: boolean }>("/api/desktop/setup", {
-      model: { provider, base_url: baseUrl.trim(), model: model.trim(), ...(apiKey.trim() ? { api_key: apiKey.trim() } : {}) },
-      work_dir: workDir.trim(),
+    mutationFn: (submitted: typeof draft & { apiKey: string }) => api.post<{ requires_restart: boolean }>("/api/desktop/setup", {
+      model: { provider: submitted.provider, base_url: submitted.baseUrl.trim(), model: submitted.model.trim(), ...(submitted.apiKey.trim() ? { api_key: submitted.apiKey.trim() } : {}) },
+      work_dir: submitted.workDir.trim(),
     }),
-    onSuccess: (response) => { setApiKey(""); setRestartPending(response.requires_restart); },
+    onSuccess: (response, { apiKey: _apiKey, ...submitted }) => { setSaved(submitted); setApiKey(""); setRestartPending(response.requires_restart); },
   });
+  useSettingsDraft(JSON.stringify(draft) !== JSON.stringify(saved) || Boolean(apiKey.trim()), save.isPending || picker.isPending);
   return <section className="surface-panel settings-section desktop-setup" id="connection">
     <h2>{t(onboarding ? "desktopLive.setupTitle" : "desktopLive.connectionSettings")}</h2>
     <p className="field-help">{t("desktopLive.setupHint")}</p>
-    <form onSubmit={(event) => { event.preventDefault(); if (!save.isPending && !restartPending) save.mutate(); }}>
-      <div className="settings-grid">
+    <form onSubmit={(event) => { event.preventDefault(); if (!save.isPending && !restartPending && !status.busy && !picker.isPending) save.mutate({ ...draft, apiKey }); }}>
+      <fieldset className="desktop-service-editor" disabled={save.isPending || restartPending}><div className="settings-grid">
         <label className="field-card"><span className="field-label">{t("desktopLive.provider")}</span>
           <select className="select" value={provider} onChange={(event) => setProvider(event.target.value as DesktopStatus["model"]["provider"])}>
             <option value="openai_compatible">OpenAI {t("desktopLive.compatible")}</option>
@@ -84,6 +88,7 @@ export function DesktopSetupForm({ status, onboarding = false }: { status: Deskt
             <button className="btn secondary" type="button" disabled={picker.isPending || !window.__TAURI_INTERNALS__} onClick={() => picker.mutate()}>{t("desktopLive.chooseDirectory")}</button></div>
           <p className="field-help">{t("desktopLive.workDirHint")}</p></label>
       </div>
+      </fieldset>
       <p className="field-help desktop-data-path">{t("desktopLive.dataDir")}: <span className="mono">{status.data_dir}</span></p>
       {save.error && <p role="alert">{save.error.message}</p>}
       {picker.error && <p role="alert">{t("desktopLive.directoryError")}</p>}

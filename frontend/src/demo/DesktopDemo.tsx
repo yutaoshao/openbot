@@ -6,10 +6,11 @@ import { useI18n } from "../i18n";
 import { ChatWorkspace } from "../components/desktop/ChatWorkspace";
 import { DesktopSidebar } from "../components/desktop/DesktopSidebar";
 import { useDemoChat } from "./use-demo-chat";
-import { SettingsWorkspace } from "../desktop/SettingsWorkspace";
+import { SettingsModal } from "../desktop/SettingsModal";
 import { demoLinkPath } from "./location";
 import type { DemoScenario } from "./chat-types";
 import "../components/desktop/desktop.css";
+
 
 function DemoWorkspace(): JSX.Element {
   const { t } = useI18n();
@@ -35,19 +36,17 @@ function DemoWorkspace(): JSX.Element {
 
   useEffect(() => {
     const handleKey = (event: KeyboardEvent) => {
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "n" && !chat.busy) {
+      if (!settingsMode && (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "n" && !chat.busy) {
         event.preventDefault(); chat.selectConversation(null); navigate(demoLinkPath("/desktop-demo"));
       }
     };
     window.addEventListener("keydown", handleKey);
     return () => window.removeEventListener("keydown", handleKey);
-  }, [chat, navigate]);
-
-  if (settingsMode) return <SettingsWorkspace basePath="/desktop-demo" theme={theme} onThemeChange={setTheme} statusLabel={t("desktop.synthetic")} />;
+  }, [chat, navigate, settingsMode]);
 
   return <div className="desktop-demo">
-    <DesktopSidebar chat={chat} />
-    <main className="demo-main">
+    <div style={{ display: "contents" }} aria-hidden={settingsMode || undefined}><DesktopSidebar chat={chat} /></div>
+    <main className="demo-main" aria-hidden={settingsMode || undefined}>
       <header className="demo-titlebar">
         <span>{chat.title}</span>
         <div className="demo-preview-controls">
@@ -63,6 +62,7 @@ function DemoWorkspace(): JSX.Element {
         <div className="demo-chat-slot"><ChatWorkspace chat={chat} /></div>
       </Suspense>
     </main>
+    {settingsMode && <SettingsModal basePath="/desktop-demo" theme={theme} onThemeChange={setTheme} statusLabel={t("desktop.synthetic")} />}
   </div>;
 }
 

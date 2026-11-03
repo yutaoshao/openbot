@@ -259,6 +259,8 @@ export const enMessages: MessageDictionary = {
   "settings.secretMissingBadge": "Missing",
   "settings.envManaged": "Managed via {env}",
   "settings.localDraftSaved": "All changes synced to local draft",
+  "desktop.preferences.discardHint": "Unsaved changes will be discarded when you close settings.",
+  "desktop.preferences.keepEditing": "Keep editing",
   "settings.unsavedChanges": "Unsaved configuration changes",
   "settings.savedToConfig": "Saved settings match config.yaml",
   "settings.localOnly": "Management access",

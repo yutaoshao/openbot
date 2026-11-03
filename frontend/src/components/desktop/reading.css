@@ -1,48 +1,32 @@
 html[data-desktop] {
-  --desktop-scrollbar-thumb: color-mix(in srgb, var(--text-muted) 80%, transparent);
-  --desktop-scrollbar-active: var(--text-muted);
+  --desktop-scrollbar-thumb: color-mix(in srgb, var(--text-muted) 30%, transparent);
+  --desktop-scrollbar-active: color-mix(in srgb, var(--text-muted) 65%, transparent);
 }
-
-html[data-desktop],
-html[data-desktop] * {
+html[data-desktop], html[data-desktop] * {
   scrollbar-width: thin;
   scrollbar-color: var(--desktop-scrollbar-thumb) transparent;
 }
-
-html[data-desktop] :is(:hover, :focus-within) {
-  scrollbar-color: var(--desktop-scrollbar-active) transparent;
-}
-
-html[data-desktop]::-webkit-scrollbar,
-html[data-desktop] ::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
-}
-
-html[data-desktop]::-webkit-scrollbar-track,
-html[data-desktop] ::-webkit-scrollbar-track,
-html[data-desktop] ::-webkit-scrollbar-corner {
-  background: transparent;
-}
-
-html[data-desktop]::-webkit-scrollbar-thumb,
-html[data-desktop] ::-webkit-scrollbar-thumb {
-  border-radius: 6px;
+html[data-desktop]::-webkit-scrollbar, html[data-desktop] ::-webkit-scrollbar { width: 8px; height: 8px; }
+html[data-desktop]::-webkit-scrollbar-track, html[data-desktop] ::-webkit-scrollbar-track,
+html[data-desktop] ::-webkit-scrollbar-corner { background: transparent; }
+html[data-desktop]::-webkit-scrollbar-thumb, html[data-desktop] ::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: 8px;
   background: var(--desktop-scrollbar-thumb);
+  background-clip: padding-box;
 }
-
-html[data-desktop] ::-webkit-scrollbar-thumb:hover,
-html[data-desktop] :focus-within::-webkit-scrollbar-thumb {
+html[data-desktop]::-webkit-scrollbar-thumb:hover, html[data-desktop] ::-webkit-scrollbar-thumb:hover {
   background: var(--desktop-scrollbar-active);
+  background-clip: padding-box;
 }
-
+html[data-desktop] .demo-history { padding-right: 8px; }
+@supports selector(::-webkit-scrollbar) {
+  html[data-desktop], html[data-desktop] * { scrollbar-width: auto; scrollbar-color: auto; }
+}
 @media (forced-colors: active) {
-  html[data-desktop], html[data-desktop] *,
-  html[data-desktop] :is(:hover, :focus-within) { scrollbar-color: auto; }
-  html[data-desktop]::-webkit-scrollbar-thumb,
-  html[data-desktop] ::-webkit-scrollbar-thumb,
-  html[data-desktop] ::-webkit-scrollbar-thumb:hover,
-  html[data-desktop] :focus-within::-webkit-scrollbar-thumb { background: CanvasText; }
+  html[data-desktop], html[data-desktop] * { scrollbar-color: auto; }
+  html[data-desktop]::-webkit-scrollbar-thumb, html[data-desktop] ::-webkit-scrollbar-thumb,
+  html[data-desktop] ::-webkit-scrollbar-thumb:hover { background: CanvasText; background-clip: padding-box; }
 }
 
 @layer base {

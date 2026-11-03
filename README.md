@@ -264,11 +264,12 @@ Use the application's browser-console action to open its own local Web instance.
 Browser credentials remain in page memory; refresh or a service restart requires
 reopening from the application. Source deployments retain their existing startup
 and Web access. See [desktop/README.md](desktop/README.md) for build and verification.
-The bottom-left Settings button opens a workspace with searchable categories.
+The bottom-left Settings button opens a centered dialog with searchable categories,
+keeping the chat, input draft, and reading position in the background.
 General contains language, login startup, and the browser-console action; Appearance
 provides explicit light/dark choices saved on this Mac. Switching categories keeps
-unsaved configuration drafts; returning to chat preserves the selected conversation
-and closes those drafts. Leaving Models & channels cancels an active QR login.
+unsaved configuration drafts. The close button or Escape returns to chat, asking
+before discarding unsaved changes. Leaving Models & channels cancels an active QR login.
 Settings include fallback/routed models, messaging channels, embeddings/reranking,
 Tavily credentials, and WeChat QR login. Credentials remain private and are never
 returned to the page. Before initial setup, a stopped standard schema-11 deployment
@@ -295,7 +296,7 @@ npm run dev -- --host 127.0.0.1 --port 5173
 ```
 
 Open the [desktop preview](http://127.0.0.1:5173/desktop-demo/). The bottom-left Settings
-button opens the same settings workspace as the desktop application; theme, language,
+button opens the same settings dialog as the desktop application; theme, language,
 and management pages are grouped there. Simulated states are at the top right.
 Edits and authorization affect only in-memory fixtures and reset on reload. Stopping
 in this entry is simulated; the real application uses backend execution and cancellation

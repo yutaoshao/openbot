@@ -3,6 +3,7 @@ import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { useI18n } from "../i18n";
+import { useSettingsDraft } from "../desktop/SettingsDrafts";
 import { api } from "../lib/api";
 
 type Knowledge = {
@@ -26,6 +27,7 @@ export function MemoryPage(): JSX.Element {
   const [editingId, setEditingId] = useState("");
   const [editingContent, setEditingContent] = useState("");
   const [editingPriority, setEditingPriority] = useState("P1");
+  const [editingOriginal, setEditingOriginal] = useState<Knowledge | null>(null);
   const [selectedProfile, setSelectedProfile] = useState("");
   const [profileContent, setProfileContent] = useState<string | null>(null);
 
@@ -99,6 +101,10 @@ export function MemoryPage(): JSX.Element {
     },
   });
 
+  const profileDirty = profileContent !== null && profileContent !== profileDocument.data?.content;
+  const editDirty = Boolean(editingId && editingOriginal && (editingContent !== editingOriginal.content || editingPriority !== editingOriginal.priority));
+  useSettingsDraft(Boolean(content.trim()) || profileDirty || editDirty, saveProfile.isPending || create.isPending || update.isPending || remove.isPending);
+
   const items = useMemo(() => list.data ?? [], [list.data]);
   const categoryLabel = (value: string) => {
     const key = `memory.category.${value}`;
@@ -120,7 +126,7 @@ export function MemoryPage(): JSX.Element {
       <section className="surface-panel panel-stack">
         <h2 className="surface-panel-title">{t("memory.personalProfiles")}</h2>
         <p>{t("memory.personalProfilesHint")}</p>
-        <select className="select" aria-label={t("memory.personalProfiles")} value={selectedProfile}
+        <select className="select" aria-label={t("memory.personalProfiles")} value={selectedProfile} disabled={saveProfile.isPending}
           onChange={(event) => { setSelectedProfile(event.target.value); setProfileContent(null); }}>
           <option value="">{t("memory.selectProfile")}</option>
           {(profileList.data?.documents ?? []).map((name) => <option key={name} value={name}>{name}</option>)}
@@ -259,6 +265,7 @@ export function MemoryPage(): JSX.Element {
                               className="btn secondary"
                               type="button"
                               onClick={() => {
+                                setEditingOriginal(item);
                                 setEditingId(item.id);
                                 setEditingContent(item.content);
                                 setEditingPriority(item.priority);

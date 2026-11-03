@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useI18n } from "../i18n";
+import { useSettingsDraft } from "./SettingsDrafts";
 import { ChoiceField, NumberField, ServiceGroup, ServiceToggle, TextField } from "./ServiceFields";
 import type { ServicesConfiguration } from "./service-types";
 
@@ -8,6 +9,8 @@ export function ChannelServices({ value, onChange }: {
 }) {
   const { t } = useI18n();
   const [allowedIds, setAllowedIds] = useState(value.telegram.allowed_user_ids.join(", "));
+  const [invalidIds, setInvalidIds] = useState(false);
+  useSettingsDraft(invalidIds);
   const allowedIdsInput = useRef<HTMLInputElement>(null);
   // Native validation text survives renders, including language changes.
   useEffect(() => {
@@ -29,6 +32,7 @@ export function ChannelServices({ value, onChange }: {
           setAllowedIds(next);
           const ids = next.split(/[,，]/).map((s) => s.trim()).filter(Boolean).map(Number);
           const valid = !e.target.validity.patternMismatch && ids.every((id) => Number.isSafeInteger(id) && id > 0);
+          setInvalidIds(!valid);
           e.target.setCustomValidity(valid ? "" : t("desktopServices.invalidUserIds"));
           if (valid) onChange({ ...value, telegram: { ...telegram, allowed_user_ids: ids } });
         }} />

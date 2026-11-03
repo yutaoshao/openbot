@@ -18,7 +18,7 @@ describe("Demo transport boundary", () => {
     vi.stubGlobal("fetch", fetchMock);
     for (const path of ["/%64esktop-demo/manage/settings", "/desktop-demo%2Fmanage/settings"]) {
       window.history.replaceState(null, "", path);
-      expect(await api.get("/api/conversations")).toHaveLength(4);
+      expect(await api.get("/api/conversations")).toHaveLength(28);
       expect(() => wsBaseUrl()).toThrow("does not open real WebSocket");
     }
     expect(fetchMock).not.toHaveBeenCalled();
@@ -27,7 +27,7 @@ describe("Demo transport boundary", () => {
   it("uses local fixtures for known requests and never falls through for unknown ones", async () => {
     const fetchMock = vi.fn(() => { throw new Error("Real network forbidden"); });
     vi.stubGlobal("fetch", fetchMock);
-    expect(await api.get("/api/conversations")).toHaveLength(4);
+    expect(await api.get("/api/conversations")).toHaveLength(28);
     await expect(api.get("/api/not-in-demo")).rejects.toThrow("Demo 未实现");
     await expect(api.get("https://example.com/api/settings")).rejects.toThrow();
     window.history.replaceState(null, "", "/desktop-demo/manage/settings");

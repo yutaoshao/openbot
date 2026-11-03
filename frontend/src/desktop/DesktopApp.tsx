@@ -5,7 +5,7 @@ import { LoaderCircle } from "lucide-react";
 
 import { ChatWorkspace } from "../components/desktop/ChatWorkspace";
 import { DesktopSidebar } from "../components/desktop/DesktopSidebar";
-import { SettingsWorkspace } from "./SettingsWorkspace";
+import { SettingsModal } from "./SettingsModal";
 import { useI18n } from "../i18n";
 import { DesktopSetupForm, useDesktopStatus } from "./DesktopSettings";
 import { DesktopImport } from "./DesktopImport";
@@ -58,23 +58,23 @@ function ReadyWorkspace({ theme, onThemeChange, instanceId }: SessionProps): JSX
   const settingsMode = /^\/desktop\/(?:manage|settings)(?:\/|$)/.test(location.pathname);
   useEffect(() => {
     const keydown = (event: KeyboardEvent) => {
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "n" && !chat.busy) {
+      if (!settingsMode && (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "n" && !chat.busy) {
         event.preventDefault(); chat.selectConversation(null); navigate("/desktop");
       }
     };
     window.addEventListener("keydown", keydown);
     return () => window.removeEventListener("keydown", keydown);
-  }, [chat, navigate]);
-  if (settingsMode) return <SettingsWorkspace basePath="/desktop" theme={theme} onThemeChange={onThemeChange} statusLabel={t("desktopLive.connected")} />;
+  }, [chat, navigate, settingsMode]);
   return <div className="desktop-demo">
-    <DesktopSidebar chat={chat} basePath="/desktop" />
-    <main className="demo-main">
+    <div style={{ display: "contents" }} aria-hidden={settingsMode || undefined}><DesktopSidebar chat={chat} basePath="/desktop" /></div>
+    <main className="demo-main" aria-hidden={settingsMode || undefined}>
       <header className="demo-titlebar"><span>{chat.title}</span>
         <span className="demo-preview-label">{t("desktopLive.connected")}</span></header>
       <Suspense fallback={<p role="status">{t("common.loading")}</p>}>
         <div className="demo-chat-slot"><ChatWorkspace chat={chat} /></div>
       </Suspense>
     </main>
+    {settingsMode && <SettingsModal basePath="/desktop" theme={theme} onThemeChange={onThemeChange} statusLabel={t("desktopLive.connected")} />}
   </div>;
 }
 

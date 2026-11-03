@@ -1,4 +1,4 @@
-import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { BrowserRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -39,22 +39,43 @@ afterEach(() => {
   expect(WebSocket).not.toHaveBeenCalled();
   cleanup();
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
   localStorage.clear();
   window.history.replaceState(null, "", "/");
 });
 
 describe("complete Demo settings workspace", () => {
-  it("opens a full workspace and returns to the selected conversation; new-chat shortcuts still work", async () => {
+  it("warns before discarding edits and supports Escape without losing the draft on cancel", async () => {
+    const user = renderDemo("/desktop-demo/settings/connection");
+    const model = await screen.findByRole("textbox", { name: "Model name" });
+    await user.clear(model);
+    await user.type(model, "changed-model");
+    fireEvent(screen.getByRole("dialog", { name: "Settings" }), new Event("cancel", { cancelable: true }));
+    expect(model).toHaveValue("changed-model");
+    await user.click(screen.getByRole("button", { name: "Keep editing" }));
+    expect(model).toHaveValue("changed-model");
+    fireEvent(screen.getByRole("dialog", { name: "Settings" }), new Event("cancel", { cancelable: true }));
+    await user.click(screen.getByRole("button", { name: "Discard" }));
+    expect(window.location.pathname).toBe("/desktop-demo");
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  it("opens a modal and returns to the selected conversation; new-chat shortcuts still work", async () => {
     const user = renderDemo();
     const selected = await screen.findByRole("button", { name: "周报整理" });
     expect(selected).toHaveAttribute("aria-current", "page");
+    const composer = screen.getByRole("textbox", { name: "Message" });
+    await user.type(composer, "保留这段未发送内容");
     await user.click(screen.getByRole("link", { name: "Settings" }));
     expect(window.location.pathname).toBe("/desktop-demo/settings/general");
     expect(categories()).toBeInTheDocument();
-    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "周报整理" })).not.toBeInTheDocument();
-    await user.click(screen.getByRole("link", { name: "Back to chat" }));
+    expect(screen.getByRole("dialog", { name: "Settings" })).toBeInTheDocument();
+    expect(selected).toBeInTheDocument();
+    await user.keyboard("{Control>}n{/Control}");
+    expect(window.location.pathname).toBe("/desktop-demo/settings/general");
+    await user.click(screen.getByRole("button", { name: "Close" }));
     expect(window.location.pathname).toBe("/desktop-demo");
+    expect(composer).toHaveValue("保留这段未发送内容");
     expect(await screen.findByRole("button", { name: "周报整理" })).toHaveAttribute("aria-current", "page");
     await user.keyboard("{Control>}n{/Control}");
     expect(screen.getByRole("button", { name: "周报整理" })).not.toHaveAttribute("aria-current");
@@ -71,7 +92,7 @@ describe("complete Demo settings workspace", () => {
       await user.click(tab(path));
       expect(window.location.pathname).toBe(path);
       expect(tab(path)).toHaveAttribute("aria-current", "page");
-      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+      expect(screen.getByRole("dialog", { name: "Settings" })).toBeInTheDocument();
     }
     for (const key of ["overview", "conversations", "memory", "tools", "scheduler", "monitoring", "logs"]) {
       const path = `/desktop-demo/manage/${key}`;
@@ -138,13 +159,16 @@ describe("complete Demo settings workspace", () => {
     const shell = await screen.findByRole("checkbox", { name: /Shell/ });
     expect(shell).not.toBeChecked();
     await user.click(shell);
-    await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Not now" }));
+    fireEvent(screen.getByRole("dialog", { name: "Settings" }), new Event("cancel", { cancelable: true }));
+    expect(window.location.pathname).toBe("/desktop-demo/settings/execution");
+    expect(screen.getByRole("dialog", { name: /Allow Shell/ })).toBeInTheDocument();
+    await user.click(within(screen.getByRole("dialog", { name: /Allow Shell/ })).getByRole("button", { name: "Not now" }));
     expect(shell).not.toBeChecked();
     await user.click(shell);
-    await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Allow tool" }));
+    await user.click(within(screen.getByRole("dialog", { name: /Allow Shell/ })).getByRole("button", { name: "Allow tool" }));
     await waitFor(() => expect(shell).toBeChecked());
     expect((await demoRequest<{ permissions: { bash: boolean } }>("/api/desktop/status")).permissions.bash).toBe(true);
-    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(screen.getByRole("dialog", { name: "Settings" })).toBeInTheDocument();
     await user.click(shell);
     await waitFor(() => expect(shell).not.toBeChecked());
     expect((await demoRequest<{ permissions: { bash: boolean } }>("/api/desktop/status")).permissions.bash).toBe(false);
@@ -188,10 +212,35 @@ describe("complete Demo settings workspace", () => {
     await user.type(source, "/demo/old-openbot");
     await user.click(screen.getByRole("checkbox", { name: /I stopped the old OpenBot instance/ }));
     expect(screen.getByRole("button", { name: "Preview import" })).toBeEnabled();
-    await user.click(screen.getByRole("link", { name: "Back to chat" }));
+    await user.click(screen.getByRole("button", { name: "Close" }));
+    await user.click(screen.getByRole("button", { name: "Discard" }));
     expect(window.location.search).toBe("?preview=import");
     await user.click(screen.getByRole("link", { name: "Settings" }));
     expect(window.location.pathname).toBe("/desktop-demo/settings/general");
     expect(window.location.search).toBe("?preview=import");
   });
+});
+
+it("retains management drafts across categories and clears their warnings after successful saves", async () => {
+  const user = renderDemo("/desktop-demo/manage/memory");
+  const knowledge = await screen.findByRole("textbox", { name: "Knowledge content..." });
+  fireEvent.change(knowledge, { target: { value: "synthetic knowledge draft" } });
+  await user.click(tab("/desktop-demo/manage/scheduler"));
+  const createSection = (await screen.findByRole("heading", { name: "Create Task" })).closest("section")!;
+  const name = within(createSection).getAllByRole("textbox")[0];
+  fireEvent.change(name, { target: { value: "synthetic schedule draft" } });
+  await user.click(tab("/desktop-demo/settings/general"));
+  await user.click(screen.getByRole("button", { name: "Close" }));
+  await user.click(screen.getByRole("button", { name: "Keep editing" }));
+  await user.click(tab("/desktop-demo/manage/memory"));
+  expect(knowledge).toHaveValue("synthetic knowledge draft");
+  await user.click(within(knowledge.closest("section")!).getByRole("button", { name: "Save" }));
+  await waitFor(() => expect(knowledge).toHaveValue(""));
+  await user.click(tab("/desktop-demo/manage/scheduler"));
+  expect(name).toHaveValue("synthetic schedule draft");
+  await user.click(within(createSection).getByRole("button", { name: "Create" }));
+  await waitFor(() => expect(within(createSection).getByRole("button", { name: "Create" })).toBeEnabled());
+  await user.click(screen.getByRole("button", { name: "Close" }));
+  expect(window.location.pathname).toBe("/desktop-demo");
+  expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
 });

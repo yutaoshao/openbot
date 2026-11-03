@@ -46,6 +46,15 @@ export function createDemoFixtures() {
       { id: "notes-a1", role: "assistant", content: "1. 整理术语。\n2. 验证一个例子。\n3. 记录尚未解决的问题。", created_at: now },
     ],
   };
+  const historyTitles = ["活动议程草案", "展位布置方案", "嘉宾访谈提纲", "宣传海报文案", "场地设备清单", "志愿者排班", "作品说明润色", "报名表字段", "交通指引", "签到流程", "现场摄影安排", "设计资料归档", "展示空间规划", "观众问卷", "物料制作清单", "分享会开场白", "合作方介绍", "圆桌讨论问题", "活动预算整理", "会后感谢文案", "展览动线检查", "品牌故事草稿", "工作坊材料", "活动复盘提纲"];
+  historyTitles.forEach((title, index) => {
+    const id = `demo-history-${index}`;
+    conversations.push({ id, title, summary: "青禾设计周的虚构历史样例。", platform: "web", updated_at: now, message_count: 2 });
+    messages[id] = [
+      { id: `${id}-u`, role: "user", content: `帮我整理${title}。`, created_at: now },
+      { id: `${id}-a`, role: "assistant", content: "先明确活动目标，再整理负责人、准备事项与完成时间。以上为虚构演示内容。", created_at: now },
+    ];
+  });
   const knowledge: DemoEntity[] = [
     { id: "knowledge-1", category: "fact", content: "青禾设计周计划包含作品分享与交流环节。", priority: "P1" },
     { id: "knowledge-2", category: "preference", content: "活动文案使用简短、清晰的中文。", priority: "P1" },

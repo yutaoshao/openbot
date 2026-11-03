@@ -3,6 +3,7 @@ import { useMutation } from "@tanstack/react-query";
 import { useI18n } from "../i18n";
 import { api } from "../lib/api";
 import { isDesktopDemoPath } from "../demo/location";
+import { useSettingsDraft } from "./SettingsDrafts";
 import { desktopInvoke } from "./native";
 
 type ImportPreview = {
@@ -38,6 +39,7 @@ export function DesktopImport({ busy = false, available = true, result }: {
     mutationFn: () => isDesktopDemoPath(window.location.pathname) ? Promise.resolve("/demo/old-openbot") : desktopInvoke<string | null>("desktop_choose_directory"),
     onSuccess: (selected) => { if (selected) updateSource(selected); },
   });
+  useSettingsDraft(Boolean(available && source.trim() && !confirm.isSuccess), previewRequest.isPending || confirm.isPending || picker.isPending);
   const pending = previewRequest.isPending || confirm.isPending || confirm.isSuccess || restarting;
   return <section className="surface-panel settings-section" id="data-import">
     <h2>{t("desktopImport.title")}</h2>

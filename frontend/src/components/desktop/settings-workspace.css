@@ -14,14 +14,10 @@ html[data-desktop] .demo-sidebar-bottom { margin-top: 16px; padding-top: 8px; bo
 .desktop-preferences-entry { display: flex; align-items: center; gap: 10px; min-height: 38px; padding: 9px 12px; border-radius: 7px; color: var(--text-muted); font-size: 13px; }
 .desktop-preferences-entry:hover { background: var(--surface-subtle); color: var(--text); }
 
-.desktop-preferences-workspace { display: grid; height: 100dvh; padding: 12px; background: var(--sidebar-bg); }
-.desktop-preferences-window { display: grid; grid-template-columns: 248px minmax(0, 1fr); min-height: 0; min-width: 0; overflow: hidden; border: 1px solid var(--border); border-radius: 14px; background: var(--surface); }
-.desktop-preferences-sidebar { display: flex; flex-direction: column; min-height: 0; min-width: 0; padding: 26px 12px 12px; border-right: 1px solid var(--border); background: var(--sidebar-bg); }
+.desktop-preferences-workspace { display: grid; flex: 1; min-height: 0; background: var(--sidebar-bg); }
+.desktop-preferences-window { display: grid; grid-template-columns: 220px minmax(0, 1fr); min-height: 0; min-width: 0; overflow: hidden; border: 0; background: var(--surface); }
+.desktop-preferences-sidebar { display: flex; flex-direction: column; min-height: 0; min-width: 0; padding: 16px 12px 12px; border-right: 1px solid var(--border); background: var(--sidebar-bg); }
 .desktop-preferences-sidebar-header { padding: 0 8px; }
-.desktop-preferences-sidebar-title { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 20px; }
-.desktop-preferences-sidebar-header h1 { margin: 0; color: var(--text); font-size: 21px; font-weight: 600; letter-spacing: -.5px; }
-.desktop-preferences-back { display: inline-flex; align-items: center; gap: 6px; min-height: 32px; padding: 4px 6px; border-radius: 6px; color: var(--text-muted); font-size: 12px; white-space: nowrap; }
-.desktop-preferences-back:hover { color: var(--text); background: var(--surface-subtle); }
 .desktop-preferences-search { display: flex; align-items: center; gap: 9px; min-height: 38px; padding: 0 12px; border-radius: 20px; background: var(--surface-subtle); color: var(--text-muted); }
 .desktop-preferences-search input { width: 100%; min-width: 0; padding: 0; border: 0; background: transparent; color: var(--text); font: inherit; font-size: 13px; outline: none; }
 .desktop-preferences-search:focus-within { outline: 2px solid var(--border-strong); outline-offset: 2px; }
@@ -81,5 +77,3 @@ html[data-desktop] .demo-sidebar-bottom { margin-top: 16px; padding-top: 8px; bo
 .desktop-theme-preview[data-theme-preview="dark"] em { border-color: #555; }
 .desktop-preferences-workspace :is(button, a):focus-visible { outline: 2px solid var(--text-muted); outline-offset: 2px; }
 html[data-desktop] .demo-tool-status[aria-expanded="true"] > svg:last-child { transform: rotate(180deg); }
-
-@media (min-width: 1700px) { .desktop-preferences-window { grid-template-columns: 280px minmax(0, 1fr); } .desktop-preferences-content { padding-right: 60px; padding-left: 60px; } }
